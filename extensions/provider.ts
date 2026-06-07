@@ -437,11 +437,15 @@ export const registerRouterProvider = (
                 }
               }
 
+              // Strip pi's reasoning from options — the router controls thinking
+              const { reasoning: _piReasoning, ...delegationOptions } =
+                options ?? {};
+
               const delegatedStream = streamSimple(
                 targetModel,
                 effectiveContext,
                 {
-                  ...options,
+                  ...delegationOptions,
                   apiKey,
                   headers,
                   ...(delegatedReasoning
