@@ -270,8 +270,13 @@ const routerExtension = (pi: ExtensionAPI) => {
     selectedProfile = ctx.model?.provider === 'router'
       ? resolveProfileName(currentConfig, ctx.model.id)
       : resolveProfileName(currentConfig, selectedProfile);
-    pinnedTierByProfile = {};
-    thinkingByProfile = {};
+    // Clear in-place to keep references intact
+    for (const key of Object.keys(pinnedTierByProfile)) {
+      delete pinnedTierByProfile[key];
+    }
+    for (const key of Object.keys(thinkingByProfile)) {
+      delete thinkingByProfile[key];
+    }
     widgetEnabled = false;
     debugHistory = [];
     accumulatedCost = 0;
@@ -296,12 +301,12 @@ const routerExtension = (pi: ExtensionAPI) => {
         savedState.selectedProfile,
       );
       routerEnabled = savedState.enabled;
-      pinnedTierByProfile = savedState.pinByProfile
-        ? { ...savedState.pinByProfile }
-        : {};
-      thinkingByProfile = savedState.thinkingByProfile
-        ? { ...savedState.thinkingByProfile }
-        : {};
+      if (savedState.pinByProfile) {
+        Object.assign(pinnedTierByProfile, savedState.pinByProfile);
+      }
+      if (savedState.thinkingByProfile) {
+        Object.assign(thinkingByProfile, savedState.thinkingByProfile);
+      }
       if (savedState.pinTier && selectedProfile) {
         pinnedTierByProfile[selectedProfile] = savedState.pinTier;
       }
