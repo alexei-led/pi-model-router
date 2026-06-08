@@ -85,8 +85,7 @@ export const updateStatus = (
       statusText = `router:${activeRouterProfile}${pinLabel} -> waiting`;
     }
   } else {
-    const profilePart = selectedProfile ? ` (${selectedProfile}${pinLabel})` : '';
-    statusText = `router:off${profilePart} -> ${formatModelRef(lastNonRouterModel)}`;
+    statusText = 'router:off';
   }
   ctx.ui.setStatus('router', ctx.ui.theme.fg('dim', statusText));
 
