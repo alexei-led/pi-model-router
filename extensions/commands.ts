@@ -93,10 +93,17 @@ export const registerCommands = (
       ).map((value) => ({
         value,
         label: value,
+        description: value === 'auto'
+          ? 'Restore auto-routing (clear pin) for the active profile'
+          : `Pin active profile to ${value} tier`,
       }));
       const profileItems = profileNames(state.currentConfig)
         .filter((name) => name.startsWith(token))
-        .map((name) => ({ value: name, label: `router/${name}` }));
+        .map((name) => ({
+          value: name,
+          label: `router/${name}`,
+          description: `Configure pinning for profile "${name}"`,
+        }));
       const items = [...pinItems, ...profileItems];
       return items.length > 0 ? items : null;
     }
@@ -111,6 +118,9 @@ export const registerCommands = (
     ).map((value) => ({
       value: `${profileToken} ${value}`,
       label: `${profileToken} ${value}`,
+      description: value === 'auto'
+        ? `Restore auto-routing (clear pin) for profile "${profileToken}"`
+        : `Pin profile "${profileToken}" to ${value} tier`,
     }));
     return items.length > 0 ? items : null;
   };
@@ -127,13 +137,27 @@ export const registerCommands = (
       return [
         ...levelValues
           .filter((v) => v.startsWith(token))
-          .map((v) => ({ value: v, label: v })),
+          .map((v) => ({
+            value: v,
+            label: v,
+            description: v === 'auto'
+              ? 'Restore default thinking level'
+              : `Set thinking level to ${v}`,
+          })),
         ...tierValues
           .filter((v) => v.startsWith(token))
-          .map((v) => ({ value: v, label: v })),
+          .map((v) => ({
+            value: v,
+            label: v,
+            description: `Override thinking for ${v} tier`,
+          })),
         ...profileNames(state.currentConfig)
           .filter((name) => name.startsWith(token))
-          .map((name) => ({ value: name, label: `router/${name}` })),
+          .map((name) => ({
+            value: name,
+            label: `router/${name}`,
+            description: `Override thinking for profile "${name}"`,
+          })),
       ];
     }
 
@@ -146,7 +170,13 @@ export const registerCommands = (
       const levelPrefix = args[1] ?? '';
       return levelValues
         .filter((v) => v.startsWith(levelPrefix))
-        .map((v) => ({ value: `${tier} ${v}`, label: `${tier} ${v}` }));
+        .map((v) => ({
+          value: `${tier} ${v}`,
+          label: `${tier} ${v}`,
+          description: v === 'auto'
+            ? `Restore default thinking level for ${tier} tier`
+            : `Set thinking level to ${v} for ${tier} tier`,
+        }));
     }
 
     if (state.currentConfig.profiles[args[0]]) {
@@ -157,10 +187,20 @@ export const registerCommands = (
         return [
           ...tierValues
             .filter((v) => v.startsWith(nextPrefix))
-            .map((v) => ({ value: `${profile} ${v}`, label: v })),
+            .map((v) => ({
+              value: `${profile} ${v}`,
+              label: v,
+              description: `Override thinking for profile "${profile}" ${v} tier`,
+            })),
           ...levelValues
             .filter((v) => v.startsWith(nextPrefix))
-            .map((v) => ({ value: `${profile} ${v}`, label: v })),
+            .map((v) => ({
+              value: `${profile} ${v}`,
+              label: v,
+              description: v === 'auto'
+                ? `Restore default thinking for all tiers of profile "${profile}"`
+                : `Set thinking to ${v} for all tiers of profile "${profile}"`,
+            })),
         ];
       }
 
@@ -173,7 +213,13 @@ export const registerCommands = (
         const levelPrefix = args[2] ?? '';
         return levelValues
           .filter((v) => v.startsWith(levelPrefix))
-          .map((v) => ({ value: `${profile} ${tier} ${v}`, label: v }));
+          .map((v) => ({
+            value: `${profile} ${tier} ${v}`,
+            label: v,
+            description: v === 'auto'
+              ? `Restore default thinking for profile "${profile}" ${tier} tier`
+              : `Set thinking to ${v} for profile "${profile}" ${tier} tier`,
+          }));
       }
     }
 
@@ -595,7 +641,7 @@ export const registerCommands = (
             completions?.map((c) => ({
               ...c,
               value: `pin ${c.value}`,
-              description: `Pin profile to ${c.label}`,
+              description: c.description ?? `Pin routing to ${c.label}`,
             })) ?? null
           );
         }
@@ -605,7 +651,7 @@ export const registerCommands = (
             completions?.map((c) => ({
               ...c,
               value: `thinking ${c.value}`,
-              description: `Set thinking level to ${c.label}`,
+              description: c.description ?? `Set thinking level to ${c.label}`,
             })) ?? null
           );
         }
