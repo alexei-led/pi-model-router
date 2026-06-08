@@ -38,7 +38,8 @@
   "scripts": {
     "tsc": "tsc --noEmit",
     "build": "tsc",
-    "prepublishOnly": "npm run tsc"
+    "prepublishOnly": "npm run tsc",
+    "test": "vitest run"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
@@ -49,6 +50,7 @@
   },
   "devDependencies": {
     "prettier": "^3.8.1",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.8"
   }
 }
