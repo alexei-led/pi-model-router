@@ -488,7 +488,8 @@ const routerExtension = (pi: ExtensionAPI) => {
     actions.updateStatus(ctx);
     ctx.ui.notify(
       `Router thinking for ${selectedProfile} (all tiers) set to ${event.level}. ` +
-        `Use /router thinking auto to restore defaults.`,
+        `Use /router thinking auto to restore defaults.\n` +
+        `Note: not all tier models may support this thinking level.`,
       'info',
     );
   });

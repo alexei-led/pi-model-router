@@ -184,10 +184,15 @@ export const registerRouterProvider = (
       if (mot > maxMaxOutputTokens) maxMaxOutputTokens = mot;
     }
 
+    const hasReasoning = supportsReasoning(profile, state.currentModelRegistry);
+
     return {
       id: name,
       name: `Router ${name}`,
-      reasoning: supportsReasoning(profile, state.currentModelRegistry),
+      reasoning: hasReasoning,
+      // Declare xhigh support so pi doesn't clamp it — the router
+      // controls thinking-level mapping for the underlying models.
+      ...(hasReasoning ? { thinkingLevelMap: { xhigh: 'xhigh' } } : {}),
       input: ['text', 'image'] as ('text' | 'image')[],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: maxContextWindow,

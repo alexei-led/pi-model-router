@@ -466,7 +466,8 @@ export const registerCommands = (
     actions.updateStatus(ctx);
     ctx.ui.notify(
       nextLevel
-        ? `Router profile ${profileName} thinking (${tier}) set to ${nextLevel}`
+        ? `Router profile ${profileName} thinking (${tier}) set to ${nextLevel}\n` +
+          `Note: not all tier models may support this thinking level.`
         : `Router profile ${profileName} thinking (${tier}) reset to config defaults`,
       'info',
     );
@@ -730,6 +731,7 @@ export const registerCommands = (
               '  profile [name]              Switch to a profile (enables router if off). Lists available if no name.',
               '  pin [profile] <tier|auto>   Force a tier (high|medium|low) for a profile or set to auto.',
               '  thinking [prof] [tier] <lv> Override thinking level for a profile/tier (off|minimal|...|xhigh|auto).',
+              '                              Note: not all tier models may support every thinking level.',
               '  disable                     Disable the router and restore the last used non-router model.',
               '  fix <tier>                  Correct the last routing decision and pin that tier for the current profile.',
               '  widget <on|off|toggle>      Control the persistent status widget visibility.',
