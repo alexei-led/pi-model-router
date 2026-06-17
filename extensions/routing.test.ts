@@ -298,6 +298,35 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toBe('High rule');
     });
 
+    it('should collect all matching rules and pick the highest tier', () => {
+      const rulesWithMultipleMatches = [
+        { matches: 'summary', tier: 'low' as const, reason: 'Low rule' },
+        { matches: 'refactor', tier: 'high' as const, reason: 'High rule' },
+      ];
+      const context: Context = {
+        messages: [
+          {
+            role: 'user',
+            content: 'Please summarize the refactor',
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const decision = decideRouting(
+        context,
+        'p',
+        profile,
+        undefined,
+        undefined,
+        undefined,
+        0.5,
+        rulesWithMultipleMatches,
+      );
+      expect(decision.tier).toBe('high');
+      expect(decision.isRuleMatched).toBe(true);
+      expect(decision.reasoning).toBe('High rule');
+    });
+
     it('should route explicit high/low hints', () => {
       const contextHigh: Context = {
         messages: [

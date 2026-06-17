@@ -241,20 +241,37 @@ export const decideRouting = (
   } else {
     // Check custom rules first
     if (rules) {
+      let highestTier: RouterTier | undefined;
+      let winningRule: RoutingRule | undefined;
+      const tierRank: Record<RouterTier, number> = {
+        low: 1,
+        medium: 2,
+        high: 3,
+      };
+
       for (const rule of rules) {
         const matches = Array.isArray(rule.matches)
           ? rule.matches
           : [rule.matches];
         const lowercaseMatches = matches.map((m) => m.toLowerCase());
         if (containsAny(prompt, lowercaseMatches)) {
-          tier = rule.tier;
-          phase = phaseForTier(tier);
-          reasoning =
-            rule.reason ??
-            `Matched custom routing rule for: ${matches.join(', ')}`;
-          isRuleMatched = true;
-          break;
+          if (!highestTier || tierRank[rule.tier] > tierRank[highestTier]) {
+            highestTier = rule.tier;
+            winningRule = rule;
+          }
         }
+      }
+
+      if (winningRule && highestTier) {
+        tier = highestTier;
+        phase = phaseForTier(tier);
+        const matches = Array.isArray(winningRule.matches)
+          ? winningRule.matches
+          : [winningRule.matches];
+        reasoning =
+          winningRule.reason ??
+          `Matched custom routing rule for: ${matches.join(', ')}`;
+        isRuleMatched = true;
       }
     }
 
