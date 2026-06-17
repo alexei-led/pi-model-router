@@ -68,12 +68,12 @@ export const updateStatus = (
   const activePin = selectedProfile ? pinnedTierByProfile[selectedProfile] : undefined;
   const pinLabel = activePin ? ` [pin:${activePin}]` : '';
 
-  let statusText: string;
   if (activeRouterProfile) {
     const matchesProfile =
       lastDecision && lastDecision.profile === activeRouterProfile;
     const matchesPin = activePin ? lastDecision?.tier === activePin : true;
 
+    let statusText: string;
     if (lastDecision && matchesProfile && matchesPin) {
       const effectiveThinking = getEffectiveThinking(
         thinkingByProfile,
@@ -84,10 +84,10 @@ export const updateStatus = (
     } else {
       statusText = `router:${activeRouterProfile}${pinLabel} -> waiting`;
     }
+    ctx.ui.setStatus('router', `🚥 ${statusText}`);
   } else {
-    statusText = 'router:off';
+    ctx.ui.setStatus('router', undefined);
   }
-  ctx.ui.setStatus('router', ctx.ui.theme.fg('dim', statusText));
 
   if (!widgetEnabled) {
     ctx.ui.setWidget('router', undefined);

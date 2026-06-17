@@ -84,7 +84,7 @@ describe('ui.ts', () => {
       profiles: {},
     };
 
-    it('should update status to router:off if disabled', () => {
+    it('should remove status if disabled', () => {
       const ctx = buildMockCtx() as any;
       updateStatus(
         ctx,
@@ -99,10 +99,7 @@ describe('ui.ts', () => {
         mockConfig,
       );
 
-      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
-        'router',
-        '[dim]router:off[/dim]',
-      );
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith('router', undefined);
       expect(ctx.ui.setWidget).toHaveBeenCalledWith('router', undefined);
     });
 
@@ -123,7 +120,7 @@ describe('ui.ts', () => {
 
       expect(ctx.ui.setStatus).toHaveBeenCalledWith(
         'router',
-        '[dim]router:balanced -> waiting[/dim]',
+        '🚥 router:balanced -> waiting',
       );
     });
 
@@ -157,7 +154,7 @@ describe('ui.ts', () => {
       // Check Status
       expect(ctx.ui.setStatus).toHaveBeenCalledWith(
         'router',
-        '[dim]router:balanced [pin:high] -> high -> google/gemini-2.5-pro (xhigh)[/dim]',
+        '🚥 router:balanced [pin:high] -> high -> google/gemini-2.5-pro (xhigh)',
       );
 
       // Check Widget Lines
