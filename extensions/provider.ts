@@ -1,6 +1,5 @@
 import {
   createAssistantMessageEventStream,
-  streamSimple,
   type Api,
   type AssistantMessage,
   type AssistantMessageEventStream,
@@ -9,6 +8,7 @@ import {
   type SimpleStreamOptions,
   type Message,
 } from '@earendil-works/pi-ai';
+import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type {
   ExtensionAPI,
   ExtensionContext,

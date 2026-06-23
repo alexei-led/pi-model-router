@@ -13,11 +13,11 @@ import {
   decideRouting,
   runClassifier,
 } from './routing';
-import { streamSimple } from '@earendil-works/pi-ai';
+import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
 import type { RouterProfile, RoutingRule } from './types';
 
-vi.mock('@earendil-works/pi-ai', () => ({
+vi.mock('@earendil-works/pi-ai/compat', () => ({
   streamSimple: vi.fn(),
 }));
 

@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { registerRouterProvider, createErrorMessage } from './provider';
-import {
-  streamSimple,
-  createAssistantMessageEventStream,
-} from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type { RouterConfig, RoutingDecision } from './types';
 
 class MockEventStream {
@@ -42,6 +40,9 @@ class MockEventStream {
 
 vi.mock('@earendil-works/pi-ai', () => ({
   createAssistantMessageEventStream: vi.fn(),
+}));
+
+vi.mock('@earendil-works/pi-ai/compat', () => ({
   streamSimple: vi.fn(),
 }));
 
