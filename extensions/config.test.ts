@@ -12,11 +12,13 @@ import {
   resolveProfileName,
   resolveContextWindow,
   resolveMaxTokens,
+  collectProfileThinkingLevels,
+  getUnsupportedTiers,
   isObjectRecord,
   isThinkingLevel,
   isRouterTier,
 } from './config';
-import type { RouterConfig, RouterProfile, ModelDefinition } from './types';
+import type { RouterConfig, RouterProfile, ModelDefinition, RoutedTierConfig } from './types';
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   getAgentDir: () => '/mock/agent/dir',
@@ -375,6 +377,152 @@ describe('config.ts', () => {
       const mot = resolveMaxTokens('high', profile, undefined);
       expect(cw).toBe(60000);
       expect(mot).toBe(4000);
+    });
+  });
+
+  describe('resolveContextWindow and resolveMaxTokens – additional coverage', () => {
+    it('should return default when tier is missing from profile', () => {
+      const profile: RouterProfile = {
+        high: { model: 'openai/gpt-4o', resolvedContextWindow: 60000, resolvedMaxTokens: 4000 },
+      };
+      expect(resolveContextWindow('low', profile, undefined)).toBe(128_000);
+      expect(resolveMaxTokens('low', profile, undefined)).toBe(16_384);
+    });
+
+    it('should fall back to resolvedContextWindow/MaxTokens when registry model has no values', () => {
+      const profile: RouterProfile = {
+        high: { model: 'openai/gpt-4o', resolvedContextWindow: 60000, resolvedMaxTokens: 4000 },
+      };
+      const registryNoValues = {
+        find: () => ({}),
+        getApiKeyAndHeaders: async () => ({ ok: false as const, error: 'not-mocked' }),
+      };
+      expect(resolveContextWindow('high', profile, registryNoValues as any)).toBe(60000);
+      expect(resolveMaxTokens('high', profile, registryNoValues as any)).toBe(4000);
+    });
+
+    it('should catch parseCanonicalModelRef errors and return resolved values', () => {
+      const profile: RouterProfile = {
+        high: { model: 'invalid-no-slash', resolvedContextWindow: 50000, resolvedMaxTokens: 3000 },
+      };
+      const registryWithFind = {
+        find: () => ({ contextWindow: 99999, maxTokens: 8888 }),
+        getApiKeyAndHeaders: async () => ({ ok: false as const, error: 'not-mocked' }),
+      };
+      // parseCanonicalModelRef will throw for 'invalid-no-slash', so it falls through to resolved values
+      expect(resolveContextWindow('high', profile, registryWithFind as any)).toBe(50000);
+      expect(resolveMaxTokens('high', profile, registryWithFind as any)).toBe(3000);
+    });
+  });
+
+  describe('collectProfileThinkingLevels', () => {
+    it('should collect thinking levels from all tiers', () => {
+      const profile: RouterProfile = {
+        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high', 'xhigh'] },
+        medium: { model: 'openai/gpt-4o-mini', resolvedThinkingLevels: ['medium', 'low'] },
+      };
+      const levels = collectProfileThinkingLevels(profile);
+      expect(levels.has('high')).toBe(true);
+      expect(levels.has('xhigh')).toBe(true);
+      expect(levels.has('medium')).toBe(true);
+      expect(levels.has('low')).toBe(true);
+      expect(levels.size).toBe(4);
+    });
+
+    it('should return empty set for profile with no tiers', () => {
+      const profile: RouterProfile = {};
+      const levels = collectProfileThinkingLevels(profile);
+      expect(levels.size).toBe(0);
+    });
+
+    it('should skip tiers without resolvedThinkingLevels', () => {
+      const profile: RouterProfile = {
+        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high'] },
+        medium: { model: 'openai/gpt-4o-mini' },
+      };
+      const levels = collectProfileThinkingLevels(profile);
+      expect(levels.size).toBe(1);
+      expect(levels.has('high')).toBe(true);
+    });
+  });
+
+  describe('getUnsupportedTiers', () => {
+    it('should return tiers that do not include the requested thinking level', () => {
+      const profile: RouterProfile = {
+        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high', 'xhigh'] },
+        medium: { model: 'openai/gpt-4o-mini', resolvedThinkingLevels: ['medium', 'low'] },
+        low: { model: 'openai/gpt-4o-micro', resolvedThinkingLevels: ['low'] },
+      };
+      const unsupported = getUnsupportedTiers(profile, 'xhigh');
+      expect(unsupported).toEqual(['medium', 'low']);
+    });
+
+    it('should return empty array if all tiers support the level', () => {
+      const profile: RouterProfile = {
+        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high', 'medium'] },
+        medium: { model: 'openai/gpt-4o-mini', resolvedThinkingLevels: ['medium'] },
+      };
+      const unsupported = getUnsupportedTiers(profile, 'medium');
+      expect(unsupported).toEqual([]);
+    });
+
+    it('should skip missing tiers (undefined tier config)', () => {
+      const profile: RouterProfile = {
+        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high'] },
+      };
+      const unsupported = getUnsupportedTiers(profile, 'low');
+      expect(unsupported).toEqual(['high']);
+    });
+
+    it('should treat tiers with undefined resolvedThinkingLevels as unsupported', () => {
+      const profile: RouterProfile = {
+        high: { model: 'openai/gpt-4o' },
+        medium: { model: 'openai/gpt-4o-mini', resolvedThinkingLevels: ['medium'] },
+      };
+      const unsupported = getUnsupportedTiers(profile, 'medium');
+      expect(unsupported).toEqual(['high']);
+    });
+  });
+
+  describe('normalizeConfig – classifier config variants', () => {
+    it('should normalize classifierModel as object with valid thinking', () => {
+      const raw = {
+        profiles: {
+          balanced: { high: { model: 'openai/gpt-4o' } },
+        },
+        classifierModel: { model: 'openai/gpt-4o', thinking: 'low' },
+      };
+      const { config, warnings } = normalizeConfig(raw as unknown as RouterConfig);
+      expect(config.classifierModel?.model).toBe('openai/gpt-4o');
+      expect(config.classifierModel?.thinking).toBe('low');
+      expect(warnings).toEqual([]);
+    });
+
+    it('should warn and ignore invalid thinking on classifierModel object', () => {
+      const raw = {
+        profiles: {
+          balanced: { high: { model: 'openai/gpt-4o' } },
+        },
+        classifierModel: { model: 'openai/gpt-4o', thinking: 'super-invalid' },
+      };
+      const { config, warnings } = normalizeConfig(raw as unknown as RouterConfig);
+      expect(config.classifierModel?.model).toBe('openai/gpt-4o');
+      expect(config.classifierModel?.thinking).toBeUndefined();
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain('invalid thinking level');
+    });
+
+    it('should warn when classifierModel object is missing model field', () => {
+      const raw = {
+        profiles: {
+          balanced: { high: { model: 'openai/gpt-4o' } },
+        },
+        classifierModel: { thinking: 'high' },
+      };
+      const { config, warnings } = normalizeConfig(raw as unknown as RouterConfig);
+      expect(config.classifierModel).toBeUndefined();
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain('missing the "model" field');
     });
   });
 });

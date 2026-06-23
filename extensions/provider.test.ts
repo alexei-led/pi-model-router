@@ -396,5 +396,165 @@ describe('provider.ts', () => {
         ].content,
       ).toBe('c'.repeat(2000));
     });
+
+    it('should push error event when currentModelRegistry is undefined', async () => {
+      mockState.currentModelRegistry = undefined;
+      registerRouterProvider(mockPi, mockState, mockActions);
+      const stream = new MockEventStream();
+      vi.mocked(createAssistantMessageEventStream).mockReturnValue(
+        stream as any,
+      );
+
+      const model = {
+        id: 'balanced',
+        api: 'router-api',
+        provider: 'router',
+      } as any;
+      const context = { messages: [{ role: 'user', content: 'hello' }] } as any;
+
+      registeredProviderOptions.streamSimple(model, context);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const errorEvent = stream.events.find((e: any) => e.type === 'error');
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent.error.errorMessage).toContain('not initialized yet');
+      expect(mockActions.persistState).toHaveBeenCalled();
+    });
+
+    it('should push error event when profile is unknown', async () => {
+      registerRouterProvider(mockPi, mockState, mockActions);
+      const stream = new MockEventStream();
+      vi.mocked(createAssistantMessageEventStream).mockReturnValue(
+        stream as any,
+      );
+
+      const model = {
+        id: 'nonexistent-profile',
+        api: 'router-api',
+        provider: 'router',
+      } as any;
+      const context = { messages: [{ role: 'user', content: 'hello' }] } as any;
+
+      registeredProviderOptions.streamSimple(model, context);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const errorEvent = stream.events.find((e: any) => e.type === 'error');
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent.error.errorMessage).toContain('Unknown router profile');
+      expect(mockActions.persistState).toHaveBeenCalled();
+    });
+
+    it('should fall back when auth fails for primary model', async () => {
+      let authCallCount = 0;
+      mockState.currentModelRegistry.getApiKeyAndHeaders = async (model: any) => {
+        authCallCount++;
+        if (model.id === 'gpt-4o-mini') {
+          return { ok: false, error: 'auth-error' };
+        }
+        return { ok: true, apiKey: 'fallback-key', headers: {} };
+      };
+
+      registerRouterProvider(mockPi, mockState, mockActions);
+      const stream = new MockEventStream();
+      vi.mocked(createAssistantMessageEventStream).mockReturnValue(
+        stream as any,
+      );
+
+      vi.mocked(streamSimple).mockReturnValue(
+        (async function* () {
+          yield { type: 'text_delta', delta: 'fallback answer' };
+          yield { type: 'done', message: { usage: { cost: { total: 0.001 } } } };
+        })() as any,
+      );
+
+      // Pin to medium so primary is gpt-4o-mini with fallback gemini-1.5-flash
+      mockState.pinnedTierByProfile['balanced'] = 'medium';
+
+      const model = {
+        id: 'balanced',
+        api: 'router-api',
+        provider: 'router',
+      } as any;
+      const context = { messages: [{ role: 'user', content: 'hello' }] } as any;
+
+      registeredProviderOptions.streamSimple(model, context);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(authCallCount).toBeGreaterThanOrEqual(2);
+      expect(mockState.accumulatedCost).toBe(0.001);
+    });
+
+    it('should skip model not found in registry and try fallback', async () => {
+      mockState.currentModelRegistry.find = (provider: string, modelId: string) => {
+        if (modelId === 'gpt-4o-mini') return undefined; // primary not found
+        return { provider, id: modelId, input: ['text', 'image'] };
+      };
+
+      registerRouterProvider(mockPi, mockState, mockActions);
+      const stream = new MockEventStream();
+      vi.mocked(createAssistantMessageEventStream).mockReturnValue(
+        stream as any,
+      );
+
+      vi.mocked(streamSimple).mockReturnValue(
+        (async function* () {
+          yield { type: 'text_delta', delta: 'answer from fallback' };
+          yield { type: 'done', message: { usage: { cost: { total: 0.002 } } } };
+        })() as any,
+      );
+
+      // Pin to medium so primary is gpt-4o-mini with fallback gemini-1.5-flash
+      mockState.pinnedTierByProfile['balanced'] = 'medium';
+
+      const model = {
+        id: 'balanced',
+        api: 'router-api',
+        provider: 'router',
+      } as any;
+      const context = { messages: [{ role: 'user', content: 'hello' }] } as any;
+
+      registeredProviderOptions.streamSimple(model, context);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(mockState.accumulatedCost).toBe(0.002);
+      expect(mockState.lastDecision.isFallback).toBe(true);
+    });
+
+    it('should push error when all models in chain fail', async () => {
+      vi.mocked(streamSimple).mockImplementation((() => {
+        return (async function* () {
+          throw new Error('model unavailable');
+        })() as any;
+      }) as any);
+
+      registerRouterProvider(mockPi, mockState, mockActions);
+      const stream = new MockEventStream();
+      vi.mocked(createAssistantMessageEventStream).mockReturnValue(
+        stream as any,
+      );
+
+      // Pin to medium to get fallback chain
+      mockState.pinnedTierByProfile['balanced'] = 'medium';
+
+      const model = {
+        id: 'balanced',
+        api: 'router-api',
+        provider: 'router',
+      } as any;
+      const context = { messages: [{ role: 'user', content: 'hello' }] } as any;
+
+      registeredProviderOptions.streamSimple(model, context);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const errorEvent = stream.events.find((e: any) => e.type === 'error');
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent.error.errorMessage).toContain('model unavailable');
+      expect(mockActions.persistState).toHaveBeenCalled();
+    });
   });
 });

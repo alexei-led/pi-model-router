@@ -397,6 +397,117 @@ describe('routing.ts', () => {
       expect(decision.tier).toBe('high');
       expect(decision.phase).toBe('planning');
     });
+
+    it('should keep planning phase bias when previous phase was planning, no tools, and word count > lowThreshold', () => {
+      const context: Context = {
+        messages: [
+          {
+            role: 'user',
+            content: 'what about this particular scenario that we discussed earlier today',
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const previous = buildRoutingDecision(
+        'p',
+        profile,
+        'high',
+        'planning',
+        'Previous planning',
+      );
+      const decision = decideRouting(context, 'p', profile, previous, undefined, undefined, 0.5);
+      expect(decision.tier).toBe('high');
+      expect(decision.phase).toBe('planning');
+      expect(decision.reasoning).toContain('planning-phase bias');
+    });
+
+    it('should detect implementation from previous implementation phase', () => {
+      const context: Context = {
+        messages: [
+          {
+            role: 'user',
+            content: 'ok next step',
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const previous = buildRoutingDecision(
+        'p',
+        profile,
+        'medium',
+        'implementation',
+        'Previous impl',
+      );
+      const decision = decideRouting(context, 'p', profile, previous);
+      expect(decision.tier).toBe('medium');
+      expect(decision.phase).toBe('implementation');
+      expect(decision.reasoning).toContain('implementation');
+    });
+
+    it('should detect implementation from toolResultCount > 0', () => {
+      const context: Context = {
+        messages: [
+          {
+            role: 'user',
+            content: 'ok next step',
+            timestamp: Date.now(),
+          },
+          {
+            role: 'toolResult',
+            toolCallId: '1',
+            toolName: 'read_file',
+            content: 'file contents',
+            isError: false,
+            timestamp: Date.now(),
+          } as unknown as Message,
+          {
+            role: 'user',
+            content: 'looks good proceed',
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const decision = decideRouting(context, 'p', profile, undefined);
+      expect(decision.tier).toBe('medium');
+      expect(decision.phase).toBe('implementation');
+      expect(decision.reasoning).toContain('implementation');
+    });
+
+    it('should detect implementation from recent conversation containing plan:', () => {
+      const context: Context = {
+        messages: [
+          {
+            role: 'assistant',
+            content: 'Plan:\n1. Do X\n2. Do Y',
+            timestamp: Date.now(),
+          } as unknown as Message,
+          {
+            role: 'user',
+            content: 'sounds good lets go',
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const decision = decideRouting(context, 'p', profile, undefined);
+      expect(decision.tier).toBe('medium');
+      expect(decision.phase).toBe('implementation');
+      expect(decision.reasoning).toContain('implementation');
+    });
+
+    it('should default to medium tier when no heuristic rules match for moderate-length prompts', () => {
+      const context: Context = {
+        messages: [
+          {
+            role: 'user',
+            content: 'i wonder about some random topic that doesnt match any particular keyword category here today now',
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      const decision = decideRouting(context, 'p', profile, undefined);
+      expect(decision.tier).toBe('medium');
+      expect(decision.reasoning).toContain('Defaulted to medium');
+    });
   });
 
   describe('runClassifier', () => {

@@ -171,5 +171,99 @@ describe('ui.ts', () => {
       );
       expect(widgetLines).toContain('[dim]Phase: planning[/dim]');
     });
+
+    it('should display fallback model when router is disabled and lastNonRouterModel is set', () => {
+      const ctx = buildMockCtx() as any;
+      updateStatus(
+        ctx,
+        false,
+        'balanced',
+        {},
+        {},
+        undefined,
+        'anthropic/claude-3.5-sonnet',
+        0.1,
+        true,
+        mockConfig,
+      );
+
+      // Status should be cleared since router is not active
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith('router', undefined);
+
+      // Widget should show fallback model
+      const widgetCalls = ctx.ui.setWidget.mock.calls[0];
+      const widgetLines = widgetCalls[1];
+      expect(widgetLines).toContain('[dim]Router: disabled[/dim]');
+      expect(widgetLines).toContain(
+        '[dim]Fallback: anthropic/claude-3.5-sonnet[/dim]',
+      );
+    });
+
+    it('should show pins line when multiple profiles have pins', () => {
+      const ctx = buildMockCtx() as any;
+      const decision: RoutingDecision = {
+        profile: 'balanced',
+        tier: 'medium',
+        phase: 'implementation',
+        targetProvider: 'openai',
+        targetModelId: 'gpt-4o-mini',
+        targetLabel: 'openai/gpt-4o-mini',
+        reasoning: 'implementation work',
+        thinking: 'medium',
+        timestamp: Date.now(),
+      };
+
+      updateStatus(
+        ctx,
+        true,
+        'balanced',
+        { balanced: 'medium', cheap: 'low' },
+        {},
+        decision,
+        undefined,
+        0,
+        true,
+        mockConfig,
+      );
+
+      const widgetCalls = ctx.ui.setWidget.mock.calls[0];
+      const widgetLines = widgetCalls[1];
+      expect(widgetLines).toContain(
+        '[dim]Pins: balanced:medium, cheap:low[/dim]',
+      );
+    });
+
+    it('should show waiting when active profile does not match lastDecision profile', () => {
+      const ctx = buildMockCtx() as any;
+      const decision: RoutingDecision = {
+        profile: 'other-profile',
+        tier: 'high',
+        phase: 'planning',
+        targetProvider: 'google',
+        targetModelId: 'gemini-2.5-pro',
+        targetLabel: 'google/gemini-2.5-pro',
+        reasoning: 'planning keywords',
+        thinking: 'high',
+        timestamp: Date.now(),
+      };
+
+      updateStatus(
+        ctx,
+        true,
+        'balanced',
+        {},
+        {},
+        decision,
+        undefined,
+        0,
+        false,
+        mockConfig,
+      );
+
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        'router',
+        '🚥 router:balanced -> waiting',
+      );
+    });
   });
 });
