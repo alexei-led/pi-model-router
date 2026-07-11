@@ -30,6 +30,35 @@ import {
   collectProfileThinkingLevels,
 } from './config';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
+const REGISTRY_WAIT_TIMEOUT_MS = 5000;
+const REGISTRY_WAIT_INITIAL_DELAY_MS = 50;
+const REGISTRY_WAIT_MAX_DELAY_MS = 500;
+
+/**
+ * Wait for the model registry to become available with exponential backoff.
+ * This handles the race condition where subagents (e.g. from pi-dynamic-workflows)
+ * invoke the router provider before session_start has fired in their context.
+ */
+export const waitForRegistry = async (
+  state: {
+    readonly currentModelRegistry:
+      | ExtensionContext['modelRegistry']
+      | undefined;
+  },
+  timeoutMs: number = REGISTRY_WAIT_TIMEOUT_MS,
+): Promise<ExtensionContext['modelRegistry'] | undefined> => {
+  if (state.currentModelRegistry) return state.currentModelRegistry;
+
+  const start = Date.now();
+  let delay = REGISTRY_WAIT_INITIAL_DELAY_MS;
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    if (state.currentModelRegistry) return state.currentModelRegistry;
+    delay = Math.min(delay * 2, REGISTRY_WAIT_MAX_DELAY_MS);
+  }
+  return undefined;
+};
+
 import {
   phaseForTier,
   buildRoutingDecision,
@@ -76,39 +105,33 @@ const truncateContext = (context: Context, limit: number): Context => {
   const messages = [...context.messages];
   if (messages.length <= 1) return context;
 
-  const getSystemTokens = () =>
-    context.systemPrompt ? estimateTokens(context.systemPrompt) : 0;
+  const systemTokens = context.systemPrompt ? estimateTokens(context.systemPrompt) : 0;
 
-  // Initial estimate
-  const totalTokens =
-    getSystemTokens() +
-    messages.reduce(
-      (sum, m) => sum + estimateTokens(extractTextFromContent(m.content)),
-      0,
-    );
+  // Pre-calculate token sizes
+  const messageTokens = messages.map((m) =>
+    estimateTokens(extractTextFromContent(m.content)),
+  );
+  const totalTokens = systemTokens + messageTokens.reduce((sum, t) => sum + t, 0);
+
   if (totalTokens <= limit) return context;
 
   const latestMessage = messages.pop();
   if (!latestMessage) return context;
+  const latestTokens = messageTokens.pop() ?? 0;
 
-  // Remove oldest until it fits
-  while (messages.length > 0) {
-    const currentTokens =
-      getSystemTokens() +
-      estimateTokens(extractTextFromContent(latestMessage.content)) +
-      messages.reduce(
-        (sum, m) => sum + estimateTokens(extractTextFromContent(m.content)),
-        0,
-      );
+  // Keep shifting oldest messages from the start of the list
+  let activeMessagesTokensSum = messageTokens.reduce((sum, t) => sum + t, 0);
 
+  let startIndex = 0;
+  while (startIndex < messages.length) {
+    const currentTokens = systemTokens + latestTokens + activeMessagesTokensSum;
     if (currentTokens <= limit) break;
-    messages.shift(); // Remove oldest
+
+    activeMessagesTokensSum -= messageTokens[startIndex];
+    startIndex++;
   }
 
-  const finalMessages: Message[] = [];
-  finalMessages.push(...messages);
-  finalMessages.push(latestMessage);
-
+  const finalMessages = [...messages.slice(startIndex), latestMessage];
   return { ...context, messages: finalMessages };
 };
 
@@ -149,11 +172,13 @@ export const registerRouterProvider = (
     readonly thinkingByProfile: RouterThinkingByProfile;
     readonly pinnedTierByProfile: RouterPinByProfile;
     accumulatedCost: number;
+    /** Override for the registry wait timeout (for testing). */
+    readonly registryTimeoutMs?: number;
   },
   actions: {
     persistState: () => void;
     recordDebugDecision: (decision: RoutingDecision) => void;
-    getThinkingOverride: (profileName: string, tier: RouterTier) => any;
+    getThinkingOverride: (profileName: string, tier: RouterTier) => ThinkingLevel | undefined;
     updateStatus: (ctx: ExtensionContext) => void;
     syncPiThinkingLevel: (level: ThinkingLevel) => void;
   },
@@ -225,9 +250,13 @@ export const registerRouterProvider = (
 
       (async () => {
         try {
-          if (!state.currentModelRegistry) {
+          // Wait for the router to be fully initialized (session_start sets currentModelRegistry).
+          // This handles the race where subagents (e.g. from pi-dynamic-workflows) invoke
+          // the router provider before session_start has fired in their context.
+          const registry = await waitForRegistry(state, state.registryTimeoutMs);
+          if (!registry) {
             throw new Error(
-              'Router provider not initialized yet. Wait for session_start and retry.',
+              'Router provider initialization timed out. session_start may not have fired.',
             );
           }
           const profile = state.currentConfig.profiles[model.id];
@@ -263,7 +292,7 @@ export const registerRouterProvider = (
           ) {
             const classifierResult = await runClassifier(
               state.currentConfig.classifierModel.model,
-              state.currentModelRegistry,
+              registry,
               context,
               state.lastDecision?.phase,
               state.currentConfig.classifierModel.thinking,
@@ -298,33 +327,33 @@ export const registerRouterProvider = (
             decision.thinking !== 'off' &&
             previousDecision.targetLabel !== decision.targetLabel;
 
-          if (isGoogleThinkingToolContinuation) {
+          if (isGoogleThinkingToolContinuation && previousDecision) {
             decision = {
               ...decision,
-              tier: previousDecision!.tier,
-              phase: previousDecision!.phase,
-              targetProvider: previousDecision!.targetProvider,
-              targetModelId: previousDecision!.targetModelId,
-              targetLabel: previousDecision!.targetLabel,
-              thinking: previousDecision!.thinking,
+              tier: previousDecision.tier,
+              phase: previousDecision.phase,
+              targetProvider: previousDecision.targetProvider,
+              targetModelId: previousDecision.targetModelId,
+              targetLabel: previousDecision.targetLabel,
+              thinking: previousDecision.thinking,
               reasoning:
-                `Preserved ${previousDecision!.targetLabel} for a Google tool-result continuation ` +
+                `Preserved ${previousDecision.targetLabel} for a Google tool-result continuation ` +
                 `to avoid thought-signature replay errors. (Original: ${decision.reasoning})`,
             };
           }
 
           const imageAttached = hasImageAttachment(context);
-          if (imageAttached) {
-            const checkModelSupportsImage = (modelRef: string) => {
-              try {
-                const { provider, modelId } = parseCanonicalModelRef(modelRef);
-                const m = state.currentModelRegistry?.find(provider, modelId);
-                return m?.input?.includes('image') ?? false;
-              } catch {
-                return false;
-              }
-            };
+          const checkModelSupportsImage = (modelRef: string) => {
+            try {
+              const { provider, modelId } = parseCanonicalModelRef(modelRef);
+              const m = registry.find(provider, modelId);
+              return m?.input?.includes('image') ?? false;
+            } catch {
+              return false;
+            }
+          };
 
+          if (imageAttached) {
             const tierModels = [
               decision.targetLabel,
               ...(profile[decision.tier]?.fallbacks ?? []),
@@ -339,10 +368,12 @@ export const registerRouterProvider = (
 
               let foundTier: RouterTier | undefined;
               for (const t of tiersToTry) {
+                const tierConfig = profile[t];
+                if (!tierConfig) continue;
                 const tModels = [
-                  profile[t]?.model,
-                  ...(profile[t]?.fallbacks ?? []),
-                ].filter((m): m is string => typeof m === 'string');
+                  tierConfig.model,
+                  ...(tierConfig.fallbacks ?? []),
+                ];
                 if (tModels.some(checkModelSupportsImage)) {
                   foundTier = t;
                   break;
@@ -366,14 +397,19 @@ export const registerRouterProvider = (
           state.lastDecision = decision;
           actions.recordDebugDecision(decision);
 
-          // Sync pi's thinking level display with the router's effective thinking
+          // Sync pi's thinking level display with the router's effective thinking.
+          // Wrapped in try/catch: in subagent contexts the extension runtime
+          // may be invalidated (stale) after session teardown.
           const effectiveThinking =
             actions.getThinkingOverride(model.id, decision.tier) ??
             decision.thinking;
-          actions.syncPiThinkingLevel(effectiveThinking);
-
-          if (state.lastExtensionContext) {
-            actions.updateStatus(state.lastExtensionContext);
+          try {
+            actions.syncPiThinkingLevel(effectiveThinking);
+            if (state.lastExtensionContext) {
+              actions.updateStatus(state.lastExtensionContext);
+            }
+          } catch {
+            // Stale extension context — skip non-critical UI updates.
           }
 
           let modelsToTry = [
@@ -381,20 +417,12 @@ export const registerRouterProvider = (
             ...(profile[decision.tier]?.fallbacks ?? []),
           ];
           if (imageAttached) {
-            modelsToTry = modelsToTry.filter((modelRef) => {
-              try {
-                const { provider, modelId } = parseCanonicalModelRef(modelRef);
-                const m = state.currentModelRegistry?.find(provider, modelId);
-                return m?.input?.includes('image') ?? false;
-              } catch {
-                return false;
-              }
-            });
+            modelsToTry = modelsToTry.filter(checkModelSupportsImage);
             if (modelsToTry.length === 0) {
               modelsToTry = [decision.targetLabel];
             }
           }
-          let lastError: any;
+          let lastError: unknown;
           let success = false;
 
           for (let i = 0; i < modelsToTry.length; i++) {
@@ -404,7 +432,7 @@ export const registerRouterProvider = (
 
             if (targetProvider === 'router') continue;
 
-            const targetModel = state.currentModelRegistry.find(
+            const targetModel = registry.find(
               targetProvider,
               targetModelId,
             );
@@ -416,7 +444,7 @@ export const registerRouterProvider = (
             }
 
             const auth =
-              await state.currentModelRegistry.getApiKeyAndHeaders(targetModel);
+              await registry.getApiKeyAndHeaders(targetModel);
             if (!auth.ok || !auth.apiKey) {
               lastError = new Error(
                 auth.ok
@@ -435,7 +463,7 @@ export const registerRouterProvider = (
               const targetLimit = resolveContextWindow(
                 decision.tier,
                 profile,
-                state.currentModelRegistry,
+                registry,
               );
               if (targetLimit < model.contextWindow!) {
                 effectiveContext = truncateContext(context, targetLimit);
@@ -448,17 +476,21 @@ export const registerRouterProvider = (
               const delegatedReasoning =
                 targetModel.reasoning &&
                 (thinkingOverride ?? decision.thinking) !== 'off'
-                  ? (thinkingOverride ?? decision.thinking)
+                  ? (thinkingOverride ?? decision.thinking) as SimpleStreamOptions['reasoning']
                   : undefined;
 
-              if (state.lastExtensionContext) {
-                if (delegatedReasoning) {
-                  state.lastExtensionContext.ui.setHiddenThinkingLabel?.(
-                    `Thinking (${targetProvider}/${targetModelId})...`,
-                  );
-                } else {
-                  state.lastExtensionContext.ui.setHiddenThinkingLabel?.();
+              try {
+                if (state.lastExtensionContext) {
+                  if (delegatedReasoning) {
+                    state.lastExtensionContext.ui.setHiddenThinkingLabel?.(
+                      `Thinking (${targetProvider}/${targetModelId})...`,
+                    );
+                  } else {
+                    state.lastExtensionContext.ui.setHiddenThinkingLabel?.();
+                  }
                 }
+              } catch {
+                // Stale extension context — skip non-critical UI updates.
               }
 
               // Strip pi's reasoning from options — the router controls thinking
@@ -485,9 +517,16 @@ export const registerRouterProvider = (
                   state.accumulatedCost += cost;
                 }
                 if (event.type === 'error' && !contentReceived) {
+                  const errorMessage =
+                    'error' in event &&
+                    event.error &&
+                    typeof event.error === 'object' &&
+                    'errorMessage' in event.error &&
+                    typeof event.error.errorMessage === 'string'
+                      ? event.error.errorMessage
+                      : undefined;
                   throw new Error(
-                    (event as any).error?.errorMessage ||
-                      'Model failed before sending content.',
+                    errorMessage || 'Model failed before sending content.',
                   );
                 }
                 const isContent =
@@ -508,24 +547,46 @@ export const registerRouterProvider = (
 
           if (!success) {
             throw (
-              lastError ||
-              new Error('Failed to delegate to any model in the chain.')
+              lastError instanceof Error
+                ? lastError
+                : new Error(
+                    typeof lastError === 'string'
+                      ? lastError
+                      : 'Failed to delegate to any model in the chain.',
+                  )
             );
           }
 
           stream.end();
         } catch (error) {
-          stream.push({
-            type: 'error',
-            reason: 'error',
-            error: createErrorMessage(
-              model,
-              error instanceof Error ? error.message : String(error),
-            ),
-          });
+          // When a subagent session is torn down (e.g. by pi-dynamic-workflows),
+          // the extension runtime is invalidated and any pi/ctx call throws a
+          // stale-context error. Push a graceful done event so the stream's
+          // result() promise resolves (required by AssistantMessageEventStream).
+          const isStaleCtx =
+            error instanceof Error && error.message.includes('stale');
+          if (isStaleCtx) {
+            stream.push({
+              type: 'done',
+              message: createErrorMessage(model, ''),
+            });
+          } else {
+            stream.push({
+              type: 'error',
+              reason: 'error',
+              error: createErrorMessage(
+                model,
+                error instanceof Error ? error.message : String(error),
+              ),
+            });
+          }
           stream.end();
         } finally {
-          actions.persistState();
+          try {
+            actions.persistState();
+          } catch {
+            // Ignore: extension context may be stale after session teardown.
+          }
         }
       })();
 

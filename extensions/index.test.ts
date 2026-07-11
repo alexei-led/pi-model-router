@@ -573,4 +573,30 @@ describe('index.ts (orchestrator)', () => {
       expect(callsAfterSecond).toBe(callsAfterFirst);
     });
   });
+
+  describe('ensureInitializedFromContext', () => {
+    it('should initialize registry and context on first turn_start, but not overwrite on subsequent events', async () => {
+      routerExtension(mockPi);
+
+      const mockCtx1 = buildMockCtx();
+      mockCtx1.cwd = '/mock/cwd1';
+
+      // Trigger turn_start event with mockCtx1
+      const turnStartHandlers = eventListeners['turn_start'] || [];
+      for (const handler of turnStartHandlers) {
+        await handler({}, mockCtx1);
+      }
+
+      // Should have reloaded config and updated status because registry was undefined
+      expect(mockCtx1.ui.setStatus).toHaveBeenCalled();
+      mockCtx1.ui.setStatus.mockClear();
+
+      // Trigger turn_start with a DIFFERENT CWD — should NOT reinitialize because
+      // registry is already set (guards against subagent overwriting parent state)
+      const mockCtx2 = buildMockCtx();
+      mockCtx2.cwd = '/mock/cwd2';
+      await turnStartHandlers[0]({}, mockCtx2);
+      expect(mockCtx2.ui.setStatus).not.toHaveBeenCalled();
+    });
+  });
 });
