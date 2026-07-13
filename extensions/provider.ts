@@ -284,11 +284,13 @@ export const registerRouterProvider = (
             isBudgetExceeded,
           );
 
-          // Classifier Override
+          // Classifier Override — skip when budget is already exceeded since the
+          // result would be downgraded anyway, saving an unnecessary LLM call.
           if (
             state.currentConfig.classifierModel &&
             !pinnedTier &&
-            !decision.isRuleMatched
+            !decision.isRuleMatched &&
+            !isBudgetExceeded
           ) {
             const classifierResult = await runClassifier(
               state.currentConfig.classifierModel.model,
@@ -307,12 +309,6 @@ export const registerRouterProvider = (
                 state.thinkingByProfile[model.id],
                 true,
               );
-              if (isBudgetExceeded && decision.tier === 'high') {
-                decision.tier = 'medium';
-                decision.phase = 'implementation';
-                decision.reasoning = `Budget exceeded. Downgraded classifier decision to medium. (Original: ${decision.reasoning})`;
-                decision.isBudgetForced = true;
-              }
             }
           }
 
@@ -412,10 +408,10 @@ export const registerRouterProvider = (
             // Stale extension context — skip non-critical UI updates.
           }
 
-          let modelsToTry = [
+          let modelsToTry = [...new Set([
             decision.targetLabel,
             ...(profile[decision.tier]?.fallbacks ?? []),
-          ];
+          ])];
           if (imageAttached) {
             modelsToTry = modelsToTry.filter(checkModelSupportsImage);
             if (modelsToTry.length === 0) {
