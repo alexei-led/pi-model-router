@@ -564,6 +564,7 @@ export const registerRouterProvider = (
           if (isStaleCtx) {
             stream.push({
               type: 'done',
+              reason: 'stop',
               message: createErrorMessage(model, ''),
             });
           } else {

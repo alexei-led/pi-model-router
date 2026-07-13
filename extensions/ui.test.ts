@@ -160,7 +160,7 @@ describe('ui.ts', () => {
 
       // Check Widget Lines
       expect(ctx.ui.setWidget).toHaveBeenCalled();
-      const widgetCalls = ctx.ui.setWidget.mock.calls[0];
+      const widgetCalls = vi.mocked(ctx.ui.setWidget).mock.calls[0];
       expect(widgetCalls[0]).toBe('router');
       const widgetLines = widgetCalls[1];
       expect(widgetLines).toContain('[dim]Router: enabled[/dim]');
@@ -192,7 +192,7 @@ describe('ui.ts', () => {
       expect(ctx.ui.setStatus).toHaveBeenCalledWith('router', undefined);
 
       // Widget should show fallback model
-      const widgetCalls = ctx.ui.setWidget.mock.calls[0];
+      const widgetCalls = vi.mocked(ctx.ui.setWidget).mock.calls[0];
       const widgetLines = widgetCalls[1];
       expect(widgetLines).toContain('[dim]Router: disabled[/dim]');
       expect(widgetLines).toContain(
@@ -227,7 +227,7 @@ describe('ui.ts', () => {
         mockConfig,
       );
 
-      const widgetCalls = ctx.ui.setWidget.mock.calls[0];
+      const widgetCalls = vi.mocked(ctx.ui.setWidget).mock.calls[0];
       const widgetLines = widgetCalls[1];
       expect(widgetLines).toContain(
         '[dim]Pins: balanced:medium, cheap:low[/dim]',
@@ -280,7 +280,7 @@ describe('ui.ts', () => {
         targetModelId: 'gemini-2.5-flash',
         targetLabel: 'google/gemini-2.5-flash',
         reasoning: 'test',
-        thinking: 'default',
+        thinking: 'medium',
         timestamp: Date.now(),
       };
 
@@ -297,7 +297,7 @@ describe('ui.ts', () => {
         noBudgetConfig,
       );
 
-      const widgetLines = ctx.ui.setWidget.mock.calls[0][1] as string[];
+      const widgetLines = vi.mocked(ctx.ui.setWidget).mock.calls[0][1] as unknown as string[];
       const costLine = widgetLines.find((l: string) => l.includes('Cost'));
       expect(costLine).toBe('[dim]Cost: $0.5000[/dim]');
     });
@@ -316,7 +316,7 @@ describe('ui.ts', () => {
         targetModelId: 'gemini-2.5-flash',
         targetLabel: 'google/gemini-2.5-flash',
         reasoning: 'test',
-        thinking: 'default',
+        thinking: 'medium',
         timestamp: Date.now(),
       };
 
@@ -333,7 +333,7 @@ describe('ui.ts', () => {
         zeroBudgetConfig,
       );
 
-      const widgetLines = ctx.ui.setWidget.mock.calls[0][1] as string[];
+      const widgetLines = vi.mocked(ctx.ui.setWidget).mock.calls[0][1] as unknown as string[];
       const costLine = widgetLines.find((l: string) => l.includes('Cost'));
       // maxSessionBudget=0 is falsy, so no denominator is shown
       expect(costLine).toBe('[dim]Cost: $0.0000[/dim]');
