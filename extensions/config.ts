@@ -37,7 +37,7 @@ export const DEFAULT_THINKING_LEVELS: readonly ThinkingLevel[] = ['high', 'mediu
 export const isObjectRecord = (
   value: unknown,
 ): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export const isThinkingLevel = (value: unknown): value is ThinkingLevel =>
   typeof value === 'string' && THINKING_LEVELS.includes(value as ThinkingLevel);

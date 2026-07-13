@@ -71,7 +71,7 @@ describe('config.ts', () => {
       expect(isObjectRecord({ a: 1 })).toBe(true);
       expect(isObjectRecord(null)).toBe(false);
       expect(isObjectRecord('string')).toBe(false);
-      expect(isObjectRecord([])).toBe(true); // typeof [] is object
+      expect(isObjectRecord([])).toBe(false);
     });
 
     it('isThinkingLevel should validate thinking levels', () => {

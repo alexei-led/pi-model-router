@@ -54,6 +54,9 @@ const routerExtension = (pi: ExtensionAPI) => {
     isInternalModelSwitch = true;
     try {
       return await pi.setModel(model);
+    } catch {
+      // Extension context may be stale after session teardown.
+      return false;
     } finally {
       isInternalModelSwitch = false;
     }
@@ -63,6 +66,8 @@ const routerExtension = (pi: ExtensionAPI) => {
     isInternalThinkingChange = true;
     try {
       pi.setThinkingLevel(level);
+    } catch {
+      // Extension context may be stale after session teardown.
     } finally {
       isInternalThinkingChange = false;
     }
@@ -118,7 +123,14 @@ const routerExtension = (pi: ExtensionAPI) => {
     if (snapshot === lastPersistedSnapshot) {
       return;
     }
-    pi.appendEntry('router-state', state);
+    try {
+      pi.appendEntry('router-state', state);
+    } catch {
+      // Defensive fallback: the session_shutdown event may fire after this
+      // code runs (due to event loop ordering), so isActive can still be
+      // true even though the runtime is already stale.
+      return;
+    }
     lastPersistedSnapshot = snapshot;
   };
 
@@ -432,7 +444,30 @@ const routerExtension = (pi: ExtensionAPI) => {
     }
   });
 
+  // Eagerly initialize the model registry from any event that provides
+  // ExtensionContext. In subagent contexts (e.g. pi-dynamic-workflows),
+  // session_start may never fire, but turn_start/model_select fire before every LLM
+  // call — including the first call to the router provider's streamSimple.
+  // Only set when not already initialized: if extensions share instances across
+  // parent/subagent sessions, always overwriting would replace the parent's valid
+  // registry with the subagent's — which goes stale when the subagent ends.
+  const ensureInitializedFromContext = (ctx: ExtensionContext) => {
+    if (!currentModelRegistry) {
+      currentModelRegistry = ctx.modelRegistry;
+      lastExtensionContext = ctx;
+      currentCwd = ctx.cwd;
+      actions.reloadConfig(ctx);
+    }
+  };
+
+  pi.on('turn_start', async (_event, ctx) => {
+    ensureInitializedFromContext(ctx);
+  });
+
   pi.on('model_select', async (event, ctx) => {
+    // Ensure the model registry is captured even if session_start hasn't fired
+    // (e.g. in subagent contexts spawned by pi-dynamic-workflows).
+    ensureInitializedFromContext(ctx);
     if (!isInitialized || isInternalModelSwitch) return;
     if (event.model.provider === 'router') {
       const profileName = resolveProfileName(currentConfig, event.model.id);
@@ -464,6 +499,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   });
 
   pi.on('turn_end', async (_event, ctx) => {
+    ensureInitializedFromContext(ctx);
     if (routerEnabled && selectedProfile && ctx.model?.provider !== 'router') {
       const routerModel = ctx.modelRegistry.find('router', selectedProfile);
       if (routerModel) {
@@ -475,6 +511,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   });
 
   pi.on('thinking_level_select', (event, ctx) => {
+    ensureInitializedFromContext(ctx);
     if (!isInitialized || !routerEnabled || !selectedProfile) return;
     if (isInternalThinkingChange) return;
 
