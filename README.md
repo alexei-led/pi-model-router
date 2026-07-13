@@ -1,6 +1,6 @@
 # pi-model-router
 
-Intelligent per-turn model router extension for the [pi-coding-agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent). Automatically selects between high, medium, and low-tier LLMs based on task intent, session budget, context size, and custom rules — with automatic fallbacks and phase awareness.
+Smart per-turn model router extension for the [pi-coding-agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent) that optimizes your AI budget and usage limits without sacrificing quality by dynamically routing each turn to the optimal LLM tier. It automatically selects between high, medium, and low-tier models based on task intent, session budget, context size, and custom rules — complete with automatic fallbacks and phase awareness.
 
 ## What it does
 
