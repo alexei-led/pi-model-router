@@ -34,6 +34,13 @@ const REGISTRY_WAIT_TIMEOUT_MS = 5000;
 const REGISTRY_WAIT_INITIAL_DELAY_MS = 50;
 const REGISTRY_WAIT_MAX_DELAY_MS = 500;
 
+type ProviderAwareRegistry = ExtensionContext['modelRegistry'] & {
+  getRegisteredProviderConfig?: (provider: string) => {
+    api?: Api;
+    streamSimple?: typeof streamSimple;
+  };
+};
+
 /**
  * Wait for the model registry to become available with exponential backoff.
  * This handles the race condition where subagents (e.g. from pi-dynamic-workflows)
@@ -493,18 +500,30 @@ export const registerRouterProvider = (
               const { reasoning: _piReasoning, ...delegationOptions } =
                 options ?? {};
 
-              const delegatedStream = streamSimple(
-                targetModel,
-                effectiveContext,
-                {
-                  ...delegationOptions,
-                  apiKey,
-                  headers,
-                  ...(delegatedReasoning
-                    ? { reasoning: delegatedReasoning }
-                    : {}),
-                },
-              );
+              const delegatedOptions = {
+                ...delegationOptions,
+                apiKey,
+                headers,
+                ...(delegatedReasoning
+                  ? { reasoning: delegatedReasoning }
+                  : {}),
+              };
+              const registeredProvider = (
+                registry as ProviderAwareRegistry
+              ).getRegisteredProviderConfig?.(targetProvider);
+              const delegatedStream =
+                registeredProvider?.streamSimple &&
+                registeredProvider.api === targetModel.api
+                  ? registeredProvider.streamSimple(
+                      targetModel,
+                      effectiveContext,
+                      delegatedOptions,
+                    )
+                  : streamSimple(
+                      targetModel,
+                      effectiveContext,
+                      delegatedOptions,
+                    );
 
               let contentReceived = false;
               for await (const event of delegatedStream) {
