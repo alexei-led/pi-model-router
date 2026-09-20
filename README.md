@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js >=22.19](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js&logoColor=white)](package.json)
 
-Per-turn model router for [Pi](https://github.com/earendil-works/pi/tree/main/packages/coding-agent). Selects high, medium or low-tier models using task intent, a soft budget policy and custom rules, while keeping the selected `router/<profile>` model stable.
+Per-turn model router for [Pi](https://github.com/earendil-works/pi/tree/main/packages/coding-agent). Selects high, medium, low or micro-tier models using task intent, a soft budget policy and custom rules, while keeping the selected `router/<profile>` model stable.
 
 > **Independent fork:** This project is an independently maintained fork of [yeliu84/pi-model-router](https://github.com/yeliu84/pi-model-router), originally created by Ye Liu. It is not an official upstream release. The original MIT license and copyright notice are preserved.
 
@@ -18,12 +18,12 @@ This fork is maintained at [alexei-led/pi-model-router](https://github.com/alexe
 ## What it does
 
 - **Logical Router Provider**: Registers a `router` provider that exposes stable profiles (e.g., `router/balanced`) as models.
-- **Per-Turn Routing**: Intelligently chooses between `high`, `medium`, and `low` tiers for every turn based on task intent and complexity.
+- **Per-Turn Routing**: Intelligently chooses between `high`, `medium`, `low`, and `micro` tiers for every turn based on task intent and complexity.
 - **Task-Aware Heuristics**: Detects planning vs. implementation vs. lightweight tasks using keyword analysis, word count, and conversation history.
 - **Advanced Controls**: Includes built-in support for:
   - **LLM Intent Classifier**: Optionally use a fast model to categorize intent (overrides heuristics).
   - **Custom Rules**: Define keyword-based tier overrides for specific patterns (e.g., `deploy` → `high`).
-  - **Cost Budgeting**: Set a session spend limit; high tier downgrades to medium once exceeded.
+  - **Cost Budgeting**: Set a session spend limit; high tier downgrades to medium once exceeded, unless the local safety floor forbids it.
   - **Fallback Chains**: Automatic retry with alternative models if the primary choice fails.
 - **Phase Memory**: Biased stickiness to keep you in the same tier during multi-turn planning or implementation work.
 - **Thinking Control**: Full control over reasoning/thinking levels per tier and profile. Changing pi's thinking level (e.g. via `shift+tab`) automatically applies as an all-tier override for the active router profile.
@@ -130,11 +130,34 @@ The extension stores the last selected profile in `~/.pi/agent/model-router-stat
 | Field                   | Description                                                                       |
 | ----------------------- | --------------------------------------------------------------------------------- |
 | `classifierModel`       | (Optional) Model used to categorize intent. Supports model aliases. If omitted, fast heuristics are used. |
-| `maxSessionBudget`      | (Optional) Soft generation-cost threshold in USD. Downgrades high to medium, or low if medium is absent. Not a spending cap; classifier cost is excluded. |
+| `maxSessionBudget`      | (Optional) Soft generation-cost threshold in USD. Downgrades high to medium, or low if medium is absent, subject to the local safety floor. Not a spending cap; classifier cost is excluded. |
 | `phaseBias`             | (0.0 - 1.0) Stickiness of the current phase. Higher = more stable. Default `0.5`. |
 | `rules`                 | List of custom keyword rules (e.g. `{ "matches": "deploy", "tier": "high" }`).    |
 | `models`                | (Optional) Map of model aliases to definitions with `model`, `contextWindow`, `maxTokens`. |
-| `profiles`              | Map of profile definitions, each containing optional `high`, `medium`, and `low` tiers (at least one required). Tier models can reference aliases from `models`. |
+| `profiles`              | Map of profile definitions, each containing optional `high`, `medium`, `low`, and `micro` tiers (at least one required). Tier models can reference aliases from `models`. |
+
+### Optional mechanical tier
+
+The order is `micro < low < medium < high`. Existing three-tier configs and saved
+sessions need no migration. Add `"micro": { "model": "nano", "thinking": "off" }`
+to a profile to use your configured cheapest model for exact mechanical requests
+such as `git status --short`, `git diff --stat`, `head -n 20 README.md`, or
+`Replace the exact comment "// teh value" with "// the value" in src/index.ts`.
+`micro` defaults to `off`, not the normal config default of `medium`; explicit
+thinking overrides still apply. There is no automatic model-price ranking.
+
+Mechanical detection is a narrow allowlist, not a shell parser. Chaining,
+substitution, arbitrary commands and ambiguous edits do not qualify. Classifier
+advice remains limited to `low`, `medium`, and `high`; deterministic mechanical
+requests skip the classifier. Images require image-capable models at every
+attempt and may promote a micro request to a higher tier.
+
+Local safety wins over pins, rules and the soft budget: ambiguous requests require
+at least `low`, ordinary edits/debugging `medium`, and design, security,
+destructive operations, migrations and concurrency `high`. Missing tiers resolve
+to a configured tier at or above that floor. **A partial profile with no eligible
+tier now fails before generation** rather than silently lowering safety. Budget
+conflicts retain the eligible route and report `budget-floor-conflict`.
 
 ## Commands
 
@@ -143,7 +166,7 @@ The extension stores the last selected profile in `~/.pi/agent/model-router-stat
 | `/router`                   | Show detailed status, current profile, spend, and settings.                     |
 | `/router status`            | Alias for `/router` (show current status).                                      |
 | `/router profile [name]`    | Switch to a profile or list available ones (enables router if off).             |
-| `/router pin <t\|a>`        | Pin a tier (high/medium/low/auto) for the active profile.                      |
+| `/router pin <t\|a>`        | Pin a tier (high/medium/low/micro/auto) for the active profile.                      |
 | `/router fix <tier>`        | Correct the _last_ decision and pin that tier for the current profile.          |
 | `/router thinking <level>`  | Override thinking level for all tiers (e.g. `/router thinking max`). Not all tier models may support every level. |
 | `/router thinking <tier> <level>` | Override thinking level for a specific tier (e.g. `/router thinking low off`). |

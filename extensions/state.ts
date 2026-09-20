@@ -128,6 +128,23 @@ export const isRouterPersistedState = (
   );
 };
 
+// Copy only the decision contract, never incidental runtime properties.
+const snapshotDecision = (decision: RoutingDecision): RoutingDecision => ({
+  profile: decision.profile,
+  tier: decision.tier,
+  phase: decision.phase,
+  targetProvider: decision.targetProvider,
+  targetModelId: decision.targetModelId,
+  targetLabel: decision.targetLabel,
+  reasoning: decision.reasoning,
+  thinking: decision.thinking,
+  timestamp: decision.timestamp,
+  isClassifier: decision.isClassifier,
+  isFallback: decision.isFallback,
+  isBudgetForced: decision.isBudgetForced,
+  isRuleMatched: decision.isRuleMatched,
+});
+
 export const buildPersistedState = ({
   routerEnabled,
   selectedProfile,
@@ -154,9 +171,9 @@ export const buildPersistedState = ({
     thinkingByProfile: { ...thinkingByProfile },
     debugEnabled,
     widgetEnabled,
-    debugHistory,
+    debugHistory: debugHistory.map(snapshotDecision),
     lastPhase: lastDecision?.phase,
-    lastDecision,
+    lastDecision: lastDecision ? snapshotDecision(lastDecision) : undefined,
     lastNonRouterModel,
     accumulatedCost,
     timestamp: Date.now(),

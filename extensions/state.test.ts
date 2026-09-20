@@ -153,3 +153,48 @@ describe('state.ts', () => {
     });
   });
 });
+
+describe('four-tier snapshots', () => {
+  it.each(['micro', 'low', 'medium', 'high'] as const)(
+    'round-trips %s pins, effort and decisions without a migration',
+    (tier) => {
+      const decision: RoutingDecision = {
+        profile: 'p',
+        tier,
+        phase:
+          tier === 'high'
+            ? 'planning'
+            : tier === 'medium'
+              ? 'implementation'
+              : 'lightweight',
+        targetProvider: 'test',
+        targetModelId: 'model',
+        targetLabel: 'test/model',
+        thinking: tier === 'micro' ? 'off' : tier,
+        reasoning: 'legacy local reason',
+        timestamp: 1,
+      };
+      const withExtraFields = {
+        ...decision,
+        rawResponse: 'must not be copied',
+      };
+      const state = buildPersistedState({
+        routerEnabled: true,
+        selectedProfile: 'p',
+        pinnedTierByProfile: { p: tier },
+        thinkingByProfile: { p: { [tier]: decision.thinking } },
+        debugEnabled: true,
+        widgetEnabled: true,
+        debugHistory: [withExtraFields],
+        lastDecision: withExtraFields,
+        lastNonRouterModel: undefined,
+        accumulatedCost: 0,
+      });
+      const restored: unknown = JSON.parse(JSON.stringify(state));
+      expect(isRouterPersistedState(restored)).toBe(true);
+      expect(state.pinTier).toBe(tier);
+      expect(state.lastDecision).toMatchObject(decision);
+      expect(JSON.stringify(state)).not.toContain('must not be copied');
+    },
+  );
+});

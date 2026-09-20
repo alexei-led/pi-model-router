@@ -1,6 +1,9 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 
-export type RouterTier = 'high' | 'medium' | 'low';
+// Descending routing complexity; all tier iteration and ranking derives here.
+export const ROUTER_TIERS = ['high', 'medium', 'low', 'micro'] as const;
+export type RouterTier = (typeof ROUTER_TIERS)[number];
+export type ClassifierTier = Exclude<RouterTier, 'micro'>;
 export type RouterPin = RouterTier | 'auto';
 export type RouterPhase = 'planning' | 'implementation' | 'lightweight';
 export type RouterPinByProfile = Partial<Record<string, RouterTier>>;
@@ -43,6 +46,7 @@ export interface RouterProfile {
   high?: RoutedTierConfig | undefined;
   medium?: RoutedTierConfig | undefined;
   low?: RoutedTierConfig | undefined;
+  micro?: RoutedTierConfig | undefined;
 }
 
 export interface RouterConfig {
@@ -64,6 +68,12 @@ export interface RouterStatusState {
   accumulatedCost: number;
   widgetEnabled: boolean;
   currentConfig: RouterConfig;
+}
+
+export interface RoutePair {
+  tier: RouterTier;
+  model: string;
+  thinking: ThinkingLevel;
 }
 
 export interface RoutingDecision {

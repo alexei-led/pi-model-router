@@ -126,6 +126,43 @@ describe('commands.ts', () => {
     return { pi, state, actions, ctx, cmd: pi.getRegisteredCommand() };
   };
 
+  describe('micro commands', () => {
+    it('completes, pins, fixes, overrides, and clears micro', async () => {
+      const { state, ctx, cmd } = setup();
+      state.currentConfig.profiles.balanced = {
+        ...state.currentConfig.profiles.balanced,
+        micro: { model: 'openai/tiny' },
+      };
+      for (const command of ['pin', 'fix', 'thinking']) {
+        expect(
+          cmd
+            .getArgumentCompletions(`${command} mi`)
+            ?.map((item) => item.value),
+        ).toContain(`${command} micro`);
+      }
+      await cmd.handler('pin micro', ctx as unknown as ExtensionCommandContext);
+      expect(state.pinnedTierByProfile.balanced).toBe('micro');
+      await cmd.handler(
+        'thinking micro off',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(state.thinkingByProfile.balanced?.micro).toBe('off');
+      await cmd.handler(
+        'thinking micro auto',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(state.thinkingByProfile.balanced?.micro).toBeUndefined();
+      await cmd.handler('fix micro', ctx as unknown as ExtensionCommandContext);
+      expect(state.pinnedTierByProfile.balanced).toBe('micro');
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining('is now pinned to micro'),
+        'info',
+      );
+      await cmd.handler('pin auto', ctx as unknown as ExtensionCommandContext);
+      expect(state.pinnedTierByProfile.balanced).toBeUndefined();
+    });
+  });
+
   describe('Registration & Subcommand Completion', () => {
     it('register router command', () => {
       const { pi } = setup();
@@ -433,7 +470,7 @@ describe('commands.ts', () => {
         ctx as unknown as ExtensionCommandContext,
       );
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router pin <high|medium|low|auto>',
+        'Usage: /router pin <high|medium|low|micro|auto>',
         'error',
       );
     });
@@ -732,7 +769,7 @@ describe('commands.ts', () => {
 
       await cmd.handler('fix', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router fix <high|medium|low>',
+        'Usage: /router fix <high|medium|low|micro>',
         'error',
       );
     });
@@ -745,7 +782,7 @@ describe('commands.ts', () => {
         ctx as unknown as ExtensionCommandContext,
       );
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router fix <high|medium|low>',
+        'Usage: /router fix <high|medium|low|micro>',
         'error',
       );
     });
@@ -758,7 +795,7 @@ describe('commands.ts', () => {
         ctx as unknown as ExtensionCommandContext,
       );
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router fix <high|medium|low>',
+        'Usage: /router fix <high|medium|low|micro>',
         'error',
       );
     });

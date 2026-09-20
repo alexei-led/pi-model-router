@@ -28,8 +28,10 @@ import {
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
 import { extractTextFromContent, hasImageAttachment } from './context';
 import {
+  allowed,
   buildRoutingDecision,
   decideRouting,
+  localSafetyFloor,
   phaseForTier,
   resolveAvailableTier,
 } from './routing';
@@ -303,6 +305,7 @@ export const registerRouterProvider = (
             state.currentConfig.maxSessionBudget !== undefined &&
             state.accumulatedCost >= state.currentConfig.maxSessionBudget;
 
+          const floor = localSafetyFloor(context);
           let decision: RoutingDecision = decideRouting(
             context,
             model.id,
@@ -320,6 +323,8 @@ export const registerRouterProvider = (
           const isGoogleThinkingToolContinuation =
             lastMessage?.role === 'toolResult' &&
             previousDecision?.profile === model.id &&
+            allowed(previousDecision.tier, floor) &&
+            (!pinnedTier || pinnedTier === previousDecision.tier) &&
             previousDecision.targetProvider === 'google' &&
             previousDecision.thinking !== 'off' &&
             decision.targetProvider === 'google' &&
@@ -347,6 +352,7 @@ export const registerRouterProvider = (
             state.currentConfig.classifierModel &&
             !pinnedTier &&
             !decision.isRuleMatched &&
+            floor !== 'micro' &&
             !isBudgetExceeded &&
             !isGoogleThinkingToolContinuation
           ) {
@@ -361,8 +367,12 @@ export const registerRouterProvider = (
               options?.signal,
             ).catch(() => undefined);
             options?.signal?.throwIfAborted();
-            if (classifierResult) {
-              const tier = resolveAvailableTier(profile, classifierResult.tier);
+            if (classifierResult && allowed(classifierResult.tier, floor)) {
+              const tier = resolveAvailableTier(
+                profile,
+                classifierResult.tier,
+                floor,
+              );
               decision = buildRoutingDecision(
                 model.id,
                 profile,
@@ -392,12 +402,12 @@ export const registerRouterProvider = (
               ...(profile[decision.tier]?.fallbacks ?? []),
             ];
             if (!tierModels.some(checkModelSupportsImage)) {
-              const tiersToTry: RouterTier[] =
-                decision.tier === 'low'
-                  ? ['medium', 'high']
-                  : decision.tier === 'medium'
-                    ? ['high']
-                    : [];
+              const tiersToTry = [...ROUTER_TIERS]
+                .reverse()
+                .filter(
+                  (tier) =>
+                    tier !== decision.tier && allowed(tier, decision.tier),
+                );
 
               let foundTier: RouterTier | undefined;
               for (const t of tiersToTry) {

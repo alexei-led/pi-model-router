@@ -10,12 +10,18 @@ import {
   hasImageAttachment,
 } from './context';
 import {
+  allowed,
   buildRoutingDecision,
   decideRouting,
+  isMechanicalTask,
+  localSafetyFloor,
   phaseForTier,
   resolveAvailableTier,
+  resolveRoutePair,
+  tierRank,
 } from './routing';
-import type { RouterProfile, RoutingRule } from './types';
+import type { RouterProfile, RouterTier, RoutingRule } from './types';
+import { ROUTER_TIERS } from './types';
 
 describe('routing.ts', () => {
   describe('extractTextFromContent', () => {
@@ -224,7 +230,7 @@ describe('routing.ts', () => {
         low: { model: 'test/low' },
       };
       const context: Context = {
-        messages: [{ role: 'user', content: 'deep design', timestamp: 1 }],
+        messages: [{ role: 'user', content: 'think hard', timestamp: 1 }],
       };
       expect(
         decideRouting(
@@ -532,5 +538,237 @@ describe('routing.ts', () => {
       expect(decision.tier).toBe('medium');
       expect(decision.reasoning).toContain('Defaulted to medium');
     });
+  });
+});
+
+describe('four-level local routing', () => {
+  const profile: RouterProfile = Object.fromEntries(
+    ROUTER_TIERS.map((tier) => [tier, { model: `test/${tier}` }]),
+  );
+  const context = (content: string): Context => ({
+    messages: [{ role: 'user', content, timestamp: 1 }],
+  });
+  const prompts: Record<RouterTier, string> = {
+    micro: 'git status --short',
+    low: 'hello',
+    medium: 'fix the test',
+    high: 'design the architecture',
+  };
+
+  it.each(ROUTER_TIERS)(
+    '%s has a distinct rank, phase, default effort and route pair',
+    (tier) => {
+      expect(tierRank(tier)).toBe(
+        ['micro', 'low', 'medium', 'high'].indexOf(tier),
+      );
+      expect(phaseForTier(tier)).toBe(
+        tier === 'high'
+          ? 'planning'
+          : tier === 'medium'
+            ? 'implementation'
+            : 'lightweight',
+      );
+      expect(resolveRoutePair(profile, tier)).toEqual({
+        tier,
+        model: `test/${tier}`,
+        thinking: tier === 'micro' ? 'off' : tier,
+      });
+      expect(resolveAvailableTier(profile, tier, tier)).toBe(tier);
+      expect(
+        decideRouting(context(prompts[tier]), 'p', profile, undefined).tier,
+      ).toBe(tier);
+      expect(
+        decideRouting(context('pwd'), 'p', profile, undefined, tier).tier,
+      ).toBe(tier);
+    },
+  );
+
+  it.each(
+    ROUTER_TIERS.flatMap((tier) =>
+      ROUTER_TIERS.map((floor) => ({ tier, floor })),
+    ),
+  )(
+    'enforces $floor floor against $tier pins, rules, budgets and partial profiles',
+    ({ tier, floor }) => {
+      const expected = allowed(tier, floor) ? tier : floor;
+      expect(allowed(tier, floor)).toBe(tierRank(tier) >= tierRank(floor));
+      expect(
+        decideRouting(context(prompts[floor]), 'p', profile, undefined, tier)
+          .tier,
+      ).toBe(expected);
+      expect(
+        decideRouting(
+          context(prompts[floor]),
+          'p',
+          profile,
+          undefined,
+          undefined,
+          undefined,
+          0.5,
+          [{ matches: prompts[floor], tier }],
+        ).tier,
+      ).toBe(expected);
+      const budget = decideRouting(
+        context(prompts[floor]),
+        'p',
+        profile,
+        undefined,
+        tier,
+        undefined,
+        0.5,
+        undefined,
+        true,
+      );
+      expect(allowed(budget.tier, floor)).toBe(true);
+      const partial: RouterProfile = { [tier]: profile[tier] };
+      if (allowed(tier, floor)) {
+        expect(resolveAvailableTier(partial, floor, floor)).toBe(tier);
+      } else {
+        expect(() => resolveAvailableTier(partial, floor, floor)).toThrow(
+          'No eligible route',
+        );
+      }
+    },
+  );
+
+  it.each([
+    'pwd',
+    'Please run git status --short.',
+    'git diff --stat',
+    'git log -1 --oneline',
+    'head -n 20 README.md',
+    'Replace the exact comment "// teh value" with "// the value" in src/index.ts',
+  ])('recognizes only bounded mechanical requests: %s', (prompt) => {
+    expect(isMechanicalTask(prompt)).toBe(true);
+    expect(
+      decideRouting(context(prompt), 'p', profile, undefined),
+    ).toMatchObject({
+      tier: 'micro',
+      thinking: 'off',
+      reasoning: 'micro-mechanical',
+    });
+  });
+
+  it.each([
+    ['git status; delete the repository', 'high'],
+    ['git status && rm -rf ./src', 'high'],
+    ['git status --short and design a migration', 'high'],
+    ['quick security fix', 'high'],
+    ['broad debugging', 'high'],
+    ['database migrations', 'high'],
+    ['deleting old files', 'high'],
+    ['editing a file', 'medium'],
+    ['remove the directory', 'high'],
+    ['add logging', 'medium'],
+    ['briefly debug the entire system', 'high'],
+    ['fix the concurrency bug', 'high'],
+    ['deploy to production', 'high'],
+    ['write comments', 'medium'],
+    ['quickly edit this file', 'medium'],
+    ['debug this test', 'medium'],
+    ['make a tiny change', 'medium'],
+    ['git status && pwd', 'low'],
+    ['git status $(whoami)', 'low'],
+    ['git status > status.txt', 'low'],
+    ['git status | cat', 'low'],
+    ['git unknown', 'low'],
+    ['run an arbitrary CLI command', 'low'],
+    ['what should I do?', 'low'],
+    ['head -n 1000 README.md', 'low'],
+    ['head -n 10 --help', 'low'],
+  ] as const)(
+    'never routes dangerous or ambiguous input to micro: %s',
+    (prompt, floor) => {
+      expect(isMechanicalTask(prompt)).toBe(false);
+      expect(localSafetyFloor(context(prompt))).toBe(floor);
+      expect(
+        allowed(
+          decideRouting(context(prompt), 'p', profile, undefined, 'micro').tier,
+          floor,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('risk signals override an otherwise exact mechanical match', () => {
+    const prompt =
+      'Replace the exact comment "// security" with "// disabled" in auth.ts';
+    expect(isMechanicalTask(prompt)).toBe(true);
+    expect(localSafetyFloor(context(prompt))).toBe('high');
+  });
+
+  it('keeps safety above a below-floor pin or soft budget', () => {
+    expect(
+      decideRouting(
+        context('design a migration'),
+        'p',
+        profile,
+        undefined,
+        'micro',
+      ),
+    ).toMatchObject({
+      tier: 'high',
+      reasoning: 'local-safety-floor',
+    });
+    expect(
+      decideRouting(
+        context('design a migration'),
+        'p',
+        profile,
+        undefined,
+        undefined,
+        undefined,
+        0.5,
+        undefined,
+        true,
+      ),
+    ).toMatchObject({
+      tier: 'high',
+      reasoning: 'budget-floor-conflict',
+      isBudgetForced: false,
+    });
+    const partial = { high: profile.high, low: profile.low };
+    expect(
+      decideRouting(
+        context('think hard and fix the bug'),
+        'p',
+        partial,
+        undefined,
+        undefined,
+        undefined,
+        0.5,
+        undefined,
+        true,
+      ),
+    ).toMatchObject({
+      tier: 'high',
+      reasoning: 'budget-floor-conflict',
+    });
+  });
+
+  it('preserves old three-tier profiles and rejects unsafe partial profiles', () => {
+    expect(
+      decideRouting(context('pwd'), 'p', { low: profile.low }, undefined).tier,
+    ).toBe('low');
+    expect(() =>
+      decideRouting(
+        context('design a migration'),
+        'p',
+        { low: profile.low },
+        undefined,
+      ),
+    ).toThrow('No eligible route');
+  });
+
+  it('normalizes route identity and honors explicit thinking overrides', () => {
+    expect(
+      resolveRoutePair(
+        { micro: { model: ' test / tiny ', thinking: 'low' } },
+        'micro',
+      ),
+    ).toEqual({ tier: 'micro', model: 'test/tiny', thinking: 'low' });
+    expect(
+      resolveRoutePair(profile, 'micro', { micro: 'minimal' }).thinking,
+    ).toBe('minimal');
   });
 });

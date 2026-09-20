@@ -6,7 +6,7 @@ import type {
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { isRouterTier, parseCanonicalModelRef } from './config';
 import { extractTextFromContent, getRecentConversationText } from './context';
-import type { RouterPhase, RouterTier } from './types';
+import type { ClassifierTier, RouterPhase } from './types';
 
 const CLASSIFIER_TIMEOUT_MS = 10_000;
 const CLASSIFIER_MAX_TOKENS = 256;
@@ -19,7 +19,7 @@ export const runClassifier = async (
   currentPhase?: RouterPhase,
   thinking?: ThinkingLevel,
   signal?: AbortSignal,
-): Promise<{ tier: RouterTier; reasoning: string } | undefined> => {
+): Promise<{ tier: ClassifierTier; reasoning: string } | undefined> => {
   try {
     if (signal?.aborted) return undefined;
     const { provider, modelId } = parseCanonicalModelRef(classifierModelRef);
@@ -101,7 +101,7 @@ export const runClassifier = async (
         .slice(tierLine.indexOf(':') + 1)
         .trim()
         .toLowerCase();
-      if (!isRouterTier(tierValue)) return undefined;
+      if (!isRouterTier(tierValue) || tierValue === 'micro') return undefined;
       return { tier: tierValue, reasoning: CLASSIFIER_REASON_CODE };
     } finally {
       if (abortListener) {

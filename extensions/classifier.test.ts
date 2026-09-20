@@ -24,6 +24,30 @@ const setup = () => {
 };
 
 describe('classifier', () => {
+  it.each(['micro', 'unknown'])(
+    'rejects %s advice even though micro is a router tier',
+    async (tier) => {
+      const s = setup();
+      s.streamSimple.mockReturnValue(
+        done(`Tier: ${tier}\nReasoning: untrusted`),
+      );
+      expect(
+        await runClassifier('test/primary', s.registry, s.context),
+      ).toBeUndefined();
+    },
+  );
+  it.each(['low', 'medium', 'high'])(
+    'retains valid %s classifier advice',
+    async (tier) => {
+      const s = setup();
+      s.streamSimple.mockReturnValue(
+        done(`Tier: ${tier}\nReasoning: untrusted`),
+      );
+      expect(
+        await runClassifier('test/primary', s.registry, s.context),
+      ).toEqual({ tier, reasoning: 'classifier' });
+    },
+  );
   it('uses isolated registry requests, keeps colons, and forwards cancellation', async () => {
     const s = setup();
     const abort = new AbortController();

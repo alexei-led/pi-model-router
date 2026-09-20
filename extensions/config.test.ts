@@ -580,3 +580,70 @@ describe('config.ts', () => {
     });
   });
 });
+
+describe('micro config compatibility', () => {
+  it.each(['micro', 'low', 'medium', 'high'] as const)(
+    'normalizes missing and invalid %s thinking deliberately',
+    (tier) => {
+      for (const thinking of [undefined, 'invalid']) {
+        const { config, warnings } = normalizeConfig({
+          profiles: { p: { [tier]: { model: 'test/model', thinking } } },
+        });
+        expect(config.profiles.p?.[tier]?.thinking).toBe(
+          tier === 'micro' ? 'off' : 'medium',
+        );
+        expect(warnings.length).toBe(thinking ? 1 : 0);
+      }
+    },
+  );
+
+  it('merges micro model aliases, effort, and fallbacks without changing legacy tiers', () => {
+    const base = {
+      models: { tiny: { model: 'test/tiny', reasoning: false } },
+      profiles: {
+        p: {
+          high: { model: 'test/high' },
+          medium: { model: 'test/medium' },
+          low: { model: 'test/low' },
+          micro: { model: 'tiny', fallbacks: ['test/backup'] },
+        },
+      },
+    };
+    const { config, warnings } = normalizeConfig(
+      mergeConfig(base, { profiles: { p: { micro: { thinking: 'off' } } } }),
+    );
+    expect(warnings).toEqual([]);
+    expect(config.profiles.p?.micro).toMatchObject({
+      model: 'test/tiny',
+      thinking: 'off',
+      fallbacks: ['test/backup'],
+      resolvedThinkingLevels: [],
+    });
+    const old = normalizeConfig({
+      profiles: {
+        p: {
+          high: base.profiles.p.high,
+          medium: base.profiles.p.medium,
+          low: base.profiles.p.low,
+        },
+      },
+    }).config.profiles.p;
+    expect(config.profiles.p).toMatchObject({
+      high: old?.high,
+      medium: old?.medium,
+      low: old?.low,
+    });
+    expect(old?.micro).toBeUndefined();
+  });
+
+  it('accepts micro-only profiles and micro rules, including explicit effort', () => {
+    const { config, warnings } = normalizeConfig({
+      profiles: { p: { micro: { model: 'test/tiny', thinking: 'minimal' } } },
+      rules: [{ matches: 'pwd', tier: 'micro' }],
+    });
+    expect(warnings).toEqual([]);
+    expect(config.profiles.p?.micro?.thinking).toBe('minimal');
+    expect(config.rules?.[0]?.tier).toBe('micro');
+    expect(isRouterTier('micro')).toBe(true);
+  });
+});

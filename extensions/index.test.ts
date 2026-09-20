@@ -21,6 +21,7 @@ vi.mock('./config', async (importOriginal) => ({
         balanced: {
           high: { model: 'openai/gpt-4o' },
           medium: { model: 'openai/gpt-4o-mini' },
+          micro: { model: 'openai/tiny', thinking: 'off' },
         },
         alternate: {
           high: { model: 'anthropic/claude-opus-4' },
@@ -86,6 +87,31 @@ describe('index.ts (orchestrator)', () => {
       theme: { fg: (_color: string, text: string) => text },
       notify: vi.fn(),
     },
+  });
+
+  it('restores micro pins and thinking overrides without migration', async () => {
+    routerExtension(mockPi);
+    const ctx = buildMockCtx();
+    ctx.sessionManager.getBranch = () => [
+      {
+        type: 'custom',
+        customType: 'router-state',
+        data: {
+          enabled: true,
+          selectedProfile: 'balanced',
+          pinTier: 'micro',
+          thinkingByProfile: { balanced: { micro: 'off' } },
+          timestamp: 1,
+        },
+      },
+    ];
+    for (const handler of handlersFor('session_start')) {
+      await handler({}, ctx);
+    }
+    expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+      pinTier: 'micro',
+      thinkingByProfile: { balanced: { micro: 'off' } },
+    });
   });
 
   it('keeps restored branch snapshots immutable when thinking changes', async () => {
@@ -305,7 +331,12 @@ describe('index.ts (orchestrator)', () => {
         'router-state',
         expect.objectContaining({
           thinkingByProfile: {
-            balanced: { high: 'high', medium: 'high', low: 'high' },
+            balanced: {
+              high: 'high',
+              medium: 'high',
+              low: 'high',
+              micro: 'high',
+            },
           },
         }),
       );
@@ -334,7 +365,12 @@ describe('index.ts (orchestrator)', () => {
         'router-state',
         expect.objectContaining({
           thinkingByProfile: {
-            balanced: { high: 'high', medium: 'high', low: 'high' },
+            balanced: {
+              high: 'high',
+              medium: 'high',
+              low: 'high',
+              micro: 'high',
+            },
           },
         }),
       );

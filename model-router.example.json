@@ -41,7 +41,8 @@
         "fallbacks": ["sonnet"]
       },
       "medium": { "model": "flash", "thinking": "medium" },
-      "low": { "model": "nano", "thinking": "low" }
+      "low": { "model": "nano", "thinking": "low" },
+      "micro": { "model": "nano", "thinking": "off" }
     },
     "cheap": {
       "high": { "model": "flash", "thinking": "low" },

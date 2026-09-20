@@ -6,11 +6,12 @@ The `pi-model-router` is an extension-first model router for the `pi` coding age
 
 ### 1. Profiles & Tiers
 
-The router is organized into **Profiles** (e.g., `balanced`, `cheap`, `deep`). Each profile defines up to three **Tiers** (at least one required):
+The router is organized into **Profiles** (e.g., `balanced`, `cheap`, `deep`). Each profile defines up to four **Tiers** (at least one required):
 
 - **High**: Reserved for architecture, design, complex debugging, and planning. Uses high-reasoning models.
 - **Medium**: The default for standard implementation, multi-file edits, and focused fixes.
 - **Low**: Used for summaries, changelogs, formatting, and simple read-only lookups.
+- **Micro**: Optional exact mechanical lane, with `off` thinking by default. Tier order is `micro < low < medium < high`, derived from `ROUTER_TIERS` in `types.ts`. Each route pair is a tier, canonical model reference and explicit thinking level.
 
 ### 2. Custom Provider Implementation
 
@@ -20,12 +21,21 @@ The extension registers a logical provider with `pi.registerProvider`. The selec
 
 For every request sent to a `router/*` model, the following logic is executed:
 
-1. **Budget Check**: When recorded generation spend reaches `maxSessionBudget`, high-tier requests are downgraded to medium (or low when medium is missing). This is a soft routing policy, not a spending cap: a high-only profile has no cheaper tier, and classifier costs are not included.
-2. **Manual Pin**: If the user has pinned a tier via `/router pin` or `/router fix`, that tier is used.
+1. **Budget Check**: When recorded generation spend reaches `maxSessionBudget`, high-tier requests are downgraded to medium (or low when medium is missing), only if the local safety floor permits it. This is a soft routing policy, not a spending cap: a high-only profile has no cheaper tier, and classifier costs are not included.
+2. **Manual Pin**: If the user has pinned a tier via `/router pin` or `/router fix`, that tier is used if it satisfies the local floor.
 3. **Custom Rules**: Keyword-based rules defined in the config are checked against the user prompt.
-4. **LLM Classifier (Optional)**: When not pinned, rule-matched or over budget, the classifier can replace the heuristic decision. It receives isolated text context, a 256-token output limit, cancellation and a 10-second timeout signal. Errors and incomplete responses retain the heuristic choice; selected tiers are resolved against the configured profile.
+4. **LLM Classifier (Optional)**: When not pinned, rule-matched, deterministic mechanical or over budget, the classifier can replace the heuristic decision. It receives isolated text context, a 256-token output limit, cancellation and a 10-second timeout signal. Errors and incomplete responses retain the heuristic choice; advice remains restricted to low/medium/high and below-floor answers are rejected.
 5. **Heuristics (Fallback)**: If the classifier is off or fails, a fast local heuristic (keyword/length/tool-use analysis) is used.
 6. **Biased Stickiness**: The `phaseBias` setting modulates thresholds to keep the router in a consistent phase (e.g., staying in `high` tier during a multi-turn planning session).
+
+Local policy in `routing.ts` computes the safety floor before classifier work:
+unknown tasks require low, ordinary edits and bounded debugging medium, and
+design/security/destructive/migration/concurrency tasks high. Exact mechanical
+matches permit micro only without competing risk signals. Pins, rules, budget
+and missing-tier resolution cannot undercut this floor. Profiles with no eligible
+tier fail with an actionable error before generation. Image support is a hard
+capability filter on the concrete target and every fallback, not a tier label.
+Existing three-tier profiles and saved snapshots remain valid without migration.
 
 ## Module Architecture
 

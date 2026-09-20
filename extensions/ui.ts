@@ -69,7 +69,11 @@ export const updateStatus = (
   if (activeRouterProfile) {
     const matchesProfile =
       lastDecision && lastDecision.profile === activeRouterProfile;
-    const matchesPin = activePin ? lastDecision?.tier === activePin : true;
+    const matchesPin = activePin
+      ? lastDecision?.tier === activePin ||
+        lastDecision?.reasoning === 'local-safety-floor' ||
+        lastDecision?.reasoning === 'budget-floor-conflict'
+      : true;
 
     let statusText: string;
     if (lastDecision && matchesProfile && matchesPin) {

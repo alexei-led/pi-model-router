@@ -8,6 +8,7 @@ import {
   getRecentConversationText,
 } from './context';
 import type {
+  RoutePair,
   RouterPhase,
   RouterProfile,
   RouterThinkingByTier,
@@ -15,6 +16,7 @@ import type {
   RoutingDecision,
   RoutingRule,
 } from './types';
+import { ROUTER_TIERS } from './types';
 
 export const phaseForTier = (tier: RouterTier): RouterPhase => {
   if (tier === 'high') return 'planning';
@@ -22,24 +24,93 @@ export const phaseForTier = (tier: RouterTier): RouterPhase => {
   return 'lightweight';
 };
 
+export const tierRank = (tier: RouterTier): number =>
+  ROUTER_TIERS.length - 1 - ROUTER_TIERS.indexOf(tier);
+
+export const allowed = (tier: RouterTier, floor: RouterTier): boolean =>
+  tierRank(tier) >= tierRank(floor);
+
+// Deliberately closed forms, not a shell parser. No chaining, substitution,
+// redirection, arbitrary flags, or free-form edits qualify for the micro lane.
+export const isMechanicalTask = (prompt: string): boolean => {
+  const text = prompt.trim();
+  if (text.length > 300) return false;
+  return (
+    /^(?:please )?(?:run |show )?(?:pwd|git status(?: --short)?|git diff --stat|git log -1 --oneline)\.?$/i.test(
+      text,
+    ) ||
+    /^(?:please )?(?:run )?head -n (?:[1-9]|[1-9][0-9]|100) [a-z0-9_./][a-z0-9_./-]*$/i.test(
+      text,
+    ) ||
+    /^replace the exact comment "\/\/ [^"\n]+" with "\/\/ [^"\n]+" in [a-z0-9_./-]+\.?$/i.test(
+      text,
+    )
+  );
+};
+
+export const localSafetyFloor = (context: Context): RouterTier => {
+  const prompt = getLastUserText(context).toLowerCase();
+  if (
+    /\b(security|auth(?:entication|orization)?|credentials?|secrets?|vulnerabilit\w*|encrypt\w*|destructive|delet\w*|destroy\w*|eras\w*|drop\w*|wip\w*|deploy\w*|production|migrat\w*|concurrency|concurrent|race conditions?|architect\w*|design(?:s|ing|ed)?|rm|sudo|chmod|chown|truncate)\b/.test(
+      prompt,
+    ) ||
+    /\bgit\s+(?:reset|clean|push)\b/.test(prompt) ||
+    /\b(?:debug|debugging|investigate)\b.*\b(?:system|entire|whole|broad)\b/.test(
+      prompt,
+    ) ||
+    /\b(?:system-wide|entire|whole|broad)\b.*\b(?:debug|debugging|investigation)\b/.test(
+      prompt,
+    ) ||
+    /\bremove\b.*\b(?:directory|database|repository)\b/.test(prompt)
+  )
+    return 'high';
+  if (isMechanicalTask(prompt)) return 'micro';
+  if (
+    /\b(implement\w*|cod(?:e|ing)|fix\w*|updat\w*|edit\w*|writ\w*|add\w*|modif\w*|refactor\w*|patch\w*|chang\w*|replac\w*|remov\w*|debug\w*|bugs?|tests?)\b/.test(
+      prompt,
+    )
+  )
+    return 'medium';
+  return 'low';
+};
+
 export const resolveAvailableTier = (
   profile: RouterProfile,
   preferred: RouterTier,
+  floor: RouterTier = 'micro',
 ): RouterTier => {
-  if (profile[preferred]) return preferred;
-  // Fall "up": low → medium → high
-  const order: RouterTier[] = ['low', 'medium', 'high'];
+  const eligible = (tier: RouterTier) => profile[tier] && allowed(tier, floor);
+  if (eligible(preferred)) return preferred;
+  const order = [...ROUTER_TIERS].reverse();
   const startIdx = order.indexOf(preferred);
-  for (let i = startIdx + 1; i < order.length; i++) {
-    const tier = order[i];
-    if (tier && profile[tier]) return tier;
+  for (const tier of order.slice(startIdx + 1)) {
+    if (eligible(tier)) return tier;
   }
-  // Fall "down" as last resort
-  for (let i = startIdx - 1; i >= 0; i--) {
-    const tier = order[i];
-    if (tier && profile[tier]) return tier;
+  for (const tier of order.slice(0, startIdx).reverse()) {
+    if (eligible(tier)) return tier;
   }
-  return preferred; // unreachable if profile has ≥1 tier
+  throw new Error(
+    'No eligible route: configure a tier at or above the local safety floor.',
+  );
+};
+
+export const resolveRoutePair = (
+  profile: RouterProfile,
+  tier: RouterTier,
+  thinkingOverrides?: RouterThinkingByTier,
+): RoutePair => {
+  const routed = profile[tier];
+  if (!routed)
+    throw new Error('No eligible route: selected tier is not configured.');
+  const { provider, modelId } = parseCanonicalModelRef(routed.model);
+  return {
+    tier,
+    model: `${provider}/${modelId}`,
+    thinking:
+      thinkingOverrides?.[tier] ??
+      routed.thinking ??
+      (tier === 'micro' ? 'off' : tier),
+  };
 };
 
 export const buildRoutingDecision = (
@@ -51,17 +122,8 @@ export const buildRoutingDecision = (
   thinkingOverrides?: RouterThinkingByTier,
   isClassifier?: boolean,
 ): RoutingDecision => {
-  const routed = profile[tier];
-  if (!routed) {
-    throw new Error(
-      `Profile "${profileName}" has no configuration for the ${tier} tier.`,
-    );
-  }
-  const { provider, modelId } = parseCanonicalModelRef(routed.model);
-  const baseThinking =
-    routed.thinking ??
-    (tier === 'high' ? 'high' : tier === 'low' ? 'low' : 'medium');
-  const effectiveThinking = thinkingOverrides?.[tier] ?? baseThinking;
+  const pair = resolveRoutePair(profile, tier, thinkingOverrides);
+  const { provider, modelId } = parseCanonicalModelRef(pair.model);
 
   return {
     profile: profileName,
@@ -69,9 +131,9 @@ export const buildRoutingDecision = (
     phase,
     targetProvider: provider,
     targetModelId: modelId,
-    targetLabel: routed.model,
+    targetLabel: pair.model,
     reasoning,
-    thinking: effectiveThinking,
+    thinking: pair.thinking,
     timestamp: Date.now(),
     isClassifier,
   };
@@ -90,6 +152,7 @@ export const decideRouting = (
 ): RoutingDecision => {
   if (previousDecision?.profile !== profileName) previousDecision = undefined;
   const prompt = getLastUserText(context).toLowerCase();
+  const floor = localSafetyFloor(context);
   const recentConversation = getRecentConversationText(context);
   const toolResultCount = countToolResults(context);
   const wordCount = countWords(prompt);
@@ -192,11 +255,6 @@ export const decideRouting = (
     if (rules) {
       let highestTier: RouterTier | undefined;
       let winningRule: RoutingRule | undefined;
-      const tierRank: Record<RouterTier, number> = {
-        low: 1,
-        medium: 2,
-        high: 3,
-      };
 
       for (const rule of rules) {
         const matches = Array.isArray(rule.matches)
@@ -204,7 +262,7 @@ export const decideRouting = (
           : [rule.matches];
         const lowercaseMatches = matches.map((m) => m.toLowerCase());
         if (containsAny(prompt, lowercaseMatches)) {
-          if (!highestTier || tierRank[rule.tier] > tierRank[highestTier]) {
+          if (!highestTier || tierRank(rule.tier) > tierRank(highestTier)) {
             highestTier = rule.tier;
             winningRule = rule;
           }
@@ -239,7 +297,11 @@ export const decideRouting = (
             : 0),
       );
 
-      if (containsAny(prompt, explicitHighHints)) {
+      if (floor === 'micro') {
+        phase = 'lightweight';
+        tier = 'micro';
+        reasoning = 'micro-mechanical';
+      } else if (containsAny(prompt, explicitHighHints)) {
         phase = 'planning';
         tier = 'high';
         reasoning =
@@ -304,23 +366,47 @@ export const decideRouting = (
     }
   }
 
-  let isBudgetForced = false;
-  if (isBudgetExceeded && tier === 'high') {
-    tier = 'medium';
-    phase = 'implementation';
-    reasoning = `Budget exceeded. Downgraded from high to medium tier. (Original: ${reasoning})`;
-    isBudgetForced = true;
+  if (!allowed(tier, floor)) {
+    tier = floor;
+    phase = phaseForTier(tier);
+    reasoning = 'local-safety-floor';
   }
 
-  // Resolve to nearest available tier if the selected tier is disabled
-  const resolvedTier =
-    isBudgetForced && !profile.medium && profile.low
-      ? 'low'
-      : resolveAvailableTier(profile, tier);
+  let isBudgetForced = false;
+  if (isBudgetExceeded && tier === 'high') {
+    if (allowed('medium', floor)) {
+      tier = 'medium';
+      phase = 'implementation';
+      reasoning = 'Budget exceeded. Downgraded from high to medium tier.';
+      isBudgetForced = true;
+    } else {
+      reasoning = 'budget-floor-conflict';
+    }
+  }
+
+  // Keep the old soft-budget preference for low when medium is absent,
+  // but never let partial profiles undercut the local floor.
+  const budgetLow =
+    isBudgetForced && !profile.medium && profile.low && allowed('low', floor);
+  const resolvedTier = resolveAvailableTier(
+    profile,
+    budgetLow ? 'low' : tier,
+    floor,
+  );
   if (resolvedTier !== tier) {
-    reasoning = `Resolved from ${tier} to ${resolvedTier} tier (${tier} tier is not configured). Original: ${reasoning}`;
+    if (
+      reasoning !== 'local-safety-floor' &&
+      reasoning !== 'budget-floor-conflict'
+    ) {
+      reasoning = `Resolved from ${tier} to ${resolvedTier} tier (${tier} tier is not configured). Original: ${reasoning}`;
+    }
     phase = phaseForTier(resolvedTier);
     tier = resolvedTier;
+  }
+
+  if (isBudgetForced && tier === 'high') {
+    reasoning = 'budget-floor-conflict';
+    isBudgetForced = false;
   }
 
   const decision = buildRoutingDecision(

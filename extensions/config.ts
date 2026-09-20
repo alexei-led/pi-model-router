@@ -17,7 +17,9 @@ import type {
   RoutingRule,
 } from './types';
 
-export const ROUTER_TIERS = ['high', 'medium', 'low'] as const;
+import { ROUTER_TIERS } from './types';
+
+export { ROUTER_TIERS } from './types';
 
 // Pi accepts this model capability at runtime, but older peer type releases omit it.
 export const MAX_THINKING_LEVEL: ThinkingLevel = 'max';
@@ -31,7 +33,7 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   'xhigh',
   MAX_THINKING_LEVEL,
 ];
-export const ROUTER_PIN_VALUES = ['auto', 'high', 'medium', 'low'] as const;
+export const ROUTER_PIN_VALUES = ['auto', ...ROUTER_TIERS] as const;
 export type RouterPinValue = (typeof ROUTER_PIN_VALUES)[number];
 export const isRouterPinValue = (value: unknown): value is RouterPinValue =>
   ROUTER_PIN_VALUES.some((candidate) => candidate === value);
@@ -51,7 +53,7 @@ export const isThinkingLevel = (value: unknown): value is ThinkingLevel =>
   typeof value === 'string' && THINKING_LEVELS.some((level) => level === value);
 
 export const isRouterTier = (value: unknown): value is RouterTier =>
-  value === 'high' || value === 'medium' || value === 'low';
+  ROUTER_TIERS.some((tier) => tier === value);
 
 export const parseConfigFile = (path: string): ParsedConfigFile => {
   if (!existsSync(path)) {
@@ -124,6 +126,7 @@ export const mergeConfig = (
       high: mergeRawValue(existing.high, profile.high),
       medium: mergeRawValue(existing.medium, profile.medium),
       low: mergeRawValue(existing.low, profile.low),
+      micro: mergeRawValue(existing.micro, profile.micro),
     };
   }
 
@@ -274,10 +277,13 @@ export const normalizeTierConfig = (
     return undefined;
   }
 
-  const thinking = isThinkingLevel(value.thinking) ? value.thinking : 'medium';
+  const defaultThinking = tier === 'micro' ? 'off' : 'medium';
+  const thinking = isThinkingLevel(value.thinking)
+    ? value.thinking
+    : defaultThinking;
   if (value.thinking !== undefined && !isThinkingLevel(value.thinking)) {
     warnings.push(
-      `Profile "${profileName}" ${tier} tier has invalid thinking level. Defaulting to medium.`,
+      `Profile "${profileName}" ${tier} tier has invalid thinking level. Defaulting to ${defaultThinking}.`,
     );
   }
 
@@ -401,12 +407,20 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       hasModels ? normalizedModels : undefined,
     );
 
-    if (!high && !medium && !low) {
+    const micro = normalizeTierConfig(
+      profileRecord.micro,
+      name,
+      'micro',
+      warnings,
+      hasModels ? normalizedModels : undefined,
+    );
+
+    if (!high && !medium && !low && !micro) {
       warnings.push(`Profile "${name}" has no valid tiers. Skipped.`);
       continue;
     }
 
-    normalizedProfiles[name] = { high, medium, low };
+    normalizedProfiles[name] = { high, medium, low, micro };
   }
 
   const phaseBias =

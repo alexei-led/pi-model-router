@@ -285,9 +285,9 @@ describe('router provider', () => {
     expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
       expect.objectContaining({ reasoning: 'classifier' }),
     );
-    expect(s.actions.recordDebugDecision.mock.calls[0]?.[0].reasoning).not.toContain(
-      'do not persist',
-    );
+    expect(
+      s.actions.recordDebugDecision.mock.calls[0]?.[0].reasoning,
+    ).not.toContain('do not persist');
   });
 
   it('routes images to a capable model and errors when none exists', async () => {
@@ -379,5 +379,124 @@ describe('registry readiness', () => {
     );
     abort.abort();
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('four-level provider routing', () => {
+  const mechanicalContext: Context = {
+    messages: [{ role: 'user', content: 'git status --short', timestamp: 1 }],
+  };
+
+  it('delegates deterministic micro with off thinking without a classifier call', async () => {
+    const s = setup();
+    required(s.state.currentConfig.profiles.balanced).micro = {
+      model: 'test/small',
+    };
+    delete s.state.pinnedTierByProfile.balanced;
+    s.state.currentConfig.classifierModel = { model: 'test/primary' };
+    await consume(s.stream(mechanicalContext));
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.delegate.mock.calls[0]?.[0].id).toBe('small');
+    expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBeUndefined();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'micro',
+      thinking: 'off',
+    });
+  });
+
+  it.each(['micro', 'low', 'medium', 'high'] as const)(
+    'applies the image capability filter starting from %s',
+    async (tier) => {
+      const s = setup();
+      const profile = required(s.state.currentConfig.profiles.balanced);
+      profile.micro = { model: 'test/small' };
+      profile.low = { model: 'test/small' };
+      profile.medium = { model: 'test/small' };
+      s.state.pinnedTierByProfile.balanced = tier;
+      required(s.models[2]).input = ['text'];
+      required(s.models[0]).input = ['text', 'image'];
+      await consume(
+        s.stream({
+          messages: [
+            {
+              role: 'user',
+              timestamp: 1,
+              content: [
+                { type: 'text', text: 'pwd' },
+                { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+              ],
+            },
+          ],
+        }),
+      );
+      expect(s.delegate).toHaveBeenCalledOnce();
+      expect(s.delegate.mock.calls[0]?.[0].id).toBe('primary');
+      expect(s.state.lastDecision?.tier).toBe('high');
+    },
+  );
+
+  it('uses a micro image-capable fallback without raising the tier', async () => {
+    const s = setup();
+    required(s.state.currentConfig.profiles.balanced).micro = {
+      model: 'test/small',
+      fallbacks: ['test/fallback'],
+    };
+    s.state.pinnedTierByProfile.balanced = 'micro';
+    required(s.models[2]).input = ['text'];
+    required(s.models[1]).input = ['text', 'image'];
+    await consume(
+      s.stream({
+        messages: [
+          {
+            role: 'user',
+            timestamp: 1,
+            content: [
+              { type: 'text', text: 'pwd' },
+              { type: 'image', data: 'aGVsbG8=', mimeType: 'image/png' },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'micro',
+      thinking: 'off',
+    });
+  });
+
+  it('rejects a below-floor classifier answer without replacing the local route', async () => {
+    const s = setup();
+    delete s.state.pinnedTierByProfile.balanced;
+    s.state.currentConfig.classifierModel = { model: 'test/primary' };
+    s.delegate.mockReturnValueOnce(done('Tier: low\nReasoning: cheap'));
+    await consume(
+      s.stream({
+        messages: [
+          { role: 'user', content: 'design a migration', timestamp: 1 },
+        ],
+      }),
+    );
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.state.lastDecision?.tier).toBe('high');
+    expect(s.state.lastDecision?.isClassifier).toBe(false);
+  });
+
+  it('resolves a below-floor pin locally and fails unsafe partial profiles before generation', async () => {
+    const s = setup();
+    s.state.pinnedTierByProfile.balanced = 'micro';
+    s.state.currentConfig.classifierModel = { model: 'test/primary' };
+    await consume(s.stream());
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasoning: 'local-safety-floor',
+    });
+    s.state.currentConfig.profiles.balanced = { low: { model: 'test/small' } };
+    s.delegate.mockClear();
+    const { result } = await consume(s.stream());
+    expect(result.stopReason).toBe('error');
+    expect(result.errorMessage).toContain('No eligible route');
+    expect(s.delegate).not.toHaveBeenCalled();
   });
 });

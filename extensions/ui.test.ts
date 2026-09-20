@@ -368,3 +368,90 @@ describe('ui.ts', () => {
     });
   });
 });
+
+describe('four-tier rendering', () => {
+  it.each(['micro', 'low', 'medium', 'high'] as const)(
+    'renders %s saved decisions, pins and effort',
+    (tier) => {
+      const decision: RoutingDecision = {
+        profile: 'p',
+        tier,
+        phase:
+          tier === 'high'
+            ? 'planning'
+            : tier === 'medium'
+              ? 'implementation'
+              : 'lightweight',
+        targetProvider: 'test',
+        targetModelId: 'model',
+        targetLabel: 'test/model',
+        thinking: tier === 'micro' ? 'off' : tier,
+        reasoning: 'legacy local reason',
+        timestamp: 1,
+      };
+      const ctx = {
+        ui: {
+          setStatus: vi.fn(),
+          setWidget: vi.fn(),
+          theme: { fg: (_color: string, text: string) => text },
+        },
+      };
+      updateStatus(ctx as unknown as ExtensionContext, {
+        routerEnabled: true,
+        selectedProfile: 'p',
+        pinnedTierByProfile: { p: tier },
+        lastDecision: decision,
+        lastNonRouterModel: undefined,
+        accumulatedCost: 0,
+        widgetEnabled: true,
+        currentConfig: { profiles: {} },
+      });
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        'router',
+        expect.stringContaining(
+          `-> ${tier} -> test/model (${decision.thinking})`,
+        ),
+      );
+      expect(ctx.ui.setWidget.mock.calls[0]?.[1]).toContain(
+        `Route: ${tier} -> test/model (${decision.thinking})`,
+      );
+      expect(formatPinSummary({ p: tier })).toBe(`p:${tier}`);
+      expect(formatThinkingSummary({ p: { [tier]: decision.thinking } })).toBe(
+        `p(${tier}:${decision.thinking})`,
+      );
+    },
+  );
+});
+
+describe('local floor status', () => {
+  it.each(['local-safety-floor', 'budget-floor-conflict'])(
+    'shows the actual route rather than waiting when the floor rejects a pin: %s',
+    (reasoning) => {
+      const ctx = { ui: { setStatus: vi.fn(), setWidget: vi.fn() } };
+      updateStatus(ctx as unknown as ExtensionContext, {
+        routerEnabled: true,
+        selectedProfile: 'p',
+        pinnedTierByProfile: { p: 'micro' },
+        lastDecision: {
+          profile: 'p',
+          tier: 'high',
+          phase: 'planning',
+          targetProvider: 'test',
+          targetModelId: 'model',
+          targetLabel: 'test/model',
+          thinking: 'high',
+          timestamp: 1,
+          reasoning,
+        },
+        lastNonRouterModel: undefined,
+        accumulatedCost: 0,
+        widgetEnabled: false,
+        currentConfig: { profiles: {} },
+      });
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        'router',
+        expect.stringContaining('[pin:micro] -> high -> test/model'),
+      );
+    },
+  );
+});
