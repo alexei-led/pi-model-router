@@ -21,7 +21,8 @@ This fork is maintained at [alexei-led/pi-model-router](https://github.com/alexe
 - **Per-Turn Routing**: Intelligently chooses between `high`, `medium`, `low`, and `micro` tiers for every turn based on task intent and complexity.
 - **Task-Aware Heuristics**: Detects planning vs. implementation vs. lightweight tasks using keyword analysis, word count, and conversation history.
 - **Advanced Controls**: Includes built-in support for:
-  - **LLM Intent Classifier**: Optionally use a fast model to categorize intent (overrides heuristics).
+  - **Jev Advisor**: Optionally choose a validated model/thinking pair within the active profile, subject to local safety and capabilities.
+  - **LLM Intent Classifier**: Optionally use a fast Pi model for tier advice when Jev is disabled or unavailable; local safety still wins.
   - **Custom Rules**: Define keyword-based tier overrides for specific patterns (e.g., `deploy` → `high`).
   - **Cost Budgeting**: Set a session spend limit; high tier downgrades to medium once exceeded, unless the local safety floor forbids it.
   - **Fallback Chains**: Automatic retry with alternative models if the primary choice fails.
@@ -93,9 +94,10 @@ pi -e ./extensions/index.ts
 
 ## Reliability
 
-- Both generation and classification use Pi's provider registry, including native/custom providers and credential-specific URLs.
-- Fallbacks run only before content is emitted; cancellation does not retry.
-- Classifier requests use isolated context, a 10-second cancellation deadline and a 256-token output limit. Failures retain local routing.
+- Generation and classification use Pi's provider registry, including native/custom providers and credential-specific URLs. Only the optional Jev advisor uses separate HTTPS transport.
+- Fallbacks run only before content is emitted; cancellation does not retry. Every target must support the requested input and exact thinking level; unsupported effort is not silently reduced.
+- Jev and classifier share one 1500 ms routing deadline. Jev gets at most 750 ms (or its shorter configured timeout); the classifier gets only the remainder and a 256-token output limit. Advisor failures retain local routing, not a failed generation.
+- Valid same-turn tool continuations reuse the actual prior route before either advisor. Pins, rules, budget gates and deterministic mechanical tasks also skip advisors.
 - Context trimming preserves system instructions and whole active tool turns. It is a text estimate, not a guarantee that images or a large active turn fit.
 
 See [architecture](https://github.com/alexei-led/pi-model-router/blob/main/docs/ARCHITECTURE.md) and [release procedure](https://github.com/alexei-led/pi-model-router/blob/main/docs/RELEASING.md).
@@ -106,6 +108,10 @@ Copy the example config to one of:
 
 - `~/.pi/agent/model-router.json` (Global)
 - `.pi/model-router.json` (Project-specific)
+
+The example's model IDs and thinking levels are illustrative: verify them against
+your Pi registry and account. Remove the top-level and per-profile `jev` sections
+when copying to project config; they are user-only and otherwise produce a warning.
 
 The extension stores the last selected profile in `~/.pi/agent/model-router-state.json`. It restores this preference only when Pi starts on the router provider without an explicit `--model` selection. Branch-specific state remains in Pi session entries and takes precedence when a session is resumed.
 
@@ -119,7 +125,8 @@ The extension stores the last selected profile in `~/.pi/agent/model-router-stat
     "auto": {
       "high": { "model": "openai/gpt-5.4-pro", "thinking": "high" },
       "medium": { "model": "google/gemini-flash-latest", "thinking": "medium" },
-      "low": { "model": "openai/gpt-5.4-nano", "thinking": "low" }
+      "low": { "model": "openai/gpt-5.4-nano", "thinking": "off" },
+      "micro": { "model": "openai/gpt-5.4-nano", "thinking": "off" }
     }
   }
 }
@@ -129,8 +136,9 @@ The extension stores the last selected profile in `~/.pi/agent/model-router-stat
 
 | Field                   | Description                                                                       |
 | ----------------------- | --------------------------------------------------------------------------------- |
-| `classifierModel`       | (Optional) Model used to categorize intent. Supports model aliases. If omitted, fast heuristics are used. |
-| `maxSessionBudget`      | (Optional) Soft generation-cost threshold in USD. Downgrades high to medium, or low if medium is absent, subject to the local safety floor. Not a spending cap; classifier cost is excluded. |
+| `classifierModel`       | (Optional) Pi model used for tier advice if Jev supplies no valid choice. Supports model aliases. If neither advisor supplies advice, local heuristics are used. |
+| `jev`                   | (Optional, user config only) External advisor settings; requires global enablement, a key and an explicit `profiles.<name>.jev.enabled` opt-in. Disabled by default. |
+| `maxSessionBudget`      | (Optional) Soft generation-cost threshold in USD. Downgrades high to medium, or low if medium is absent, subject to the local safety floor. Not a spending cap; classifier and Jev costs are excluded. |
 | `phaseBias`             | (0.0 - 1.0) Stickiness of the current phase. Higher = more stable. Default `0.5`. |
 | `rules`                 | List of custom keyword rules (e.g. `{ "matches": "deploy", "tier": "high" }`).    |
 | `models`                | (Optional) Map of model aliases to definitions with `model`, `contextWindow`, `maxTokens`. |
@@ -161,11 +169,17 @@ conflicts retain the eligible route and report `budget-floor-conflict`.
 
 ### Optional Jev advisor: user config only
 
-The Jev adapter/configuration is available; provider routing integration is staged
-separately. It makes one bounded TypeSafe System One Choice request, without
-retries. Advice is restricted to locally supplied tier/model/thinking candidates;
-missing keys, malformed responses, `uncertain`, low confidence, timeout and HTTP
-errors return no advice.
+Jev makes one bounded TypeSafe System One Choice request per eligible new user
+turn, without retries. It chooses only among the active profile's available
+primary tier/model/thinking pairs at or above the local safety floor. Fallback
+models are not extra Jev choices. Pins, custom rules, budget gates, deterministic
+micro tasks and tool continuations skip Jev and the classifier.
+
+Missing keys, malformed responses, `uncertain`, low confidence, timeout and HTTP
+errors fall through to the configured Pi classifier within the same deadline,
+then local heuristics. Jev cannot select another profile or an arbitrary model,
+provider account or thinking level. Explicit generation fallback chains may
+still cross providers, as configured by you.
 
 Configure Jev **only** in `~/.pi/agent/model-router.json` (or the agent directory
 selected by Pi). Both global enablement and an explicit user-level profile opt-in
@@ -188,7 +202,10 @@ profile opt-ins, are ignored with a warning, before merging user credentials.
   "profiles": {
     "personal": {
       "jev": { "enabled": true },
-      "medium": { "model": "google/gemini-flash-latest", "thinking": "medium" }
+      "high": { "model": "openai/gpt-5.4-pro", "thinking": "high" },
+      "medium": { "model": "google/gemini-flash-latest", "thinking": "medium" },
+      "low": { "model": "openai/gpt-5.4-nano", "thinking": "off" },
+      "micro": { "model": "openai/gpt-5.4-nano", "thinking": "off" }
     }
   }
 }
@@ -198,7 +215,22 @@ The endpoint, model, timeout, confidence threshold, state limit and mode shown
 above are defaults. Only HTTPS endpoints without embedded credentials, query
 parameters or fragments are accepted. Timeout must be positive and at most
 1500 ms, confidence must be 0–1, and the task-summary limit must be 1–12000
-characters. The adapter also respects the caller's remaining routing deadline.
+characters. Provider routing further caps Jev at 750 ms within the fixed 1500 ms
+shared advisor deadline; increasing `timeoutMs` does not extend those caps.
+
+**External data:** Jev receives the latest user text, truncated to `maxStateChars`
+and marked untrusted, plus candidate tier/model/thinking identifiers. This is not
+a redaction or summarization service: the bounded text may still contain private
+data. It does not send the full transcript, tool output, system prompt or config.
+Approve external-data handling before enabling a profile, especially work. Local
+keyword safety checks are conservative routing heuristics, not a security sandbox.
+
+Router state and debug history retain only allowlisted local decision metadata:
+source, tier, model, thinking, phase, timing and fixed error classes
+(`advisor-unavailable` or `deadline`). They never retain the Jev key, endpoint,
+request text, raw response or remote explanations. Older saved explanations are
+discarded as non-rendered `legacy` metadata; Pi's own conversation transcript is
+separate from router state.
 
 For chezmoi, use a **private template**, for example
 `private_model-router.json.tmpl` under your agent-directory source path. Render

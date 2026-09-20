@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Add the optional `micro` mechanical tier with `off` thinking by default; existing three-tier configs and saved sessions remain supported.
+- Enforce local safety floors, image capabilities and exact model thinking support across pins, rules, budgets, advisor choices and fallback targets. Profiles without an eligible route now fail before generation rather than lowering safety.
+- Add opt-in Jev System One Choice advice with user-only credentials and profile enablement, bounded task text, validated local route IDs and no routing retry.
+- Share a 1500 ms routing deadline between Jev (at most 750 ms) and the Pi classifier; optional advisor failures retain local routing. Reuse validated same-turn tool routes before advisor calls.
+- Persist only allowlisted decision metadata and closed reason codes; discard legacy free-form explanations and keep advisor secrets, request text and raw responses out of router state and UI.
+- Document private chezmoi/1Password rendering, external-data approval, fallback limits and verification boundaries.
+
 ## 0.5.2 — 2026-09-20
 
 - Fix context trimming so preserved system instructions count toward the actual token estimate.

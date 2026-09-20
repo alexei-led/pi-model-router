@@ -52,15 +52,17 @@
         "fallbacks": ["sonnet"]
       },
       "medium": { "model": "flash", "thinking": "medium" },
-      "low": { "model": "nano", "thinking": "low" },
+      "low": { "model": "nano", "thinking": "off" },
       "micro": { "model": "nano", "thinking": "off" }
     },
     "cheap": {
+      "jev": { "enabled": false },
       "high": { "model": "flash", "thinking": "low" },
       "medium": { "model": "nano", "thinking": "off" },
       "low": { "model": "google/gemini-flash-lite-latest", "thinking": "off" }
     },
     "deep": {
+      "jev": { "enabled": false },
       "high": {
         "model": "openai/o1-preview",
         "thinking": "xhigh",
@@ -70,6 +72,7 @@
       "low": { "model": "flash", "thinking": "low" }
     },
     "anthropic": {
+      "jev": { "enabled": false },
       "high": {
         "model": "sonnet",
         "thinking": "high"
