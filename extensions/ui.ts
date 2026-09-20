@@ -1,16 +1,10 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type {
-  RouterConfig,
   RouterPinByProfile,
+  RouterStatusState,
   RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
-
-const getEffectiveThinking = (
-  thinkingByProfile: RouterThinkingByProfile,
-  profileName: string,
-  decision: RoutingDecision,
-) => thinkingByProfile[profileName]?.[decision.tier] ?? decision.thinking;
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
@@ -53,16 +47,18 @@ export const formatModelRef = (ref: string | undefined): string => {
 
 export const updateStatus = (
   ctx: ExtensionContext,
-  routerEnabled: boolean,
-  selectedProfile: string | undefined,
-  pinnedTierByProfile: RouterPinByProfile,
-  thinkingByProfile: RouterThinkingByProfile,
-  lastDecision: RoutingDecision | undefined,
-  lastNonRouterModel: string | undefined,
-  accumulatedCost: number,
-  widgetEnabled: boolean,
-  currentConfig: RouterConfig,
+  state: RouterStatusState,
 ) => {
+  const {
+    routerEnabled,
+    selectedProfile,
+    pinnedTierByProfile,
+    lastDecision,
+    lastNonRouterModel,
+    accumulatedCost,
+    widgetEnabled,
+    currentConfig,
+  } = state;
   const activeRouterProfile = routerEnabled ? selectedProfile : undefined;
   const statusProfile = selectedProfile ?? 'none';
   const activePin = selectedProfile
@@ -77,12 +73,7 @@ export const updateStatus = (
 
     let statusText: string;
     if (lastDecision && matchesProfile && matchesPin) {
-      const effectiveThinking = getEffectiveThinking(
-        thinkingByProfile,
-        activeRouterProfile,
-        lastDecision,
-      );
-      statusText = `router:${activeRouterProfile}${pinLabel} -> ${lastDecision.tier} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${effectiveThinking})`;
+      statusText = `router:${activeRouterProfile}${pinLabel} -> ${lastDecision.tier} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`;
     } else {
       statusText = `router:${activeRouterProfile}${pinLabel} -> waiting`;
     }
@@ -106,16 +97,11 @@ export const updateStatus = (
         : ''),
   ];
   if (lastDecision && lastDecision.profile === statusProfile) {
-    const effectiveThinking = getEffectiveThinking(
-      thinkingByProfile,
-      statusProfile,
-      lastDecision,
-    );
     const flags = getDecisionFlags(lastDecision);
     const flagsStr = flags.length > 0 ? ` [${flags.join(',')}]` : '';
 
     widgetLines.push(
-      `Route: ${lastDecision.tier}${flagsStr} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${effectiveThinking})`,
+      `Route: ${lastDecision.tier}${flagsStr} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`,
       `Phase: ${lastDecision.phase}`,
     );
   } else if (!routerEnabled && lastNonRouterModel) {

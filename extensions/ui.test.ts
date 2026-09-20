@@ -1,6 +1,11 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
-import type { RouterConfig, RoutingDecision } from './types';
+import type {
+  RouterConfig,
+  RouterStatusState,
+  RouterThinkingByProfile,
+  RoutingDecision,
+} from './types';
 import {
   formatDecision,
   formatModelRef,
@@ -11,7 +16,7 @@ import {
 
 describe('ui.ts', () => {
   describe('formatDecision', () => {
-    it('should format routing decision correctly', () => {
+    it('format routing decision correctly', () => {
       const decision: RoutingDecision = {
         profile: 'balanced',
         tier: 'high',
@@ -31,7 +36,7 @@ describe('ui.ts', () => {
   });
 
   describe('formatPinSummary', () => {
-    it('should format pin configurations sorted alphabetically', () => {
+    it('format pin configurations sorted alphabetically', () => {
       const pins = {
         cheap: 'low' as const,
         balanced: 'medium' as const,
@@ -39,13 +44,13 @@ describe('ui.ts', () => {
       expect(formatPinSummary(pins)).toBe('balanced:medium, cheap:low');
     });
 
-    it('should return none if empty', () => {
+    it('return none if empty', () => {
       expect(formatPinSummary({})).toBe('none');
     });
   });
 
   describe('formatThinkingSummary', () => {
-    it('should format thinking configurations sorted alphabetically', () => {
+    it('format thinking configurations sorted alphabetically', () => {
       const thinking = {
         balanced: { high: 'xhigh' as const, medium: 'low' as const },
         cheap: { low: 'off' as const },
@@ -55,13 +60,13 @@ describe('ui.ts', () => {
       );
     });
 
-    it('should return none if empty', () => {
+    it('return none if empty', () => {
       expect(formatThinkingSummary({})).toBe('none');
     });
   });
 
   describe('formatModelRef', () => {
-    it('should return model name or none', () => {
+    it('return model name or none', () => {
       expect(formatModelRef('openai/gpt-4o')).toBe('openai/gpt-4o');
       expect(formatModelRef(undefined)).toBe('none');
     });
@@ -85,9 +90,32 @@ describe('ui.ts', () => {
       profiles: {},
     };
 
-    it('should remove status if disabled', () => {
+    const renderStatus = (
+      ctx: ExtensionContext,
+      routerEnabled: boolean,
+      selectedProfile: string | undefined,
+      pinnedTierByProfile: RouterStatusState['pinnedTierByProfile'],
+      _thinkingByProfile: RouterThinkingByProfile,
+      lastDecision: RoutingDecision | undefined,
+      lastNonRouterModel: string | undefined,
+      accumulatedCost: number,
+      widgetEnabled: boolean,
+      currentConfig: RouterConfig,
+    ) =>
+      updateStatus(ctx, {
+        routerEnabled,
+        selectedProfile,
+        pinnedTierByProfile,
+        lastDecision,
+        lastNonRouterModel,
+        accumulatedCost,
+        widgetEnabled,
+        currentConfig,
+      });
+
+    it('remove status if disabled', () => {
       const ctx = buildMockCtx() as unknown as ExtensionContext;
-      updateStatus(
+      renderStatus(
         ctx,
         false,
         'balanced',
@@ -104,9 +132,9 @@ describe('ui.ts', () => {
       expect(ctx.ui.setWidget).toHaveBeenCalledWith('router', undefined);
     });
 
-    it('should update status to waiting if router is enabled but no last decision matches', () => {
+    it('update status to waiting if router is enabled but no last decision matches', () => {
       const ctx = buildMockCtx() as unknown as ExtensionContext;
-      updateStatus(
+      renderStatus(
         ctx,
         true,
         'balanced',
@@ -125,7 +153,7 @@ describe('ui.ts', () => {
       );
     });
 
-    it('should display last routed decision information when active profile matches', () => {
+    it('display last routed decision information when active profile matches', () => {
       const ctx = buildMockCtx() as unknown as ExtensionContext;
       const decision: RoutingDecision = {
         profile: 'balanced',
@@ -139,7 +167,7 @@ describe('ui.ts', () => {
         timestamp: Date.now(),
       };
 
-      updateStatus(
+      renderStatus(
         ctx,
         true,
         'balanced',
@@ -152,30 +180,29 @@ describe('ui.ts', () => {
         mockConfig,
       );
 
-      // Check Status
       expect(ctx.ui.setStatus).toHaveBeenCalledWith(
         'router',
-        '🚥 router:balanced [pin:high] -> high -> google/gemini-2.5-pro (xhigh)',
+        '🚥 router:balanced [pin:high] -> high -> google/gemini-2.5-pro (high)',
       );
 
-      // Check Widget Lines
       expect(ctx.ui.setWidget).toHaveBeenCalled();
       const widgetCalls = vi.mocked(ctx.ui.setWidget).mock.calls[0];
+      if (!widgetCalls) throw new Error('Missing widget call');
       expect(widgetCalls[0]).toBe('router');
-      const widgetLines = widgetCalls[1];
+      const widgetLines = Array.isArray(widgetCalls[1]) ? widgetCalls[1] : [];
       expect(widgetLines).toContain('[dim]Router: enabled[/dim]');
       expect(widgetLines).toContain('[dim]Profile: balanced (active)[/dim]');
       expect(widgetLines).toContain('[dim]Pin: high[/dim]');
       expect(widgetLines).toContain('[dim]Cost: $0.0050 / $10.00[/dim]');
       expect(widgetLines).toContain(
-        '[dim]Route: high -> google/gemini-2.5-pro (xhigh)[/dim]',
+        '[dim]Route: high -> google/gemini-2.5-pro (high)[/dim]',
       );
       expect(widgetLines).toContain('[dim]Phase: planning[/dim]');
     });
 
-    it('should display fallback model when router is disabled and lastNonRouterModel is set', () => {
+    it('display fallback model when router is disabled and lastNonRouterModel is set', () => {
       const ctx = buildMockCtx() as unknown as ExtensionContext;
-      updateStatus(
+      renderStatus(
         ctx,
         false,
         'balanced',
@@ -188,19 +215,18 @@ describe('ui.ts', () => {
         mockConfig,
       );
 
-      // Status should be cleared since router is not active
       expect(ctx.ui.setStatus).toHaveBeenCalledWith('router', undefined);
 
-      // Widget should show fallback model
       const widgetCalls = vi.mocked(ctx.ui.setWidget).mock.calls[0];
-      const widgetLines = widgetCalls[1];
+      if (!widgetCalls) throw new Error('Missing widget call');
+      const widgetLines = Array.isArray(widgetCalls[1]) ? widgetCalls[1] : [];
       expect(widgetLines).toContain('[dim]Router: disabled[/dim]');
       expect(widgetLines).toContain(
         '[dim]Fallback: anthropic/claude-3.5-sonnet[/dim]',
       );
     });
 
-    it('should show pins line when multiple profiles have pins', () => {
+    it('show pins line when multiple profiles have pins', () => {
       const ctx = buildMockCtx() as unknown as ExtensionContext;
       const decision: RoutingDecision = {
         profile: 'balanced',
@@ -214,7 +240,7 @@ describe('ui.ts', () => {
         timestamp: Date.now(),
       };
 
-      updateStatus(
+      renderStatus(
         ctx,
         true,
         'balanced',
@@ -228,13 +254,14 @@ describe('ui.ts', () => {
       );
 
       const widgetCalls = vi.mocked(ctx.ui.setWidget).mock.calls[0];
-      const widgetLines = widgetCalls[1];
+      if (!widgetCalls) throw new Error('Missing widget call');
+      const widgetLines = Array.isArray(widgetCalls[1]) ? widgetCalls[1] : [];
       expect(widgetLines).toContain(
         '[dim]Pins: balanced:medium, cheap:low[/dim]',
       );
     });
 
-    it('should show waiting when active profile does not match lastDecision profile', () => {
+    it('show waiting when active profile does not match lastDecision profile', () => {
       const ctx = buildMockCtx() as unknown as ExtensionContext;
       const decision: RoutingDecision = {
         profile: 'other-profile',
@@ -248,7 +275,7 @@ describe('ui.ts', () => {
         timestamp: Date.now(),
       };
 
-      updateStatus(
+      renderStatus(
         ctx,
         true,
         'balanced',
@@ -267,7 +294,7 @@ describe('ui.ts', () => {
       );
     });
 
-    it('should omit budget denominator from widget when maxSessionBudget is undefined', () => {
+    it('omit budget denominator from widget when maxSessionBudget is undefined', () => {
       const ctx = buildMockCtx() as unknown as ExtensionContext;
       const noBudgetConfig: RouterConfig = {
         profiles: {},
@@ -284,7 +311,7 @@ describe('ui.ts', () => {
         timestamp: Date.now(),
       };
 
-      updateStatus(
+      renderStatus(
         ctx,
         true,
         'balanced',
@@ -297,13 +324,13 @@ describe('ui.ts', () => {
         noBudgetConfig,
       );
 
-      const widgetLines = vi.mocked(ctx.ui.setWidget).mock
-        .calls[0][1] as unknown as string[];
-      const costLine = widgetLines.find((l: string) => l.includes('Cost'));
+      const widgetLines = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
+      const lines = Array.isArray(widgetLines) ? widgetLines : [];
+      const costLine = lines.find((l: string) => l.includes('Cost'));
       expect(costLine).toBe('[dim]Cost: $0.5000[/dim]');
     });
 
-    it('should omit budget denominator when maxSessionBudget is 0 (falsy)', () => {
+    it('omit budget denominator when maxSessionBudget is 0 (falsy)', () => {
       const ctx = buildMockCtx() as unknown as ExtensionContext;
       const zeroBudgetConfig: RouterConfig = {
         maxSessionBudget: 0,
@@ -321,7 +348,7 @@ describe('ui.ts', () => {
         timestamp: Date.now(),
       };
 
-      updateStatus(
+      renderStatus(
         ctx,
         true,
         'balanced',
@@ -334,10 +361,9 @@ describe('ui.ts', () => {
         zeroBudgetConfig,
       );
 
-      const widgetLines = vi.mocked(ctx.ui.setWidget).mock
-        .calls[0][1] as unknown as string[];
-      const costLine = widgetLines.find((l: string) => l.includes('Cost'));
-      // maxSessionBudget=0 is falsy, so no denominator is shown
+      const widgetLines = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
+      const lines = Array.isArray(widgetLines) ? widgetLines : [];
+      const costLine = lines.find((l: string) => l.includes('Cost'));
       expect(costLine).toBe('[dim]Cost: $0.0000[/dim]');
     });
   });

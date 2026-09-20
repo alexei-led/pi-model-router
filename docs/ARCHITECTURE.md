@@ -33,12 +33,16 @@ The extension is modularized for maintainability:
 
 - `extensions/index.ts`: Orchestrator. Manages state, hooks into `pi` events, and wires modules together.
 - `extensions/provider.ts`: Implements the `router` provider and the delegation/retry loop.
-- `extensions/routing.ts`: Core decision logic, heuristics, and the LLM classifier.
-- `extensions/config.ts`: Loads, merges, and normalizes the JSON configuration.
+- `extensions/routing.ts`: Pure tier selection, heuristics, phase bias and routing decisions.
+- `extensions/classifier.ts`: Isolated, bounded classifier request and response parsing.
+- `extensions/context.ts`: Small message/text extraction helpers shared by routing and classification.
+- `extensions/config.ts`: Loads, merges, validates and normalizes the JSON configuration.
 - `extensions/commands.ts`: Registers all `/router` subcommands and their autocompletions.
 - `extensions/ui.ts`: Manages the status line and the optional state widget.
 - `extensions/state.ts`: Handles session-persisted state and snapshots.
 - `extensions/types.ts`: Centralized interface and type definitions.
+
+The dependency direction is one-way: `index` wires lifecycle, `provider` delegates through Pi and calls `routing`/`classifier`, while `routing` and `classifier` use pure `context` and `config` helpers. No production import cycle is allowed.
 
 ## State & Persistence
 

@@ -21,7 +21,23 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error",
+        "useAwaitThenable": "error",
+        "useExhaustiveSwitchCases": "error",
+        "useImportsFirst": "error"
+      },
+      "suspicious": {
+        "noAsyncPromiseExecutor": "error",
+        "noImportCycles": "error",
+        "noNestedPromises": "error"
+      },
+      "style": {
+        "useImportType": "error",
+        "useNodejsImportProtocol": "error"
+      }
     }
   },
   "assist": {

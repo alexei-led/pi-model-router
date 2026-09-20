@@ -10,7 +10,14 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { registerRouterProvider, waitForRegistry } from './provider';
-import { done, events, failure, message, model } from './test/fixtures';
+import {
+  done,
+  events,
+  failure,
+  message,
+  model,
+  required,
+} from './test/fixtures';
 
 type State = Parameters<typeof registerRouterProvider>[1];
 type MutableState = { -readonly [K in keyof State]: State[K] };
@@ -68,10 +75,11 @@ const setup = () => {
     const config = register.mock.calls.at(-1)?.[1];
     if (!config?.streamSimple)
       throw new Error('Router provider not registered');
+    const streamOptions = signal ? { signal } : undefined;
     return config.streamSimple(
       model('balanced', { provider: 'router', contextWindow: 8192 }),
       normalizeContext(context),
-      { signal },
+      streamOptions,
     );
   };
   return { models, registry, state, delegate, register, api, actions, stream };
@@ -100,7 +108,7 @@ describe('router provider', () => {
 
   it('does not pass or report thinking for a non-reasoning target', async () => {
     const s = setup();
-    s.models[0].reasoning = false;
+    required(s.models[0]).reasoning = false;
     await consume(s.stream());
     expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBeUndefined();
     expect(s.state.lastDecision?.thinking).toBe('off');
@@ -115,7 +123,8 @@ describe('router provider', () => {
     });
     registerRouterProvider(s.api, s.state, s.actions);
     expect(s.register).toHaveBeenCalledTimes(1);
-    s.state.currentConfig.profiles.balanced.high = {
+    const balanced = required(s.state.currentConfig.profiles.balanced);
+    balanced.high = {
       model: 'test/primary',
       resolvedThinkingLevels: ['xhigh'],
     };
@@ -228,11 +237,10 @@ describe('router provider', () => {
 
   it('keeps the prior Google model on a thinking tool continuation', async () => {
     const s = setup();
-    s.models[0].provider = 'google';
-    s.models[1].provider = 'google';
-    s.state.currentConfig.profiles.balanced.medium = {
-      model: 'google/primary',
-    };
+    required(s.models[0]).provider = 'google';
+    required(s.models[1]).provider = 'google';
+    const balanced = required(s.state.currentConfig.profiles.balanced);
+    balanced.medium = { model: 'google/primary' };
     s.state.lastDecision = {
       profile: 'balanced',
       tier: 'medium',
@@ -263,7 +271,7 @@ describe('router provider', () => {
   it('routes images to a capable model and errors when none exists', async () => {
     const s = setup();
     s.state.pinnedTierByProfile.balanced = 'low';
-    s.models[2].input = ['text'];
+    required(s.models[2]).input = ['text'];
     const context: Context = {
       messages: [
         {
@@ -285,9 +293,9 @@ describe('router provider', () => {
     const s = setup();
     s.delegate.mockReturnValueOnce(failure());
     const context: Context = {
-      systemPrompt: 'Keep instructions',
+      systemPrompt: 's'.repeat(8000),
       messages: [
-        { role: 'user', content: 'x'.repeat(10000), timestamp: 1 },
+        { role: 'user', content: 'x'.repeat(300), timestamp: 1 },
         message({
           content: [
             { type: 'toolCall', id: 'call', name: 'read', arguments: {} },
@@ -297,7 +305,7 @@ describe('router provider', () => {
           role: 'toolResult',
           toolCallId: 'call',
           toolName: 'read',
-          content: [{ type: 'text', text: 'x'.repeat(4000) }],
+          content: [{ type: 'text', text: 'x'.repeat(300) }],
           timestamp: 1,
           isError: false,
         },
@@ -309,7 +317,7 @@ describe('router provider', () => {
     expect(delegated?.messages.filter((m) => m.role !== 'system')).toEqual([
       context.messages[3],
     ]);
-    expect(delegated?.messages[0].role).toBe('system');
+    expect(delegated?.messages[0]?.role).toBe('system');
     expect(context.messages).toHaveLength(4);
   });
 

@@ -28,7 +28,7 @@ describe('state.ts', () => {
   };
 
   describe('last router profile', () => {
-    it('should validate last-profile state', () => {
+    it('validate last-profile state', () => {
       expect(
         isRouterLastProfileState({
           selectedProfile: 'balanced',
@@ -43,14 +43,14 @@ describe('state.ts', () => {
       );
     });
 
-    it('should save and load the last profile', () => {
+    it('save and load the last profile', () => {
       const agentDir = createTempDir();
 
       expect(saveLastRouterProfile('balanced', agentDir)).toBe(true);
       expect(loadLastRouterProfile(agentDir)).toBe('balanced');
     });
 
-    it('should ignore missing or malformed state', () => {
+    it('ignore missing or malformed state', () => {
       const agentDir = createTempDir();
 
       expect(loadLastRouterProfile(agentDir)).toBeUndefined();
@@ -58,7 +58,7 @@ describe('state.ts', () => {
       expect(loadLastRouterProfile(agentDir)).toBeUndefined();
     });
 
-    it('should return false when the state cannot be written', () => {
+    it('return false when the state cannot be written', () => {
       const missingDir = join(createTempDir(), 'missing');
 
       expect(saveLastRouterProfile('balanced', missingDir)).toBe(false);
@@ -66,13 +66,13 @@ describe('state.ts', () => {
   });
 
   describe('isRouterPersistedState', () => {
-    it('should return false for non-objects or null', () => {
+    it('return false for non-objects or null', () => {
       expect(isRouterPersistedState(null)).toBe(false);
       expect(isRouterPersistedState('string')).toBe(false);
       expect(isRouterPersistedState(123)).toBe(false);
     });
 
-    it('should return false if required properties are missing or wrong type', () => {
+    it('return false if required properties are missing or wrong type', () => {
       expect(isRouterPersistedState({ enabled: true })).toBe(false);
       expect(
         isRouterPersistedState({
@@ -83,7 +83,7 @@ describe('state.ts', () => {
       ).toBe(false);
     });
 
-    it('should return true for valid persisted state objects', () => {
+    it('return true for valid persisted state objects', () => {
       const state = {
         enabled: true,
         selectedProfile: 'balanced',
@@ -94,7 +94,7 @@ describe('state.ts', () => {
   });
 
   describe('buildPersistedState', () => {
-    it('should build a state object matching the interface requirements', () => {
+    it('build a state object matching the interface requirements', () => {
       const decision: RoutingDecision = {
         profile: 'balanced',
         tier: 'high',
@@ -107,18 +107,18 @@ describe('state.ts', () => {
         timestamp: Date.now(),
       };
 
-      const state = buildPersistedState(
-        true,
-        'balanced',
-        { balanced: 'high' },
-        { balanced: { high: 'xhigh' } },
-        true,
-        false,
-        [decision],
-        decision,
-        'openai/gpt-4o',
-        0.0045,
-      );
+      const state = buildPersistedState({
+        routerEnabled: true,
+        selectedProfile: 'balanced',
+        pinnedTierByProfile: { balanced: 'high' },
+        thinkingByProfile: { balanced: { high: 'xhigh' } },
+        debugEnabled: true,
+        widgetEnabled: false,
+        debugHistory: [decision],
+        lastDecision: decision,
+        lastNonRouterModel: 'openai/gpt-4o',
+        accumulatedCost: 0.0045,
+      });
 
       expect(state.enabled).toBe(true);
       expect(state.selectedProfile).toBe('balanced');
@@ -135,19 +135,19 @@ describe('state.ts', () => {
       expect(state.timestamp).toBeGreaterThan(0);
     });
 
-    it('should handle undefined selectedProfile', () => {
-      const state = buildPersistedState(
-        false,
-        undefined,
-        {},
-        {},
-        false,
-        false,
-        [],
-        undefined,
-        undefined,
-        0,
-      );
+    it('handle undefined selectedProfile', () => {
+      const state = buildPersistedState({
+        routerEnabled: false,
+        selectedProfile: undefined,
+        pinnedTierByProfile: {},
+        thinkingByProfile: {},
+        debugEnabled: false,
+        widgetEnabled: false,
+        debugHistory: [],
+        lastDecision: undefined,
+        lastNonRouterModel: undefined,
+        accumulatedCost: 0,
+      });
       expect(state.selectedProfile).toBe('');
       expect(state.pinTier).toBeUndefined();
     });

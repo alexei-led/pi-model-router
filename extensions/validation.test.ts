@@ -19,9 +19,9 @@ describe('configuration boundaries', () => {
         local: { medium: { model: 'test/local', reasoning: false } },
       },
     });
-    expect(result.config.profiles.local.medium?.resolvedThinkingLevels).toEqual(
-      [],
-    );
+    expect(
+      result.config.profiles.local?.medium?.resolvedThinkingLevels,
+    ).toEqual([]);
   });
   it.each([null, [], 'wrong'])(
     'ignores malformed profile entries %j while preserving valid config',
@@ -72,20 +72,20 @@ describe('persisted state boundary', () => {
   });
   it('snapshots nested maps independently of live state', () => {
     const thinking = { balanced: { high: 'high' as const } };
-    const state = buildPersistedState(
-      true,
-      'balanced',
-      {},
-      thinking,
-      false,
-      false,
-      [],
-      undefined,
-      undefined,
-      0,
-    );
-    delete state.thinkingByProfile?.balanced.high;
-    expect(thinking.balanced.high).toBe('high');
+    const state = buildPersistedState({
+      routerEnabled: true,
+      selectedProfile: 'balanced',
+      pinnedTierByProfile: {},
+      thinkingByProfile: thinking,
+      debugEnabled: false,
+      widgetEnabled: false,
+      debugHistory: [],
+      lastDecision: undefined,
+      lastNonRouterModel: undefined,
+      accumulatedCost: 0,
+    });
+    delete state.thinkingByProfile?.balanced?.high;
+    expect(thinking.balanced?.high).toBe('high');
     expect(isRouterPersistedState(state)).toBe(true);
   });
 });
