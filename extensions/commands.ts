@@ -136,10 +136,6 @@ export const registerCommands = (
       ];
     }
 
-    if (levelValues.includes(args[0])) {
-      return null;
-    }
-
     if ((tierValues as string[]).includes(args[0])) {
       const tier = args[0];
       const levelPrefix = args[1] ?? '';
@@ -443,6 +439,10 @@ export const registerCommands = (
       return;
     }
     const cmd = args[0]?.toLowerCase();
+    if (cmd && !['on', 'off', 'toggle'].includes(cmd)) {
+      ctx.ui.notify('Usage: /router widget <on|off|toggle>', 'error');
+      return;
+    }
     if (cmd === 'on') state.widgetEnabled = true;
     else if (cmd === 'off') state.widgetEnabled = false;
     else state.widgetEnabled = !state.widgetEnabled;
@@ -460,6 +460,10 @@ export const registerCommands = (
       return;
     }
     const cmd = args[0]?.toLowerCase();
+    if (cmd && !['on', 'off', 'toggle', 'clear', 'show'].includes(cmd)) {
+      ctx.ui.notify('Usage: /router debug <on|off|toggle|show|clear>', 'error');
+      return;
+    }
     if (cmd === 'on') state.debugEnabled = true;
     else if (cmd === 'off') state.debugEnabled = false;
     else if (cmd === 'clear') state.debugHistory.length = 0;
@@ -656,11 +660,12 @@ export const registerCommands = (
                 );
                 return;
               }
-              await actions.switchToRouterProfile(subcommand, ctx);
-              ctx.ui.notify(
-                `Router enabled with profile: ${state.selectedProfile}`,
-                'info',
-              );
+              if (await actions.switchToRouterProfile(subcommand, ctx)) {
+                ctx.ui.notify(
+                  `Router enabled with profile: ${state.selectedProfile}`,
+                  'info',
+                );
+              }
             } else {
               ctx.ui.notify(
                 `Unknown router subcommand: ${subcommand}. Try /router help`,

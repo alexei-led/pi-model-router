@@ -1,16 +1,15 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   type Api,
   type AssistantMessage,
+  type AssistantMessageEvent,
   type AssistantMessageEventStream,
   type Context,
   createAssistantMessageEventStream,
   type Model,
-  normalizeContext,
   type SimpleStreamOptions,
-  type TranscriptContext,
 } from '@earendil-works/pi-ai';
-import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -25,13 +24,7 @@ import {
   resolveContextWindow,
   resolveMaxTokens,
 } from './config';
-import {
-  DEFAULT_CONTEXT_WINDOW,
-  DEFAULT_MAX_TOKENS,
-  hasUsableRequestAuth,
-  type RegistryWithProviderAuth,
-  resolveDelegatedModel,
-} from './constants';
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
 import type {
   RouterConfig,
   RouterPinByProfile,
@@ -43,17 +36,6 @@ import type {
 const REGISTRY_WAIT_TIMEOUT_MS = 5000;
 const REGISTRY_WAIT_INITIAL_DELAY_MS = 50;
 const REGISTRY_WAIT_MAX_DELAY_MS = 500;
-
-type ProviderAwareRegistry = ExtensionContext['modelRegistry'] & {
-  getRegisteredProviderConfig?: (provider: string) => {
-    api?: Api;
-    streamSimple?: (
-      model: Model<Api>,
-      context: TranscriptContext,
-      options?: SimpleStreamOptions,
-    ) => AssistantMessageEventStream;
-  };
-};
 
 /**
  * Wait for the model registry to become available with exponential backoff.
@@ -67,15 +49,21 @@ export const waitForRegistry = async (
       | undefined;
   },
   timeoutMs: number = REGISTRY_WAIT_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<ExtensionContext['modelRegistry'] | undefined> => {
+  signal?.throwIfAborted();
   if (state.currentModelRegistry) return state.currentModelRegistry;
 
   const start = Date.now();
-  let delay = REGISTRY_WAIT_INITIAL_DELAY_MS;
+  let interval = REGISTRY_WAIT_INITIAL_DELAY_MS;
   while (Date.now() - start < timeoutMs) {
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    await delay(
+      Math.min(interval, timeoutMs - (Date.now() - start)),
+      undefined,
+      { signal },
+    );
     if (state.currentModelRegistry) return state.currentModelRegistry;
-    delay = Math.min(delay * 2, REGISTRY_WAIT_MAX_DELAY_MS);
+    interval = Math.min(interval * 2, REGISTRY_WAIT_MAX_DELAY_MS);
   }
   return undefined;
 };
@@ -86,6 +74,7 @@ import {
   extractTextFromContent,
   hasImageAttachment,
   phaseForTier,
+  resolveAvailableTier,
   runClassifier,
 } from './routing';
 
@@ -120,7 +109,7 @@ const estimateTokens = (text: string): number => Math.ceil(text.length / 3);
 
 /**
  * Truncate context to fit within a target token limit by removing oldest messages.
- * Always preserves the first system message and the latest user message.
+ * Preserves the system prompt and the complete latest user/tool turn.
  */
 const truncateContext = (context: Context, limit: number): Context => {
   const messages = [...context.messages];
@@ -139,24 +128,23 @@ const truncateContext = (context: Context, limit: number): Context => {
 
   if (totalTokens <= limit) return context;
 
-  const latestMessage = messages.pop();
-  if (!latestMessage) return context;
-  const latestTokens = messageTokens.pop() ?? 0;
-
-  // Keep shifting oldest messages from the start of the list
-  let activeMessagesTokensSum = messageTokens.reduce((sum, t) => sum + t, 0);
-
+  // Drop only complete turns. Splitting an assistant/tool-result pair corrupts transcripts.
+  // This text estimate cannot guarantee a fit for images/tools or one oversized active turn.
+  let remaining = totalTokens;
   let startIndex = 0;
-  while (startIndex < messages.length) {
-    const currentTokens = systemTokens + latestTokens + activeMessagesTokensSum;
-    if (currentTokens <= limit) break;
-
-    activeMessagesTokensSum -= messageTokens[startIndex];
-    startIndex++;
+  for (let i = 1; i < messages.length && remaining > limit; i++) {
+    if (messages[i].role !== 'user') continue;
+    while (startIndex < i) remaining -= messageTokens[startIndex++];
   }
-
-  const finalMessages = [...messages.slice(startIndex), latestMessage];
-  return { ...context, messages: finalMessages };
+  return {
+    ...context,
+    messages: [
+      ...messages
+        .slice(0, startIndex)
+        .filter((message) => message.role === 'system'),
+      ...messages.slice(startIndex),
+    ],
+  };
 };
 
 const supportsReasoning = (
@@ -219,8 +207,8 @@ export const registerRouterProvider = (
     // Report the MAX context window and max output tokens across all tiers.
     // The honesty check + truncateContext handles the case where the
     // actually routed model is smaller.
-    let maxContextWindow = DEFAULT_CONTEXT_WINDOW;
-    let maxMaxTokens = DEFAULT_MAX_TOKENS;
+    let maxContextWindow = 0;
+    let maxMaxTokens = 0;
     for (const tier of ROUTER_TIERS) {
       if (!profile[tier]) continue;
       const cw = resolveContextWindow(
@@ -252,14 +240,12 @@ export const registerRouterProvider = (
       ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
       input: ['text', 'image'] as ('text' | 'image')[],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: maxContextWindow,
-      maxTokens: maxMaxTokens,
+      contextWindow: maxContextWindow || DEFAULT_CONTEXT_WINDOW,
+      maxTokens: maxMaxTokens || DEFAULT_MAX_TOKENS,
     };
   });
 
-  const modelsKey = modelDefinitions
-    .map((m) => `${m.id}:${m.contextWindow}:${m.maxTokens}:${m.reasoning}`)
-    .join(',');
+  const modelsKey = JSON.stringify(modelDefinitions);
   if (state.lastRegisteredModels === modelsKey) return;
 
   pi.registerProvider('router', {
@@ -275,6 +261,7 @@ export const registerRouterProvider = (
       const stream = createAssistantMessageEventStream();
 
       (async () => {
+        let partialMessage: AssistantMessage | undefined;
         try {
           // Wait for the router to be fully initialized (session_start sets currentModelRegistry).
           // This handles the race where subagents (e.g. from pi-dynamic-workflows) invoke
@@ -282,6 +269,7 @@ export const registerRouterProvider = (
           const registry = await waitForRegistry(
             state,
             state.registryTimeoutMs,
+            options?.signal,
           );
           if (!registry) {
             throw new Error(
@@ -325,15 +313,20 @@ export const registerRouterProvider = (
               state.currentConfig.classifierModel.model,
               registry,
               context,
-              state.lastDecision?.phase,
+              state.lastDecision?.profile === model.id
+                ? state.lastDecision.phase
+                : undefined,
               state.currentConfig.classifierModel.thinking,
+              options?.signal,
             );
+            options?.signal?.throwIfAborted();
             if (classifierResult) {
+              const tier = resolveAvailableTier(profile, classifierResult.tier);
               decision = buildRoutingDecision(
                 model.id,
                 profile,
-                classifierResult.tier,
-                phaseForTier(classifierResult.tier),
+                tier,
+                phaseForTier(tier),
                 `Classifier: ${classifierResult.reasoning}`,
                 state.thinkingByProfile[model.id],
                 true,
@@ -446,13 +439,16 @@ export const registerRouterProvider = (
           if (imageAttached) {
             modelsToTry = modelsToTry.filter(checkModelSupportsImage);
             if (modelsToTry.length === 0) {
-              modelsToTry = [decision.targetLabel];
+              throw new Error(
+                'No configured model supports image attachments.',
+              );
             }
           }
           let lastError: unknown;
           let success = false;
 
           for (let i = 0; i < modelsToTry.length; i++) {
+            options?.signal?.throwIfAborted();
             const modelRef = modelsToTry[i];
             const { provider: targetProvider, modelId: targetModelId } =
               parseCanonicalModelRef(modelRef);
@@ -467,31 +463,14 @@ export const registerRouterProvider = (
               continue;
             }
 
-            const auth = await registry.getApiKeyAndHeaders(targetModel);
-            if (!auth.ok || !hasUsableRequestAuth(auth)) {
-              lastError = new Error(
-                auth.ok
-                  ? `No API key or authentication headers for routed model: ${targetProvider}/${targetModelId}`
-                  : `Auth failed for routed model: ${targetProvider}/${targetModelId}: ${auth.error}`,
-              );
-              continue;
-            }
-            const apiKey = auth.apiKey;
-            const headers = auth.headers;
-            const requestModel = await resolveDelegatedModel(
-              registry as unknown as RegistryWithProviderAuth,
-              targetModel,
-            );
-
+            let contentReceived = false;
             try {
               // HONESTY CHECK & AUTO-TRUNCATION
               // If the picked model has a smaller context than what we reported, truncate now.
               let effectiveContext = context;
-              const targetLimit = resolveContextWindow(
-                decision.tier,
-                profile,
-                registry,
-              );
+              const targetLimit =
+                targetModel.contextWindow ??
+                resolveContextWindow(decision.tier, profile, registry);
               if (
                 model.contextWindow !== undefined &&
                 targetLimit < model.contextWindow
@@ -534,42 +513,42 @@ export const registerRouterProvider = (
                 // Stale extension context — skip non-critical UI updates.
               }
 
-              // Strip pi's reasoning from options — the router controls thinking
-              const { reasoning: _piReasoning, ...delegationOptions } =
-                options ?? {};
+              // Router credentials must not override the concrete provider's request auth.
+              const {
+                reasoning: _piReasoning,
+                apiKey: _routerKey,
+                headers: _routerHeaders,
+                env: _routerEnv,
+                ...delegationOptions
+              } = options ?? {};
 
               const delegatedOptions = {
                 ...delegationOptions,
-                apiKey,
-                headers,
                 ...(delegatedReasoning
                   ? { reasoning: delegatedReasoning }
                   : {}),
               };
-              const registeredProvider = (
-                registry as ProviderAwareRegistry
-              ).getRegisteredProviderConfig?.(targetProvider);
-              const delegatedStream =
-                registeredProvider?.streamSimple &&
-                registeredProvider.api === requestModel.api
-                  ? registeredProvider.streamSimple(
-                      requestModel,
-                      normalizeContext(effectiveContext),
-                      delegatedOptions,
-                    )
-                  : streamSimple(
-                      requestModel,
-                      effectiveContext,
-                      delegatedOptions,
-                    );
-
-              let contentReceived = false;
+              // Pi owns request-time auth, custom/native providers, URLs and transcript normalization.
+              const delegatedStream = registry.streamSimple(
+                targetModel,
+                effectiveContext,
+                delegatedOptions,
+              );
+              let terminalReceived = false;
+              const pendingEvents: AssistantMessageEvent[] = [];
+              const recordTarget = () => {
+                decision.targetProvider = targetProvider;
+                decision.targetModelId = targetModelId;
+                decision.targetLabel = modelRef;
+                decision.thinking = delegatedReasoning ?? 'off';
+                decision.isFallback = i > 0;
+              };
               for await (const event of delegatedStream) {
-                if (event.type === 'done') {
-                  const cost = event.message.usage?.cost?.total ?? 0;
-                  state.accumulatedCost += cost;
-                }
-                if (event.type === 'error' && !contentReceived) {
+                if (
+                  event.type === 'error' &&
+                  event.reason !== 'aborted' &&
+                  !contentReceived
+                ) {
                   const errorMessage =
                     'error' in event &&
                     event.error &&
@@ -587,13 +566,37 @@ export const registerRouterProvider = (
                   event.type === 'thinking_delta' ||
                   event.type === 'toolcall_delta' ||
                   event.type === 'toolcall_end';
-                if (isContent) contentReceived = true;
-                stream.push(event);
+                if (isContent) {
+                  contentReceived = true;
+                  recordTarget();
+                }
+                if (event.type === 'done' || event.type === 'error') {
+                  terminalReceived = true;
+                  recordTarget();
+                  const cost = (
+                    event.type === 'done' ? event.message : event.error
+                  ).usage.cost.total;
+                  if (Number.isFinite(cost) && cost > 0)
+                    state.accumulatedCost += cost;
+                }
+                if (contentReceived || terminalReceived) {
+                  for (const pending of pendingEvents.splice(0))
+                    stream.push(pending);
+                  stream.push(event);
+                  if ('partial' in event) partialMessage = event.partial;
+                } else {
+                  pendingEvents.push(event);
+                }
+                if (terminalReceived) break;
               }
+              if (!terminalReceived)
+                throw new Error(
+                  'Provider stream ended without a terminal event.',
+                );
               success = true;
-              if (i > 0) decision.isFallback = true;
               break;
             } catch (err) {
+              if (contentReceived || options?.signal?.aborted) throw err;
               lastError = err;
             }
           }
@@ -610,28 +613,17 @@ export const registerRouterProvider = (
 
           stream.end();
         } catch (error) {
-          // When a subagent session is torn down (e.g. by pi-dynamic-workflows),
-          // the extension runtime is invalidated and any pi/ctx call throws a
-          // stale-context error. Push a graceful done event so the stream's
-          // result() promise resolves (required by AssistantMessageEventStream).
-          const isStaleCtx =
-            error instanceof Error && error.message.includes('stale');
-          if (isStaleCtx) {
-            stream.push({
-              type: 'done',
-              reason: 'stop',
-              message: createErrorMessage(model, ''),
-            });
-          } else {
-            stream.push({
-              type: 'error',
-              reason: 'error',
-              error: createErrorMessage(
-                model,
+          const reason = options?.signal?.aborted ? 'aborted' : 'error';
+          stream.push({
+            type: 'error',
+            reason,
+            error: {
+              ...(partialMessage ?? createErrorMessage(model, '')),
+              errorMessage:
                 error instanceof Error ? error.message : String(error),
-              ),
-            });
-          }
+              stopReason: reason,
+            },
+          });
           stream.end();
         } finally {
           try {
