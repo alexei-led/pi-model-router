@@ -315,39 +315,6 @@ export const registerRouterProvider = (
             isBudgetExceeded,
           );
 
-          // Classifier Override — skip when budget is already exceeded since the
-          // result would be downgraded anyway, saving an unnecessary LLM call.
-          if (
-            state.currentConfig.classifierModel &&
-            !pinnedTier &&
-            !decision.isRuleMatched &&
-            !isBudgetExceeded
-          ) {
-            const classifierResult = await runClassifier(
-              state.currentConfig.classifierModel.model,
-              registry,
-              context,
-              state.lastDecision?.profile === model.id
-                ? state.lastDecision.phase
-                : undefined,
-              state.currentConfig.classifierModel.thinking,
-              options?.signal,
-            );
-            options?.signal?.throwIfAborted();
-            if (classifierResult) {
-              const tier = resolveAvailableTier(profile, classifierResult.tier);
-              decision = buildRoutingDecision(
-                model.id,
-                profile,
-                tier,
-                phaseForTier(tier),
-                `Classifier: ${classifierResult.reasoning}`,
-                state.thinkingByProfile[model.id],
-                true,
-              );
-            }
-          }
-
           const lastMessage = context.messages[context.messages.length - 1];
           const previousDecision = state.lastDecision;
           const isGoogleThinkingToolContinuation =
@@ -372,6 +339,40 @@ export const registerRouterProvider = (
                 `Preserved ${previousDecision.targetLabel} for a Google tool-result continuation ` +
                 `to avoid thought-signature replay errors. (Original: ${decision.reasoning})`,
             };
+          }
+
+          // Classifier Override — skip when budget is already exceeded or this is
+          // a continuation whose prior model must be preserved.
+          if (
+            state.currentConfig.classifierModel &&
+            !pinnedTier &&
+            !decision.isRuleMatched &&
+            !isBudgetExceeded &&
+            !isGoogleThinkingToolContinuation
+          ) {
+            const classifierResult = await runClassifier(
+              state.currentConfig.classifierModel.model,
+              registry,
+              context,
+              previousDecision?.profile === model.id
+                ? previousDecision.phase
+                : undefined,
+              state.currentConfig.classifierModel.thinking,
+              options?.signal,
+            ).catch(() => undefined);
+            options?.signal?.throwIfAborted();
+            if (classifierResult) {
+              const tier = resolveAvailableTier(profile, classifierResult.tier);
+              decision = buildRoutingDecision(
+                model.id,
+                profile,
+                tier,
+                phaseForTier(tier),
+                'classifier',
+                state.thinkingByProfile[model.id],
+                true,
+              );
+            }
           }
 
           const imageAttached = hasImageAttachment(context);

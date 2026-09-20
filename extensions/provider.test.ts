@@ -235,10 +235,12 @@ describe('router provider', () => {
     });
   });
 
-  it('keeps the prior Google model on a thinking tool continuation', async () => {
+  it('keeps the prior Google model on a thinking tool continuation before classification', async () => {
     const s = setup();
     required(s.models[0]).provider = 'google';
     required(s.models[1]).provider = 'google';
+    s.state.currentConfig.classifierModel = { model: 'test/small' };
+    delete s.state.pinnedTierByProfile.balanced;
     const balanced = required(s.state.currentConfig.profiles.balanced);
     balanced.medium = { model: 'google/primary' };
     s.state.lastDecision = {
@@ -266,6 +268,26 @@ describe('router provider', () => {
     };
     await consume(s.stream(context));
     expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
+    expect(s.delegate).toHaveBeenCalledOnce();
+  });
+
+  it('does not persist classifier explanation text in a decision sink', async () => {
+    const s = setup();
+    delete s.state.pinnedTierByProfile.balanced;
+    s.state.currentConfig.classifierModel = { model: 'test/small' };
+    s.delegate.mockReturnValueOnce(
+      done('Tier: high\nReasoning: do not persist this explanation'),
+    );
+
+    await consume(s.stream());
+
+    expect(s.state.lastDecision?.reasoning).toBe('classifier');
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ reasoning: 'classifier' }),
+    );
+    expect(s.actions.recordDebugDecision.mock.calls[0]?.[0].reasoning).not.toContain(
+      'do not persist',
+    );
   });
 
   it('routes images to a capable model and errors when none exists', async () => {
