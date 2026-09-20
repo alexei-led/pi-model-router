@@ -1,13 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { describe, expect, it, vi } from 'vitest';
+import type { RouterConfig, RoutingDecision } from './types';
 import {
   formatDecision,
+  formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
-  formatModelRef,
   updateStatus,
 } from './ui';
-import type { RoutingDecision, RouterConfig } from './types';
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 describe('ui.ts', () => {
   describe('formatDecision', () => {
@@ -297,7 +297,8 @@ describe('ui.ts', () => {
         noBudgetConfig,
       );
 
-      const widgetLines = vi.mocked(ctx.ui.setWidget).mock.calls[0][1] as unknown as string[];
+      const widgetLines = vi.mocked(ctx.ui.setWidget).mock
+        .calls[0][1] as unknown as string[];
       const costLine = widgetLines.find((l: string) => l.includes('Cost'));
       expect(costLine).toBe('[dim]Cost: $0.5000[/dim]');
     });
@@ -333,7 +334,8 @@ describe('ui.ts', () => {
         zeroBudgetConfig,
       );
 
-      const widgetLines = vi.mocked(ctx.ui.setWidget).mock.calls[0][1] as unknown as string[];
+      const widgetLines = vi.mocked(ctx.ui.setWidget).mock
+        .calls[0][1] as unknown as string[];
       const costLine = widgetLines.find((l: string) => l.includes('Cost'));
       // maxSessionBudget=0 is falsy, so no denominator is shown
       expect(costLine).toBe('[dim]Cost: $0.0000[/dim]');

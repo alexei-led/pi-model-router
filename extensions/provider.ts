@@ -1,40 +1,59 @@
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
-  createAssistantMessageEventStream,
   type Api,
   type AssistantMessage,
   type AssistantMessageEventStream,
   type Context,
+  createAssistantMessageEventStream,
   type Model,
+  normalizeContext,
   type SimpleStreamOptions,
-  type Message,
+  type TranscriptContext,
 } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type {
-  RouterConfig,
-  RoutingDecision,
-  RouterTier,
-  RouterPinByProfile,
-  RouterThinkingByProfile,
-} from './types';
 import {
-  profileNames,
+  clampThinkingLevel,
+  collectProfileThinkingLevels,
+  MAX_THINKING_LEVEL,
   parseCanonicalModelRef,
+  profileNames,
   ROUTER_TIERS,
   resolveContextWindow,
   resolveMaxTokens,
-  collectProfileThinkingLevels,
-  MAX_THINKING_LEVEL,
-  clampThinkingLevel,
 } from './config';
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_TOKENS,
+  hasUsableRequestAuth,
+  type RegistryWithProviderAuth,
+  resolveDelegatedModel,
+} from './constants';
+import type {
+  RouterConfig,
+  RouterPinByProfile,
+  RouterThinkingByProfile,
+  RouterTier,
+  RoutingDecision,
+} from './types';
+
 const REGISTRY_WAIT_TIMEOUT_MS = 5000;
 const REGISTRY_WAIT_INITIAL_DELAY_MS = 50;
 const REGISTRY_WAIT_MAX_DELAY_MS = 500;
+
+type ProviderAwareRegistry = ExtensionContext['modelRegistry'] & {
+  getRegisteredProviderConfig?: (provider: string) => {
+    api?: Api;
+    streamSimple?: (
+      model: Model<Api>,
+      context: TranscriptContext,
+      options?: SimpleStreamOptions,
+    ) => AssistantMessageEventStream;
+  };
+};
 
 /**
  * Wait for the model registry to become available with exponential backoff.
@@ -62,12 +81,12 @@ export const waitForRegistry = async (
 };
 
 import {
-  phaseForTier,
   buildRoutingDecision,
   decideRouting,
-  runClassifier,
   extractTextFromContent,
   hasImageAttachment,
+  phaseForTier,
+  runClassifier,
 } from './routing';
 
 export const createErrorMessage = (
@@ -107,13 +126,16 @@ const truncateContext = (context: Context, limit: number): Context => {
   const messages = [...context.messages];
   if (messages.length <= 1) return context;
 
-  const systemTokens = context.systemPrompt ? estimateTokens(context.systemPrompt) : 0;
+  const systemTokens = context.systemPrompt
+    ? estimateTokens(context.systemPrompt)
+    : 0;
 
   // Pre-calculate token sizes
   const messageTokens = messages.map((m) =>
     estimateTokens(extractTextFromContent(m.content)),
   );
-  const totalTokens = systemTokens + messageTokens.reduce((sum, t) => sum + t, 0);
+  const totalTokens =
+    systemTokens + messageTokens.reduce((sum, t) => sum + t, 0);
 
   if (totalTokens <= limit) return context;
 
@@ -180,7 +202,10 @@ export const registerRouterProvider = (
   actions: {
     persistState: () => void;
     recordDebugDecision: (decision: RoutingDecision) => void;
-    getThinkingOverride: (profileName: string, tier: RouterTier) => ThinkingLevel | undefined;
+    getThinkingOverride: (
+      profileName: string,
+      tier: RouterTier,
+    ) => ThinkingLevel | undefined;
     updateStatus: (ctx: ExtensionContext) => void;
     syncPiThinkingLevel: (level: ThinkingLevel) => void;
   },
@@ -203,11 +228,7 @@ export const registerRouterProvider = (
         profile,
         state.currentModelRegistry,
       );
-      const mot = resolveMaxTokens(
-        tier,
-        profile,
-        state.currentModelRegistry,
-      );
+      const mot = resolveMaxTokens(tier, profile, state.currentModelRegistry);
       if (cw > maxContextWindow) maxContextWindow = cw;
       if (mot > maxMaxTokens) maxMaxTokens = mot;
     }
@@ -258,7 +279,10 @@ export const registerRouterProvider = (
           // Wait for the router to be fully initialized (session_start sets currentModelRegistry).
           // This handles the race where subagents (e.g. from pi-dynamic-workflows) invoke
           // the router provider before session_start has fired in their context.
-          const registry = await waitForRegistry(state, state.registryTimeoutMs);
+          const registry = await waitForRegistry(
+            state,
+            state.registryTimeoutMs,
+          );
           if (!registry) {
             throw new Error(
               'Router provider initialization timed out. session_start may not have fired.',
@@ -413,10 +437,12 @@ export const registerRouterProvider = (
             // Stale extension context — skip non-critical UI updates.
           }
 
-          let modelsToTry = [...new Set([
-            decision.targetLabel,
-            ...(profile[decision.tier]?.fallbacks ?? []),
-          ])];
+          let modelsToTry = [
+            ...new Set([
+              decision.targetLabel,
+              ...(profile[decision.tier]?.fallbacks ?? []),
+            ]),
+          ];
           if (imageAttached) {
             modelsToTry = modelsToTry.filter(checkModelSupportsImage);
             if (modelsToTry.length === 0) {
@@ -433,10 +459,7 @@ export const registerRouterProvider = (
 
             if (targetProvider === 'router') continue;
 
-            const targetModel = registry.find(
-              targetProvider,
-              targetModelId,
-            );
+            const targetModel = registry.find(targetProvider, targetModelId);
             if (!targetModel) {
               lastError = new Error(
                 `Routed model not found: ${targetProvider}/${targetModelId}`,
@@ -444,18 +467,21 @@ export const registerRouterProvider = (
               continue;
             }
 
-            const auth =
-              await registry.getApiKeyAndHeaders(targetModel);
-            if (!auth.ok || !auth.apiKey) {
+            const auth = await registry.getApiKeyAndHeaders(targetModel);
+            if (!auth.ok || !hasUsableRequestAuth(auth)) {
               lastError = new Error(
                 auth.ok
-                  ? `No API key for routed model: ${targetProvider}/${targetModelId}`
+                  ? `No API key or authentication headers for routed model: ${targetProvider}/${targetModelId}`
                   : `Auth failed for routed model: ${targetProvider}/${targetModelId}: ${auth.error}`,
               );
               continue;
             }
             const apiKey = auth.apiKey;
             const headers = auth.headers;
+            const requestModel = await resolveDelegatedModel(
+              registry as unknown as RegistryWithProviderAuth,
+              targetModel,
+            );
 
             try {
               // HONESTY CHECK & AUTO-TRUNCATION
@@ -466,7 +492,10 @@ export const registerRouterProvider = (
                 profile,
                 registry,
               );
-              if (targetLimit < model.contextWindow!) {
+              if (
+                model.contextWindow !== undefined &&
+                targetLimit < model.contextWindow
+              ) {
                 effectiveContext = truncateContext(context, targetLimit);
               }
 
@@ -474,8 +503,8 @@ export const registerRouterProvider = (
                 model.id,
                 decision.tier,
               );
-              let requestedReasoning = (thinkingOverride ?? decision.thinking);
-              
+              let requestedReasoning = thinkingOverride ?? decision.thinking;
+
               if (requestedReasoning !== 'off' && targetModel.reasoning) {
                 const tierConfig = profile[decision.tier];
                 if (tierConfig?.resolvedThinkingLevels) {
@@ -488,7 +517,7 @@ export const registerRouterProvider = (
 
               const delegatedReasoning =
                 targetModel.reasoning && requestedReasoning !== 'off'
-                  ? requestedReasoning as SimpleStreamOptions['reasoning']
+                  ? (requestedReasoning as SimpleStreamOptions['reasoning'])
                   : undefined;
 
               try {
@@ -509,18 +538,30 @@ export const registerRouterProvider = (
               const { reasoning: _piReasoning, ...delegationOptions } =
                 options ?? {};
 
-              const delegatedStream = streamSimple(
-                targetModel,
-                effectiveContext,
-                {
-                  ...delegationOptions,
-                  apiKey,
-                  headers,
-                  ...(delegatedReasoning
-                    ? { reasoning: delegatedReasoning }
-                    : {}),
-                },
-              );
+              const delegatedOptions = {
+                ...delegationOptions,
+                apiKey,
+                headers,
+                ...(delegatedReasoning
+                  ? { reasoning: delegatedReasoning }
+                  : {}),
+              };
+              const registeredProvider = (
+                registry as ProviderAwareRegistry
+              ).getRegisteredProviderConfig?.(targetProvider);
+              const delegatedStream =
+                registeredProvider?.streamSimple &&
+                registeredProvider.api === requestModel.api
+                  ? registeredProvider.streamSimple(
+                      requestModel,
+                      normalizeContext(effectiveContext),
+                      delegatedOptions,
+                    )
+                  : streamSimple(
+                      requestModel,
+                      effectiveContext,
+                      delegatedOptions,
+                    );
 
               let contentReceived = false;
               for await (const event of delegatedStream) {
@@ -558,15 +599,13 @@ export const registerRouterProvider = (
           }
 
           if (!success) {
-            throw (
-              lastError instanceof Error
-                ? lastError
-                : new Error(
-                    typeof lastError === 'string'
-                      ? lastError
-                      : 'Failed to delegate to any model in the chain.',
-                  )
-            );
+            throw lastError instanceof Error
+              ? lastError
+              : new Error(
+                  typeof lastError === 'string'
+                    ? lastError
+                    : 'Failed to delegate to any model in the chain.',
+                );
           }
 
           stream.end();

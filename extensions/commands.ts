@@ -1,29 +1,29 @@
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { AutocompleteItem } from '@earendil-works/pi-tui';
+import {
+  getUnsupportedTiers,
+  parseCanonicalModelRef,
+  profileNames,
+  ROUTER_PIN_VALUES,
+  ROUTER_TIERS,
+  THINKING_LEVELS,
+} from './config';
 import type {
   RouterConfig,
   RouterPinByProfile,
   RouterThinkingByProfile,
-  RoutingDecision,
   RouterTier,
+  RoutingDecision,
 } from './types';
 import {
-  profileNames,
-  THINKING_LEVELS,
-  ROUTER_PIN_VALUES,
-  ROUTER_TIERS,
-  parseCanonicalModelRef,
-  getUnsupportedTiers,
-} from './config';
-import {
+  formatDecision,
+  formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
-  formatModelRef,
-  formatDecision,
 } from './ui';
 
 export const registerCommands = (
@@ -96,9 +96,10 @@ export const registerCommands = (
       ).map((value) => ({
         value,
         label: value,
-        description: value === 'auto'
-          ? 'Restore auto-routing (clear pin) for the active profile'
-          : `Pin active profile to ${value} tier`,
+        description:
+          value === 'auto'
+            ? 'Restore auto-routing (clear pin) for the active profile'
+            : `Pin active profile to ${value} tier`,
       }));
       return items.length > 0 ? items : null;
     }
@@ -120,9 +121,10 @@ export const registerCommands = (
           .map((v) => ({
             value: v,
             label: v,
-            description: v === 'auto'
-              ? 'Restore default thinking level'
-              : `Set thinking level to ${v}`,
+            description:
+              v === 'auto'
+                ? 'Restore default thinking level'
+                : `Set thinking level to ${v}`,
           })),
         ...tierValues
           .filter((v) => v.startsWith(token))
@@ -146,15 +148,15 @@ export const registerCommands = (
         .map((v) => ({
           value: `${tier} ${v}`,
           label: `${tier} ${v}`,
-          description: v === 'auto'
-            ? `Restore default thinking level for ${tier} tier`
-            : `Set thinking level to ${v} for ${tier} tier`,
+          description:
+            v === 'auto'
+              ? `Restore default thinking level for ${tier} tier`
+              : `Set thinking level to ${v} for ${tier} tier`,
         }));
     }
 
     return null;
   };
-
 
   const handleStatus = async (args: string[], ctx: ExtensionContext) => {
     if (args.length > 0) {
@@ -224,7 +226,10 @@ export const registerCommands = (
   const handlePin = async (args: string[], ctx: ExtensionContext) => {
     const currentProfile = state.selectedProfile;
     if (!currentProfile) {
-      ctx.ui.notify('No router profile is active. Select a router model first.', 'error');
+      ctx.ui.notify(
+        'No router profile is active. Select a router model first.',
+        'error',
+      );
       return;
     }
     if (args.length === 0) {
@@ -241,16 +246,13 @@ export const registerCommands = (
     }
 
     if (args.length > 1) {
-      ctx.ui.notify(
-        'Usage: /router pin <high|medium|low|auto>',
-        'error',
-      );
+      ctx.ui.notify('Usage: /router pin <high|medium|low|auto>', 'error');
       return;
     }
 
     const pinValue = args[0];
 
-    if (!ROUTER_PIN_VALUES.includes(pinValue as any)) {
+    if (!ROUTER_PIN_VALUES.some((value) => value === pinValue)) {
       ctx.ui.notify(
         `Invalid router pin: ${pinValue}. Use one of: ${ROUTER_PIN_VALUES.join(', ')}`,
         'error',
@@ -277,7 +279,10 @@ export const registerCommands = (
   const handleThinking = async (args: string[], ctx: ExtensionContext) => {
     const currentProfile = state.selectedProfile;
     if (!currentProfile) {
-      ctx.ui.notify('No router profile is active. Select a router model first.', 'error');
+      ctx.ui.notify(
+        'No router profile is active. Select a router model first.',
+        'error',
+      );
       return;
     }
     if (args.length === 0) {
@@ -299,7 +304,7 @@ export const registerCommands = (
       return;
     }
 
-    let tier: RouterTier | 'all' | undefined = undefined;
+    let tier: RouterTier | 'all' | undefined;
     let levelValue = '';
 
     const tierValues = ['high', 'medium', 'low'];
@@ -336,25 +341,16 @@ export const registerCommands = (
       return;
     }
 
-    const nextLevel = levelValue === 'auto' ? undefined : (levelValue as any);
-    if (tier === 'all') {
-      for (const t of ROUTER_TIERS) {
-        if (!state.thinkingByProfile[currentProfile])
-          state.thinkingByProfile[currentProfile] = {};
-        if (nextLevel) state.thinkingByProfile[currentProfile]![t] = nextLevel;
-        else delete state.thinkingByProfile[currentProfile]![t];
-      }
-    } else {
-      if (!state.thinkingByProfile[currentProfile])
-        state.thinkingByProfile[currentProfile] = {};
-      if (nextLevel)
-        state.thinkingByProfile[currentProfile]![tier as RouterTier] = nextLevel;
-      else delete state.thinkingByProfile[currentProfile]![tier as RouterTier];
+    const nextLevel =
+      levelValue === 'auto' ? undefined : (levelValue as ThinkingLevel);
+    state.thinkingByProfile[currentProfile] ??= {};
+    const overrides = state.thinkingByProfile[currentProfile];
+    const tiers = tier === 'all' ? ROUTER_TIERS : [tier as RouterTier];
+    for (const targetTier of tiers) {
+      if (nextLevel) overrides[targetTier] = nextLevel;
+      else delete overrides[targetTier];
     }
-    if (
-      state.thinkingByProfile[currentProfile] &&
-      Object.keys(state.thinkingByProfile[currentProfile]!).length === 0
-    ) {
+    if (Object.keys(overrides).length === 0) {
       delete state.thinkingByProfile[currentProfile];
     }
 

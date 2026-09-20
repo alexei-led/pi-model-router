@@ -3,10 +3,10 @@ import { join } from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import type {
   RouterLastProfileState,
+  RouterPersistedState,
   RouterPinByProfile,
   RouterThinkingByProfile,
   RoutingDecision,
-  RouterPersistedState,
 } from './types';
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';

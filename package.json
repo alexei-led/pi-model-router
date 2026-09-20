@@ -1,13 +1,14 @@
 {
-  "name": "@yeliu84/pi-model-router",
-  "version": "0.4.4",
+  "name": "@alexeiled/pi-model-router",
+  "version": "0.5.0",
   "type": "module",
   "files": [
     "extensions",
     "!extensions/*.test.ts",
     "LICENSE",
     "model-router.example.json",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "description": "Smart per-turn model router for Pi that optimizes your AI budget and usage limits by dynamically switching LLM tiers based on task complexity, budget, and phase awareness.",
   "keywords": [
@@ -19,14 +20,24 @@
     "extension"
   ],
   "license": "MIT",
-  "author": "Ye Liu",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "npm@11.18.0",
+  "author": "Alexei Ledenev",
+  "contributors": [
+    "Ye Liu"
+  ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yeliu84/pi-model-router.git"
+    "url": "git+https://github.com/alexei-led/pi-model-router.git"
   },
-  "homepage": "https://github.com/yeliu84/pi-model-router#readme",
+  "homepage": "https://github.com/alexei-led/pi-model-router#readme",
   "bugs": {
-    "url": "https://github.com/yeliu84/pi-model-router/issues"
+    "url": "https://github.com/alexei-led/pi-model-router/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "exports": {
     ".": "./extensions/index.ts"
@@ -39,18 +50,28 @@
   "scripts": {
     "tsc": "tsc --noEmit",
     "build": "tsc",
-    "prepublishOnly": "npm run tsc",
-    "test": "vitest run"
+    "prepublishOnly": "npm run check && npm test",
+    "test": "vitest run",
+    "check": "biome check --error-on-warnings . && npm run tsc",
+    "lint": "biome lint --error-on-warnings .",
+    "lint:fix": "biome lint --write --error-on-warnings .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "pack:dry": "npm pack --dry-run"
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-agent-core": ">=0.86.0",
+    "@earendil-works/pi-ai": ">=0.86.0",
+    "@earendil-works/pi-coding-agent": ">=0.86.0",
+    "@earendil-works/pi-tui": ">=0.86.0"
   },
   "devDependencies": {
-    "prettier": "^3.8.4",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "@biomejs/biome": "2.5.14",
+    "@earendil-works/pi-agent-core": "0.86.0",
+    "@earendil-works/pi-ai": "0.86.0",
+    "@earendil-works/pi-coding-agent": "0.86.0",
+    "@earendil-works/pi-tui": "0.86.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
   }
 }

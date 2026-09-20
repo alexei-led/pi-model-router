@@ -1,20 +1,20 @@
-import { describe, it, expect, vi } from 'vitest';
+import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
+import { streamSimple } from '@earendil-works/pi-ai/compat';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  buildRoutingDecision,
+  containsAny,
+  countToolResults,
+  countWords,
+  decideRouting,
   extractTextFromContent,
   getLastUserText,
   getRecentConversationText,
-  countToolResults,
-  countWords,
   hasImageAttachment,
-  containsAny,
   phaseForTier,
   resolveAvailableTier,
-  buildRoutingDecision,
-  decideRouting,
   runClassifier,
 } from './routing';
-import { streamSimple } from '@earendil-works/pi-ai/compat';
-import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
 import type { RouterProfile, RoutingRule } from './types';
 
 vi.mock('@earendil-works/pi-ai/compat', () => ({
@@ -163,10 +163,6 @@ describe('routing.ts', () => {
   });
 
   describe('resolveAvailableTier', () => {
-    const profile: RouterProfile = {
-      medium: { model: 'openai/gpt-4o' },
-    };
-
     it('should return preferred if available', () => {
       expect(
         resolveAvailableTier(
@@ -403,7 +399,8 @@ describe('routing.ts', () => {
         messages: [
           {
             role: 'user',
-            content: 'what about this particular scenario that we discussed earlier today',
+            content:
+              'what about this particular scenario that we discussed earlier today',
             timestamp: Date.now(),
           },
         ],
@@ -415,7 +412,15 @@ describe('routing.ts', () => {
         'planning',
         'Previous planning',
       );
-      const decision = decideRouting(context, 'p', profile, previous, undefined, undefined, 0.5);
+      const decision = decideRouting(
+        context,
+        'p',
+        profile,
+        previous,
+        undefined,
+        undefined,
+        0.5,
+      );
       expect(decision.tier).toBe('high');
       expect(decision.phase).toBe('planning');
       expect(decision.reasoning).toContain('planning-phase bias');
@@ -499,7 +504,8 @@ describe('routing.ts', () => {
         messages: [
           {
             role: 'user',
-            content: 'i wonder about some random topic that doesnt match any particular keyword category here today now',
+            content:
+              'i wonder about some random topic that doesnt match any particular keyword category here today now',
             timestamp: Date.now(),
           },
         ],
@@ -514,7 +520,7 @@ describe('routing.ts', () => {
     const mockRegistry = {
       find: (provider: string, modelId: string) => {
         if (provider === 'openai' && modelId === 'gpt-4o') {
-          return { provider, id: modelId, reasoning: true } as any;
+          return { provider, id: modelId, reasoning: true };
         }
         return undefined;
       },
@@ -523,7 +529,7 @@ describe('routing.ts', () => {
         apiKey: 'test-key',
         headers: {},
       }),
-    } as any;
+    } as unknown as Parameters<typeof runClassifier>[1];
 
     const context: Context = {
       messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }],
@@ -534,7 +540,9 @@ describe('routing.ts', () => {
         yield { type: 'text_delta', delta: 'Tier: high\n' };
         yield { type: 'text_delta', delta: 'Reasoning: Needs deep reasoner.' };
       })();
-      vi.mocked(streamSimple).mockReturnValue(mockStream as any);
+      vi.mocked(streamSimple).mockReturnValue(
+        mockStream as unknown as ReturnType<typeof streamSimple>,
+      );
 
       const result = await runClassifier(
         'openai/gpt-4o',
@@ -549,11 +557,63 @@ describe('routing.ts', () => {
       });
     });
 
+    it('should accept headers-only authentication and isolate classifier context', async () => {
+      let delegatedContext: Context | undefined;
+      let delegatedOptions: unknown;
+      const headersOnlyRegistry = {
+        find: () =>
+          ({
+            provider: 'openai',
+            id: 'gpt-4o',
+            api: 'openai-responses',
+            baseUrl: 'https://api.openai.com',
+            reasoning: true,
+          }) as unknown,
+        getApiKeyAndHeaders: async () => ({
+          ok: true as const,
+          headers: { Authorization: 'Bearer headers-only-token' },
+        }),
+      } as unknown as Parameters<typeof runClassifier>[1];
+      const mockStream = (async function* () {
+        yield { type: 'text_delta', delta: 'Tier: low\n' };
+        yield { type: 'text_delta', delta: 'Reasoning: Small request.' };
+      })();
+      vi.mocked(streamSimple).mockImplementation((_model, context, options) => {
+        delegatedContext = context;
+        delegatedOptions = options;
+        return mockStream as unknown as ReturnType<typeof streamSimple>;
+      });
+
+      const context = {
+        systemPrompt: 'private system prompt',
+        tools: [{ name: 'private-tool' }],
+        messages: [{ role: 'user', content: 'classify this' }],
+      } as unknown as Context;
+      const result = await runClassifier(
+        'openai/gpt-4o',
+        headersOnlyRegistry,
+        context,
+      );
+
+      expect(result).toEqual({
+        tier: 'low',
+        reasoning: 'Small request.',
+      });
+      expect(delegatedContext?.systemPrompt).toBeUndefined();
+      expect(delegatedContext && 'tools' in delegatedContext).toBe(false);
+      expect(delegatedOptions).toMatchObject({
+        apiKey: undefined,
+        headers: { Authorization: 'Bearer headers-only-token' },
+      });
+    });
+
     it('should return undefined if stream fails or format is invalid', async () => {
       const mockStream = (async function* () {
         yield { type: 'text_delta', delta: 'Invalid response format' };
       })();
-      vi.mocked(streamSimple).mockReturnValue(mockStream as any);
+      vi.mocked(streamSimple).mockReturnValue(
+        mockStream as unknown as ReturnType<typeof streamSimple>,
+      );
 
       const result = await runClassifier(
         'openai/gpt-4o',
