@@ -1,30 +1,39 @@
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type {
   ExtensionAPI,
   ExtensionContext,
+  SessionStartEvent,
 } from '@earendil-works/pi-coding-agent';
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import { registerCommands } from './commands';
 import {
-  type RouterConfig,
-  type RouterPersistedState,
-  type RoutingDecision,
-  type RouterPinByProfile,
-  type RouterThinkingByProfile,
-  type RouterTier,
-  type CustomSessionEntry,
-} from './types';
-import {
+  getUnsupportedTiers,
   loadRouterConfig,
   profileNames,
-  resolveProfileName,
-  parseCanonicalModelRef,
   ROUTER_TIERS,
-  getUnsupportedTiers,
+  resolveProfileName,
 } from './config';
 import { MAX_DEBUG_HISTORY } from './constants';
-import { isRouterPersistedState, buildPersistedState } from './state';
-import { updateStatus, formatModelRef } from './ui';
-import { registerCommands } from './commands';
 import { registerRouterProvider } from './provider';
+import {
+  buildPersistedState,
+  isRouterPersistedState,
+  loadLastRouterProfile,
+  saveLastRouterProfile,
+} from './state';
+import type {
+  CustomSessionEntry,
+  RouterConfig,
+  RouterPinByProfile,
+  RouterThinkingByProfile,
+  RouterTier,
+  RoutingDecision,
+} from './types';
+import { updateStatus } from './ui';
+
+const hasExplicitCliModel = () =>
+  process.argv
+    .slice(2)
+    .some((arg) => arg === '--model' || arg.startsWith('--model='));
 
 const routerExtension = (pi: ExtensionAPI) => {
   let currentConfig: RouterConfig = { profiles: {} };
@@ -33,11 +42,11 @@ const routerExtension = (pi: ExtensionAPI) => {
   let lastDecision: RoutingDecision | undefined;
   let debugEnabled = false;
   let routerEnabled = false;
-  let selectedProfile: string | undefined = undefined;
+  let selectedProfile: string | undefined;
   let widgetEnabled = false;
   let lastRegisteredModels = '';
-  let pinnedTierByProfile: RouterPinByProfile = {};
-  let thinkingByProfile: RouterThinkingByProfile = {};
+  const pinnedTierByProfile: RouterPinByProfile = {};
+  const thinkingByProfile: RouterThinkingByProfile = {};
   let debugHistory: RoutingDecision[] = [];
   let lastNonRouterModel: string | undefined;
   let accumulatedCost = 0;
@@ -47,6 +56,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   let isInitialized = false;
   let isInternalModelSwitch = false;
   let isInternalThinkingChange = false;
+  let ignoreStartupThinkingEvent = false;
 
   const setModelInternally = async (
     model: NonNullable<ExtensionContext['model']>,
@@ -70,21 +80,6 @@ const routerExtension = (pi: ExtensionAPI) => {
       // Extension context may be stale after session teardown.
     } finally {
       isInternalThinkingChange = false;
-    }
-  };
-
-  const getPinnedTierForProfile = (
-    profileName: string,
-  ): RouterTier | undefined => pinnedTierByProfile[profileName];
-
-  const setPinnedTierForProfile = (
-    profileName: string,
-    tier: RouterTier | undefined,
-  ) => {
-    if (tier) {
-      pinnedTierByProfile[profileName] = tier;
-    } else {
-      delete pinnedTierByProfile[profileName];
     }
   };
 
@@ -221,6 +216,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       }
       selectedProfile = profileName;
       routerEnabled = true;
+      saveLastRouterProfile(profileName);
       persistState();
       actions.updateStatus(ctx);
       return true;
@@ -284,19 +280,29 @@ const routerExtension = (pi: ExtensionAPI) => {
 
   actions.reloadConfig();
 
-  const restoreStateFromSession = async (ctx: ExtensionContext) => {
+  const restoreStateFromSession = async (
+    ctx: ExtensionContext,
+    startReason: SessionStartEvent['reason'],
+  ) => {
+    ignoreStartupThinkingEvent =
+      startReason === 'startup' ||
+      startReason === 'new' ||
+      startReason === 'reload';
     lastExtensionContext = ctx;
     currentModelRegistry = ctx.modelRegistry;
     currentCwd = ctx.cwd;
     actions.reloadConfig(ctx);
+    const hasExplicitStartupModel =
+      startReason === 'startup' && hasExplicitCliModel();
 
     // Give the registry a moment to synchronize after re-registration
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     routerEnabled = ctx.model?.provider === 'router';
-    selectedProfile = ctx.model?.provider === 'router'
-      ? resolveProfileName(currentConfig, ctx.model.id)
-      : resolveProfileName(currentConfig, selectedProfile);
+    selectedProfile =
+      ctx.model?.provider === 'router'
+        ? resolveProfileName(currentConfig, ctx.model.id)
+        : resolveProfileName(currentConfig, selectedProfile);
     // Clear in-place to keep references intact
     for (const key of Object.keys(pinnedTierByProfile)) {
       delete pinnedTierByProfile[key];
@@ -313,6 +319,8 @@ const routerExtension = (pi: ExtensionAPI) => {
         : lastNonRouterModel;
     lastDecision = undefined;
 
+    await actions.ensureValidActiveRouterProfile(ctx);
+
     const entries = ctx.sessionManager.getBranch() as CustomSessionEntry[];
     const savedState = entries
       .filter(
@@ -323,11 +331,13 @@ const routerExtension = (pi: ExtensionAPI) => {
       .findLast((data) => isRouterPersistedState(data));
 
     if (isRouterPersistedState(savedState)) {
-      selectedProfile = resolveProfileName(
-        currentConfig,
-        savedState.selectedProfile,
-      );
-      routerEnabled = savedState.enabled;
+      if (!hasExplicitStartupModel) {
+        selectedProfile = resolveProfileName(
+          currentConfig,
+          savedState.selectedProfile,
+        );
+        routerEnabled = savedState.enabled && selectedProfile !== undefined;
+      }
       if (savedState.pinByProfile) {
         Object.assign(pinnedTierByProfile, savedState.pinByProfile);
       }
@@ -342,12 +352,26 @@ const routerExtension = (pi: ExtensionAPI) => {
       debugHistory = savedState.debugHistory
         ? [...savedState.debugHistory].slice(-MAX_DEBUG_HISTORY)
         : [];
-      lastNonRouterModel = savedState.lastNonRouterModel ?? lastNonRouterModel;
+      if (!hasExplicitStartupModel) {
+        lastNonRouterModel =
+          savedState.lastNonRouterModel ?? lastNonRouterModel;
+        lastDecision = savedState.lastDecision;
+      }
       accumulatedCost = savedState.accumulatedCost ?? 0;
-      lastDecision = savedState.lastDecision;
+    } else if (
+      ctx.model?.provider === 'router' &&
+      (startReason === 'startup' || startReason === 'new') &&
+      !hasExplicitStartupModel
+    ) {
+      const lastProfile = resolveProfileName(
+        currentConfig,
+        loadLastRouterProfile(),
+      );
+      if (lastProfile) {
+        selectedProfile = lastProfile;
+        routerEnabled = true;
+      }
     }
-
-    await actions.ensureValidActiveRouterProfile(ctx);
 
     if (routerEnabled && selectedProfile) {
       const routerModel = ctx.modelRegistry.find('router', selectedProfile);
@@ -433,9 +457,9 @@ const routerExtension = (pi: ExtensionAPI) => {
     actions,
   );
 
-  pi.on('session_start', async (_event, ctx) => {
+  pi.on('session_start', async (event, ctx) => {
     isInitialized = true;
-    await restoreStateFromSession(ctx);
+    await restoreStateFromSession(ctx, event.reason);
     if (debugEnabled) {
       ctx.ui.notify(
         `Router initialized with profiles: ${profileNames(currentConfig).join(', ')}`,
@@ -461,6 +485,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   };
 
   pi.on('turn_start', async (_event, ctx) => {
+    ignoreStartupThinkingEvent = false;
     ensureInitializedFromContext(ctx);
   });
 
@@ -489,6 +514,7 @@ const routerExtension = (pi: ExtensionAPI) => {
 
       routerEnabled = true;
       selectedProfile = profileName;
+      saveLastRouterProfile(profileName);
     } else {
       routerEnabled = false;
       lastNonRouterModel = `${event.model.provider}/${event.model.id}`;
@@ -514,14 +540,17 @@ const routerExtension = (pi: ExtensionAPI) => {
     ensureInitializedFromContext(ctx);
     if (!isInitialized || !routerEnabled || !selectedProfile) return;
     if (isInternalThinkingChange) return;
+    if (ignoreStartupThinkingEvent) {
+      ignoreStartupThinkingEvent = false;
+      return;
+    }
 
     // User changed pi's thinking level (e.g. via shift+tab).
     // Apply as an all-tier thinking override for the active router profile.
-    if (!thinkingByProfile[selectedProfile]) {
-      thinkingByProfile[selectedProfile] = {};
-    }
+    thinkingByProfile[selectedProfile] ??= {};
+    const overrides = thinkingByProfile[selectedProfile];
     for (const t of ROUTER_TIERS) {
-      thinkingByProfile[selectedProfile]![t] = event.level;
+      overrides[t] = event.level;
     }
     persistState();
     actions.updateStatus(ctx);

@@ -1,16 +1,21 @@
-import { streamSimple } from '@earendil-works/pi-ai/compat';
-import type { Context, Message } from '@earendil-works/pi-ai';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { Context, Message } from '@earendil-works/pi-ai';
+import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { isRouterTier, parseCanonicalModelRef } from './config';
+import {
+  hasUsableRequestAuth,
+  type RegistryWithProviderAuth,
+  resolveDelegatedModel,
+} from './constants';
 import type {
-  RouterTier,
   RouterPhase,
   RouterProfile,
+  RouterThinkingByTier,
+  RouterTier,
   RoutingDecision,
   RoutingRule,
-  RouterThinkingByTier,
 } from './types';
-import { parseCanonicalModelRef, isRouterTier } from './config';
 
 export const extractTextFromContent = (
   content: string | Message['content'],
@@ -108,7 +113,9 @@ export const buildRoutingDecision = (
 ): RoutingDecision => {
   const routed = profile[tier];
   if (!routed) {
-    throw new Error(`Profile "${profileName}" has no configuration for the ${tier} tier.`);
+    throw new Error(
+      `Profile "${profileName}" has no configuration for the ${tier} tier.`,
+    );
   }
   const { provider, modelId } = parseCanonicalModelRef(routed.model);
   const baseThinking =
@@ -399,9 +406,13 @@ export const runClassifier = async (
     if (!model) return undefined;
 
     const auth = await modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok || !auth.apiKey) return undefined;
+    if (!auth.ok || !hasUsableRequestAuth(auth)) return undefined;
     const apiKey = auth.apiKey;
     const headers = auth.headers;
+    const requestModel = await resolveDelegatedModel(
+      modelRegistry as unknown as RegistryWithProviderAuth,
+      model,
+    );
 
     const promptText = getLastUserText(context);
     const historyText = getRecentConversationText(context, 4);
@@ -428,27 +439,23 @@ ${currentPhase === 'planning' ? 'Consider that the conversation is currently in 
 ${currentPhase === 'implementation' ? 'Consider that the conversation is currently in an implementation phase. Bias toward "medium" unless the request is clearly planning or a simple summary.' : ''}`;
 
     const classifierContext: Context = {
-      ...context,
-      messages: [{ role: 'user', content: classifierPrompt, timestamp: Date.now() }],
+      messages: [
+        { role: 'user', content: classifierPrompt, timestamp: Date.now() },
+      ],
     };
 
     const reasoningOption =
-      model.reasoning && thinking && thinking !== 'off'
-        ? thinking
-        : undefined;
+      model.reasoning && thinking && thinking !== 'off' ? thinking : undefined;
 
-    const stream = streamSimple(model, classifierContext, {
+    const stream = streamSimple(requestModel, classifierContext, {
       apiKey,
       headers,
       ...(reasoningOption ? { reasoning: reasoningOption } : {}),
     });
     let fullText = '';
     for await (const event of stream) {
-      if (
-        event.type === 'text_delta' &&
-        typeof (event as any).delta === 'string'
-      ) {
-        fullText += (event as any).delta;
+      if (event.type === 'text_delta' && typeof event.delta === 'string') {
+        fullText += event.delta;
       }
     }
 
@@ -469,7 +476,7 @@ ${currentPhase === 'implementation' ? 'Consider that the conversation is current
         };
       }
     }
-  } catch (error) {
+  } catch {
     // Ignore classifier errors and fall back to heuristics
   }
   return undefined;

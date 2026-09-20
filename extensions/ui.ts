@@ -1,9 +1,9 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type {
-  RoutingDecision,
   RouterConfig,
   RouterPinByProfile,
   RouterThinkingByProfile,
+  RoutingDecision,
 } from './types';
 
 const getEffectiveThinking = (
@@ -65,7 +65,9 @@ export const updateStatus = (
 ) => {
   const activeRouterProfile = routerEnabled ? selectedProfile : undefined;
   const statusProfile = selectedProfile ?? 'none';
-  const activePin = selectedProfile ? pinnedTierByProfile[selectedProfile] : undefined;
+  const activePin = selectedProfile
+    ? pinnedTierByProfile[selectedProfile]
+    : undefined;
   const pinLabel = activePin ? ` [pin:${activePin}]` : '';
 
   if (activeRouterProfile) {

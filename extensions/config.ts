@@ -1,26 +1,25 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
 import type {
+  ClassifierConfig,
+  ConfigLoadResult,
+  ModelDefinition,
+  ParsedConfigFile,
+  RoutedTierConfig,
   RouterConfig,
   RouterProfile,
-  RoutedTierConfig,
-  ConfigLoadResult,
-  ParsedConfigFile,
   RouterTier,
   RoutingRule,
-  ModelDefinition,
-  ClassifierConfig,
 } from './types';
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import {
-  DEFAULT_CONTEXT_WINDOW,
-  DEFAULT_MAX_TOKENS,
-} from './constants';
 
 export const ROUTER_TIERS = ['high', 'medium', 'low'] as const;
 
+// Pi accepts this model capability at runtime, but older peer type releases omit it.
+export const MAX_THINKING_LEVEL = 'max' as ThinkingLevel;
 
 export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   'off',
@@ -29,10 +28,15 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   'medium',
   'high',
   'xhigh',
+  MAX_THINKING_LEVEL,
 ];
 export const ROUTER_PIN_VALUES = ['auto', 'high', 'medium', 'low'] as const;
 
-export const DEFAULT_THINKING_LEVELS: readonly ThinkingLevel[] = ['high', 'medium', 'low'] as const;
+export const DEFAULT_THINKING_LEVELS: readonly ThinkingLevel[] = [
+  'high',
+  'medium',
+  'low',
+] as const;
 
 export const isObjectRecord = (
   value: unknown,
@@ -157,13 +161,17 @@ export const normalizeModelsMap = (
 
   for (const [alias, entry] of Object.entries(raw)) {
     if (!isObjectRecord(entry)) {
-      warnings.push(`Ignored invalid model definition "${alias}": expected an object.`);
+      warnings.push(
+        `Ignored invalid model definition "${alias}": expected an object.`,
+      );
       continue;
     }
 
     const model = typeof entry.model === 'string' ? entry.model.trim() : '';
     if (!model) {
-      warnings.push(`Model definition "${alias}" is missing the "model" field. Skipped.`);
+      warnings.push(
+        `Model definition "${alias}" is missing the "model" field. Skipped.`,
+      );
       continue;
     }
 
@@ -201,13 +209,19 @@ export const normalizeModelsMap = (
 
     let thinkingLevels: ThinkingLevel[] | undefined;
     if (Array.isArray(entry.thinkingLevels)) {
-      thinkingLevels = entry.thinkingLevels.filter(
-        (l): l is ThinkingLevel => isThinkingLevel(l),
+      thinkingLevels = entry.thinkingLevels.filter((l): l is ThinkingLevel =>
+        isThinkingLevel(l),
       );
       if (thinkingLevels.length === 0) thinkingLevels = undefined;
     }
 
-    result[alias] = { model, contextWindow, maxTokens, reasoning, thinkingLevels };
+    result[alias] = {
+      model,
+      contextWindow,
+      maxTokens,
+      reasoning,
+      thinkingLevels,
+    };
   }
 
   return result;
@@ -225,7 +239,6 @@ export const normalizeTierConfig = (
   }
 
   const rawModel = typeof value.model === 'string' ? value.model.trim() : '';
-  let aliasDefinition: ModelDefinition | undefined;
 
   if (!rawModel) {
     warnings.push(
@@ -236,7 +249,7 @@ export const normalizeTierConfig = (
 
   // Try to resolve as an alias first
   const resolved = resolveModelRef(rawModel, models);
-  aliasDefinition = resolved.definition;
+  const aliasDefinition = resolved.definition;
   let parsedModel: string;
   try {
     parseCanonicalModelRef(resolved.canonicalRef);
@@ -248,16 +261,14 @@ export const normalizeTierConfig = (
     return undefined;
   }
 
-  const thinking = isThinkingLevel(value.thinking)
-    ? value.thinking
-    : 'medium';
+  const thinking = isThinkingLevel(value.thinking) ? value.thinking : 'medium';
   if (value.thinking !== undefined && !isThinkingLevel(value.thinking)) {
     warnings.push(
       `Profile "${profileName}" ${tier} tier has invalid thinking level. Defaulting to medium.`,
     );
   }
 
-  let fallbacks: string[] | undefined = undefined;
+  let fallbacks: string[] | undefined;
   if (Array.isArray(value.fallbacks)) {
     fallbacks = [];
     for (const f of value.fallbacks) {
@@ -282,7 +293,9 @@ export const normalizeTierConfig = (
       ? value.contextWindow
       : undefined;
   const resolvedContextWindow =
-    tierContextWindow ?? aliasDefinition?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+    tierContextWindow ??
+    aliasDefinition?.contextWindow ??
+    DEFAULT_CONTEXT_WINDOW;
 
   // Resolve maxTokens: tier config > alias > hardcoded default
   const tierMaxTokens =
@@ -307,14 +320,20 @@ export const normalizeTierConfig = (
     if (tierThinkingLevels.length === 0) tierThinkingLevels = undefined;
   }
 
+  const explicitThinkingLevels =
+    tierThinkingLevels ?? aliasDefinition?.thinkingLevels;
   const baseThinkingLevels: ThinkingLevel[] =
-    tierThinkingLevels ??
-    aliasDefinition?.thinkingLevels ??
+    explicitThinkingLevels ??
     (effectiveReasoning === false ? [] : [...DEFAULT_THINKING_LEVELS]);
 
-  // Auto-add the tier's thinking value if it's not 'off' and not already present
+  // Auto-add the tier's thinking value if it's not 'off' and not already present,
+  // but only if the user didn't explicitly constrain the thinkingLevels array.
   const resolvedThinkingLevels: ThinkingLevel[] = [...baseThinkingLevels];
-  if (thinking !== 'off' && !resolvedThinkingLevels.includes(thinking)) {
+  if (
+    !explicitThinkingLevels &&
+    thinking !== 'off' &&
+    !resolvedThinkingLevels.includes(thinking)
+  ) {
     resolvedThinkingLevels.push(thinking);
   }
 
@@ -368,9 +387,7 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
     );
 
     if (!high && !medium && !low) {
-      warnings.push(
-        `Profile "${name}" has no valid tiers. Skipped.`,
-      );
+      warnings.push(`Profile "${name}" has no valid tiers. Skipped.`);
       continue;
     }
 
@@ -428,7 +445,8 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
       );
     }
   } else if (isObjectRecord(rawClassifier)) {
-    const modelRef = typeof rawClassifier.model === 'string' ? rawClassifier.model.trim() : '';
+    const modelRef =
+      typeof rawClassifier.model === 'string' ? rawClassifier.model.trim() : '';
     if (modelRef) {
       const resolved = resolveModelRef(
         modelRef,
@@ -451,7 +469,9 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
         );
       }
     } else {
-      warnings.push('classifierModel object is missing the "model" field. Ignored.');
+      warnings.push(
+        'classifierModel object is missing the "model" field. Ignored.',
+      );
     }
   }
 
@@ -524,7 +544,9 @@ export const resolveContextWindow = (
       const { provider, modelId } = parseCanonicalModelRef(tierConfig.model);
       const registryModel = modelRegistry.find(provider, modelId);
       if (registryModel?.contextWindow) return registryModel.contextWindow;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // 2-4. Pre-resolved during config normalization (tier > alias > hardcoded)
@@ -551,7 +573,9 @@ export const resolveMaxTokens = (
       const { provider, modelId } = parseCanonicalModelRef(tierConfig.model);
       const registryModel = modelRegistry.find(provider, modelId);
       if (registryModel?.maxTokens) return registryModel.maxTokens;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   // 2-4. Pre-resolved during config normalization (tier > alias > hardcoded)
@@ -593,4 +617,26 @@ export const getUnsupportedTiers = (
     }
   }
   return unsupported;
+};
+
+/**
+ * Clamps a requested thinking level to the highest supported level
+ * in the provided array of supported levels.
+ */
+export const clampThinkingLevel = (
+  requested: ThinkingLevel,
+  supported: ThinkingLevel[] | undefined,
+): ThinkingLevel => {
+  if (requested === 'off' || !supported || supported.length === 0) {
+    return 'off';
+  }
+
+  const reqIdx = THINKING_LEVELS.indexOf(requested);
+  for (let i = reqIdx; i >= 0; i--) {
+    if (supported.includes(THINKING_LEVELS[i])) {
+      return THINKING_LEVELS[i];
+    }
+  }
+
+  return 'off';
 };

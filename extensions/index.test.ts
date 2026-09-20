@@ -1,5 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import routerExtension from './index';
+
+const stateMocks = vi.hoisted(() => ({
+  loadLastRouterProfile: vi.fn(),
+  saveLastRouterProfile: vi.fn(),
+}));
+
+vi.mock('./state', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./state')>()),
+  loadLastRouterProfile: stateMocks.loadLastRouterProfile,
+  saveLastRouterProfile: stateMocks.saveLastRouterProfile,
+}));
 
 vi.mock('./config', () => ({
   loadRouterConfig: () => ({
@@ -9,13 +21,19 @@ vi.mock('./config', () => ({
           high: { model: 'openai/gpt-4o' },
           medium: { model: 'openai/gpt-4o-mini' },
         },
+        alternate: {
+          high: { model: 'anthropic/claude-opus-4' },
+          medium: { model: 'anthropic/claude-sonnet-4' },
+        },
       },
     },
     warnings: [],
   }),
-  profileNames: () => ['balanced'],
-  resolveProfileName: (config: unknown, name: unknown) =>
-    name === 'balanced' ? 'balanced' : undefined,
+  profileNames: () => ['alternate', 'balanced'],
+  resolveProfileName: (
+    config: { profiles: Record<string, unknown> },
+    name: unknown,
+  ) => (typeof name === 'string' && config.profiles[name] ? name : undefined),
   parseCanonicalModelRef: (_ref: string) => ({
     provider: 'openai',
     modelId: 'gpt-4o',
@@ -38,24 +56,35 @@ vi.mock('./config', () => ({
 }));
 
 describe('index.ts (orchestrator)', () => {
-  let mockPi: any;
-  let eventListeners: Record<string, Function[]> = {};
+  type EventHandler = (
+    event: Record<string, unknown>,
+    ctx: ReturnType<typeof buildMockCtx>,
+  ) => unknown;
+  let mockPi: ReturnType<typeof buildMockPi>;
+  let eventListeners: Record<string, EventHandler[]> = {};
 
-  beforeEach(() => {
-    eventListeners = {};
-    mockPi = {
+  const buildMockPi = () => {
+    const api = {
       registerProvider: vi.fn(),
       registerCommand: vi.fn(),
       setModel: vi.fn().mockResolvedValue(true),
       setThinkingLevel: vi.fn(),
       appendEntry: vi.fn(),
-      on: vi.fn().mockImplementation((event: string, handler: Function) => {
-        if (!eventListeners[event]) {
-          eventListeners[event] = [];
-        }
+      on: vi.fn().mockImplementation((event: string, handler: EventHandler) => {
+        eventListeners[event] ??= [];
         eventListeners[event].push(handler);
       }),
     };
+    return api as typeof api & ExtensionAPI;
+  };
+
+  beforeEach(() => {
+    eventListeners = {};
+    stateMocks.loadLastRouterProfile.mockReset();
+    stateMocks.loadLastRouterProfile.mockReturnValue(undefined);
+    stateMocks.saveLastRouterProfile.mockReset();
+    stateMocks.saveLastRouterProfile.mockReturnValue(true);
+    mockPi = buildMockPi();
   });
 
   const buildMockCtx = () => ({
@@ -72,7 +101,7 @@ describe('index.ts (orchestrator)', () => {
       setStatus: vi.fn(),
       setWidget: vi.fn(),
       setHiddenThinkingLabel: vi.fn(),
-      theme: { fg: (c: string, text: string) => text },
+      theme: { fg: (_color: string, text: string) => text },
       notify: vi.fn(),
     },
   });
@@ -121,7 +150,7 @@ describe('index.ts (orchestrator)', () => {
     ];
 
     // Trigger session_start
-    const sessionStartHandlers = eventListeners['session_start'] || [];
+    const sessionStartHandlers = eventListeners.session_start || [];
     for (const handler of sessionStartHandlers) {
       await handler({}, mockCtx);
     }
@@ -138,17 +167,18 @@ describe('index.ts (orchestrator)', () => {
     const mockCtx = buildMockCtx();
 
     // Trigger session_start to initialize first
-    const sessionStartHandlers = eventListeners['session_start'] || [];
+    const sessionStartHandlers = eventListeners.session_start || [];
     for (const handler of sessionStartHandlers) {
       await handler({}, mockCtx);
     }
 
-    const modelSelectHandlers = eventListeners['model_select'] || [];
+    const modelSelectHandlers = eventListeners.model_select || [];
     for (const handler of modelSelectHandlers) {
       await handler({ model: { provider: 'router', id: 'balanced' } }, mockCtx);
     }
 
     expect(mockCtx.ui.setStatus).toHaveBeenCalled();
+    expect(stateMocks.saveLastRouterProfile).toHaveBeenCalledWith('balanced');
   });
 
   it('should enforce router model on turn_end hook', async () => {
@@ -157,13 +187,13 @@ describe('index.ts (orchestrator)', () => {
     const mockCtx = buildMockCtx();
 
     // Trigger session_start to initialize
-    const sessionStartHandlers = eventListeners['session_start'] || [];
+    const sessionStartHandlers = eventListeners.session_start || [];
     for (const handler of sessionStartHandlers) {
       await handler({}, mockCtx);
     }
 
     // Now trigger model_select to select a router model
-    const modelSelectHandlers = eventListeners['model_select'] || [];
+    const modelSelectHandlers = eventListeners.model_select || [];
     for (const handler of modelSelectHandlers) {
       await handler({ model: { provider: 'router', id: 'balanced' } }, mockCtx);
     }
@@ -172,7 +202,7 @@ describe('index.ts (orchestrator)', () => {
     mockCtx.model = { provider: 'openai', id: 'gpt-4o' };
 
     // Trigger turn_end
-    const turnEndHandlers = eventListeners['turn_end'] || [];
+    const turnEndHandlers = eventListeners.turn_end || [];
     for (const handler of turnEndHandlers) {
       await handler({}, mockCtx);
     }
@@ -190,7 +220,7 @@ describe('index.ts (orchestrator)', () => {
       const mockCtx = buildMockCtx();
 
       // Initialize via session_start
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -199,7 +229,7 @@ describe('index.ts (orchestrator)', () => {
       mockPi.appendEntry.mockClear();
 
       // Select a non-router model
-      const modelSelectHandlers = eventListeners['model_select'] || [];
+      const modelSelectHandlers = eventListeners.model_select || [];
       for (const handler of modelSelectHandlers) {
         await handler(
           { model: { provider: 'anthropic', id: 'claude-3-5-sonnet' } },
@@ -230,7 +260,7 @@ describe('index.ts (orchestrator)', () => {
       mockCtx.ui.setStatus.mockClear();
 
       // Trigger model_select WITHOUT session_start first
-      const modelSelectHandlers = eventListeners['model_select'] || [];
+      const modelSelectHandlers = eventListeners.model_select || [];
       for (const handler of modelSelectHandlers) {
         await handler(
           { model: { provider: 'anthropic', id: 'claude-3-5-sonnet' } },
@@ -251,7 +281,7 @@ describe('index.ts (orchestrator)', () => {
       const mockCtx = buildMockCtx();
 
       // Initialize via session_start (sets routerEnabled=true, selectedProfile='balanced')
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -260,12 +290,41 @@ describe('index.ts (orchestrator)', () => {
       mockPi.appendEntry.mockClear();
 
       // Trigger thinking_level_select
-      const thinkingHandlers = eventListeners['thinking_level_select'] || [];
+      const thinkingHandlers = eventListeners.thinking_level_select || [];
       for (const handler of thinkingHandlers) {
         handler({ level: 'high' }, mockCtx);
       }
 
       // Should persist state with thinking overrides for all tiers
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        'router-state',
+        expect.objectContaining({
+          thinkingByProfile: {
+            balanced: { high: 'high', medium: 'high', low: 'high' },
+          },
+        }),
+      );
+    });
+
+    it('should ignore Pi startup thinking selection but keep user changes', async () => {
+      routerExtension(mockPi);
+
+      const mockCtx = buildMockCtx();
+      const sessionStartHandlers = eventListeners.session_start || [];
+      for (const handler of sessionStartHandlers) {
+        await handler({ reason: 'startup' }, mockCtx);
+      }
+
+      mockPi.appendEntry.mockClear();
+      const thinkingHandlers = eventListeners.thinking_level_select || [];
+      for (const handler of thinkingHandlers) {
+        handler({ level: 'medium', previousLevel: 'off' }, mockCtx);
+      }
+      expect(mockPi.appendEntry).not.toHaveBeenCalled();
+
+      for (const handler of thinkingHandlers) {
+        handler({ level: 'high', previousLevel: 'medium' }, mockCtx);
+      }
       expect(mockPi.appendEntry).toHaveBeenCalledWith(
         'router-state',
         expect.objectContaining({
@@ -284,7 +343,7 @@ describe('index.ts (orchestrator)', () => {
       mockCtx.model = { provider: 'openai', id: 'gpt-4o' };
 
       // Initialize via session_start with non-router model
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -292,7 +351,7 @@ describe('index.ts (orchestrator)', () => {
       mockPi.appendEntry.mockClear();
 
       // Trigger thinking_level_select
-      const thinkingHandlers = eventListeners['thinking_level_select'] || [];
+      const thinkingHandlers = eventListeners.thinking_level_select || [];
       for (const handler of thinkingHandlers) {
         handler({ level: 'medium' }, mockCtx);
       }
@@ -309,7 +368,7 @@ describe('index.ts (orchestrator)', () => {
       mockPi.appendEntry.mockClear();
 
       // Trigger thinking_level_select without session_start
-      const thinkingHandlers = eventListeners['thinking_level_select'] || [];
+      const thinkingHandlers = eventListeners.thinking_level_select || [];
       for (const handler of thinkingHandlers) {
         handler({ level: 'low' }, mockCtx);
       }
@@ -326,7 +385,7 @@ describe('index.ts (orchestrator)', () => {
       // Empty session
       mockCtx.sessionManager.getBranch = () => [];
 
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -341,6 +400,142 @@ describe('index.ts (orchestrator)', () => {
           selectedProfile: 'balanced',
         }),
       );
+    });
+
+    it('should restore the last profile for a new startup session', async () => {
+      stateMocks.loadLastRouterProfile.mockReturnValue('alternate');
+      routerExtension(mockPi);
+
+      const mockCtx = buildMockCtx();
+      mockCtx.modelRegistry.find = vi
+        .fn()
+        .mockImplementation((provider: string, id: string) => ({
+          provider,
+          id,
+        }));
+
+      const sessionStartHandlers = eventListeners.session_start || [];
+      for (const handler of sessionStartHandlers) {
+        await handler({ reason: 'startup' }, mockCtx);
+      }
+
+      expect(mockPi.setModel).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'router', id: 'alternate' }),
+      );
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        'router-state',
+        expect.objectContaining({
+          enabled: true,
+          selectedProfile: 'alternate',
+        }),
+      );
+    });
+
+    it('should preserve an explicit CLI model selection', async () => {
+      stateMocks.loadLastRouterProfile.mockReturnValue('alternate');
+      routerExtension(mockPi);
+
+      const originalArgv = process.argv;
+      process.argv = [...originalArgv, '--model=router/balanced'];
+      try {
+        const mockCtx = buildMockCtx();
+        mockCtx.sessionManager.getBranch = () => [
+          {
+            type: 'custom',
+            customType: 'router-state',
+            data: {
+              enabled: true,
+              selectedProfile: 'alternate',
+              lastNonRouterModel: 'anthropic/claude-sonnet-4',
+              timestamp: Date.now(),
+            },
+          },
+        ];
+        const sessionStartHandlers = eventListeners.session_start || [];
+        for (const handler of sessionStartHandlers) {
+          await handler({ reason: 'startup' }, mockCtx);
+        }
+      } finally {
+        process.argv = originalArgv;
+      }
+
+      expect(stateMocks.loadLastRouterProfile).not.toHaveBeenCalled();
+      expect(mockPi.setModel).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'router', id: 'balanced' }),
+      );
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        'router-state',
+        expect.objectContaining({
+          enabled: true,
+          selectedProfile: 'balanced',
+        }),
+      );
+    });
+
+    it('should not enable the router when Pi starts on a non-router model', async () => {
+      stateMocks.loadLastRouterProfile.mockReturnValue('alternate');
+      routerExtension(mockPi);
+
+      const mockCtx = buildMockCtx();
+      mockCtx.model = { provider: 'openai', id: 'gpt-4o' };
+      const sessionStartHandlers = eventListeners.session_start || [];
+      for (const handler of sessionStartHandlers) {
+        await handler({ reason: 'startup' }, mockCtx);
+      }
+
+      expect(stateMocks.loadLastRouterProfile).not.toHaveBeenCalled();
+      expect(mockPi.setModel).not.toHaveBeenCalled();
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        'router-state',
+        expect.objectContaining({ enabled: false }),
+      );
+    });
+
+    it('should ignore a last profile that is no longer configured', async () => {
+      stateMocks.loadLastRouterProfile.mockReturnValue('removed');
+      routerExtension(mockPi);
+
+      const mockCtx = buildMockCtx();
+      const sessionStartHandlers = eventListeners.session_start || [];
+      for (const handler of sessionStartHandlers) {
+        await handler({ reason: 'startup' }, mockCtx);
+      }
+
+      expect(mockPi.setModel).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'router', id: 'balanced' }),
+      );
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        'router-state',
+        expect.objectContaining({ selectedProfile: 'balanced' }),
+      );
+    });
+
+    it('should prefer branch state over the cross-session profile', async () => {
+      stateMocks.loadLastRouterProfile.mockReturnValue('alternate');
+      routerExtension(mockPi);
+
+      const mockCtx = buildMockCtx();
+      mockCtx.sessionManager.getBranch = () => [
+        {
+          type: 'custom',
+          customType: 'router-state',
+          data: {
+            enabled: true,
+            selectedProfile: 'balanced',
+            timestamp: Date.now(),
+          },
+        },
+      ];
+
+      const sessionStartHandlers = eventListeners.session_start || [];
+      for (const handler of sessionStartHandlers) {
+        await handler({ reason: 'startup' }, mockCtx);
+      }
+
+      expect(mockPi.setModel).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'router', id: 'balanced' }),
+      );
+      expect(stateMocks.loadLastRouterProfile).not.toHaveBeenCalled();
     });
 
     it('should handle failed model restoration (setModel returns false)', async () => {
@@ -362,7 +557,7 @@ describe('index.ts (orchestrator)', () => {
         },
       ];
 
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -402,7 +597,7 @@ describe('index.ts (orchestrator)', () => {
         },
       ];
 
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -444,7 +639,7 @@ describe('index.ts (orchestrator)', () => {
         },
       ];
 
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -488,7 +683,7 @@ describe('index.ts (orchestrator)', () => {
         },
       ];
 
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -507,7 +702,7 @@ describe('index.ts (orchestrator)', () => {
       mockCtx.model = { provider: 'openai', id: 'gpt-4o' };
 
       // Initialize via session_start with non-router model
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
@@ -518,7 +713,7 @@ describe('index.ts (orchestrator)', () => {
       mockCtx.ui.setStatus.mockClear();
 
       // Trigger turn_end
-      const turnEndHandlers = eventListeners['turn_end'] || [];
+      const turnEndHandlers = eventListeners.turn_end || [];
       for (const handler of turnEndHandlers) {
         await handler({}, mockCtx);
       }
@@ -542,22 +737,25 @@ describe('index.ts (orchestrator)', () => {
       const mockCtx = buildMockCtx();
 
       // Initialize with router enabled (default: model is router/balanced)
-      const sessionStartHandlers = eventListeners['session_start'] || [];
+      const sessionStartHandlers = eventListeners.session_start || [];
       for (const handler of sessionStartHandlers) {
         await handler({}, mockCtx);
       }
 
       // Select router model to ensure routerEnabled=true
-      const modelSelectHandlers = eventListeners['model_select'] || [];
+      const modelSelectHandlers = eventListeners.model_select || [];
       for (const handler of modelSelectHandlers) {
-        await handler({ model: { provider: 'router', id: 'balanced' } }, mockCtx);
+        await handler(
+          { model: { provider: 'router', id: 'balanced' } },
+          mockCtx,
+        );
       }
 
       // Clear mocks after initialization and model_select
       mockPi.appendEntry.mockClear();
 
       // Trigger turn_end — first call may persist if snapshot differs
-      const turnEndHandlers = eventListeners['turn_end'] || [];
+      const turnEndHandlers = eventListeners.turn_end || [];
       for (const handler of turnEndHandlers) {
         await handler({}, mockCtx);
       }
@@ -582,7 +780,7 @@ describe('index.ts (orchestrator)', () => {
       mockCtx1.cwd = '/mock/cwd1';
 
       // Trigger turn_start event with mockCtx1
-      const turnStartHandlers = eventListeners['turn_start'] || [];
+      const turnStartHandlers = eventListeners.turn_start || [];
       for (const handler of turnStartHandlers) {
         await handler({}, mockCtx1);
       }
