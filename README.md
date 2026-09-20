@@ -159,6 +159,58 @@ to a configured tier at or above that floor. **A partial profile with no eligibl
 tier now fails before generation** rather than silently lowering safety. Budget
 conflicts retain the eligible route and report `budget-floor-conflict`.
 
+### Optional Jev advisor: user config only
+
+The Jev adapter/configuration is available; provider routing integration is staged
+separately. It makes one bounded TypeSafe System One Choice request, without
+retries. Advice is restricted to locally supplied tier/model/thinking candidates;
+missing keys, malformed responses, `uncertain`, low confidence, timeout and HTTP
+errors return no advice.
+
+Configure Jev **only** in `~/.pi/agent/model-router.json` (or the agent directory
+selected by Pi). Both global enablement and an explicit user-level profile opt-in
+are required. Work profiles remain disabled unless you explicitly approve sending
+their task summaries externally. All project-level `jev` settings, including
+profile opt-ins, are ignored with a warning, before merging user credentials.
+
+```json
+{
+  "jev": {
+    "enabled": true,
+    "apiKey": "<rendered by chezmoi/1Password>",
+    "endpoint": "https://api.typesafe.ai/v1/systemone",
+    "model": "jev-1.13.0",
+    "timeoutMs": 750,
+    "confidenceThreshold": 0.65,
+    "maxStateChars": 12000,
+    "mode": "advisory"
+  },
+  "profiles": {
+    "personal": {
+      "jev": { "enabled": true },
+      "medium": { "model": "google/gemini-flash-latest", "thinking": "medium" }
+    }
+  }
+}
+```
+
+The endpoint, model, timeout, confidence threshold, state limit and mode shown
+above are defaults. Only HTTPS endpoints without embedded credentials, query
+parameters or fragments are accepted. Timeout must be positive and at most
+1500 ms, confidence must be 0–1, and the task-summary limit must be 1–12000
+characters. The adapter also respects the caller's remaining routing deadline.
+
+For chezmoi, use a **private template**, for example
+`private_model-router.json.tmpl` under your agent-directory source path. Render
+only the `apiKey` value using a reference such as
+`{{ onepasswordRead "op://Personal/TypeSafe/apiKey" | toJson }}` (unquoted in the
+JSON template). Adapt the vault/item reference locally. Keep the rendered file
+out of Git and restrict permissions to `0600` (`chmod 600` on Unix); verify the
+mode without printing the file. Never commit rendered credentials or 1Password
+output. No environment variable is required, and the extension never executes a
+secret-lookup command. The repository example contains only a placeholder and
+keeps Jev disabled.
+
 ## Commands
 
 | Command                     | Description                                                                     |

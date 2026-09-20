@@ -7,6 +7,7 @@ import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
 import type {
   ClassifierConfig,
   ConfigLoadResult,
+  JevConfig,
   ModelDefinition,
   ParsedConfigFile,
   RawRouterConfig,
@@ -69,12 +70,11 @@ export const parseConfigFile = (path: string): ParsedConfigFile => {
       };
     }
     return { config: parsed, warnings: [] };
-  } catch (error) {
+  } catch {
+    // JSON parse errors can include source snippets containing credentials.
     return {
       config: {},
-      warnings: [
-        `Failed to parse router config at ${path}: ${error instanceof Error ? error.message : String(error)}`,
-      ],
+      warnings: [`Failed to parse router config at ${path}.`],
     };
   }
 };
@@ -127,6 +127,7 @@ export const mergeConfig = (
       medium: mergeRawValue(existing.medium, profile.medium),
       low: mergeRawValue(existing.low, profile.low),
       micro: mergeRawValue(existing.micro, profile.micro),
+      jev: mergeRawValue(existing.jev, profile.jev),
     };
   }
 
@@ -135,6 +136,7 @@ export const mergeConfig = (
   const mergedModels = { ...baseModels, ...overrideModels };
 
   return {
+    jev: mergeRawValue(base.jev, override.jev),
     debug: override.debug ?? base.debug,
     classifierModel: override.classifierModel ?? base.classifierModel,
     phaseBias: override.phaseBias ?? base.phaseBias,
@@ -371,6 +373,104 @@ export const normalizeTierConfig = (
   };
 };
 
+export const DEFAULT_JEV_CONFIG = {
+  endpoint: 'https://api.typesafe.ai/v1/systemone',
+  model: 'jev-1.13.0',
+  timeoutMs: 750,
+  confidenceThreshold: 0.65,
+  maxStateChars: 12000,
+  mode: 'advisory',
+} as const;
+
+export const isJevEndpoint = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const normalizeJevConfig = (
+  raw: unknown,
+  warnings: string[],
+): JevConfig | undefined => {
+  if (raw === undefined) return undefined;
+  const invalid = (): undefined => {
+    warnings.push('Ignored invalid Jev configuration.');
+    return undefined;
+  };
+  if (!isObjectRecord(raw)) return invalid();
+  const value: Record<string, unknown> = { ...DEFAULT_JEV_CONFIG, ...raw };
+  if (
+    (value.enabled !== undefined && typeof value.enabled !== 'boolean') ||
+    !isJevEndpoint(value.endpoint) ||
+    typeof value.model !== 'string' ||
+    !/^[a-zA-Z0-9._-]{1,128}$/.test(value.model) ||
+    typeof value.timeoutMs !== 'number' ||
+    !Number.isFinite(value.timeoutMs) ||
+    value.timeoutMs <= 0 ||
+    value.timeoutMs > 1500 ||
+    typeof value.confidenceThreshold !== 'number' ||
+    !Number.isFinite(value.confidenceThreshold) ||
+    value.confidenceThreshold < 0 ||
+    value.confidenceThreshold > 1 ||
+    typeof value.maxStateChars !== 'number' ||
+    !Number.isInteger(value.maxStateChars) ||
+    value.maxStateChars < 1 ||
+    value.maxStateChars > 12000 ||
+    value.mode !== 'advisory' ||
+    (value.apiKey !== undefined &&
+      (typeof value.apiKey !== 'string' || /[\r\n]/.test(value.apiKey)))
+  )
+    return invalid();
+  const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
+  if (value.enabled === true && !apiKey) {
+    warnings.push('Jev disabled: missing user-config API key.');
+  }
+  return {
+    enabled: value.enabled === true && apiKey.length > 0,
+    apiKey,
+    endpoint: value.endpoint,
+    model: value.model,
+    timeoutMs: value.timeoutMs,
+    confidenceThreshold: value.confidenceThreshold,
+    maxStateChars: value.maxStateChars,
+    mode: 'advisory',
+  };
+};
+
+// Remove every project Jev setting before merging with user-owned credentials.
+export const stripProjectJevConfig = (
+  raw: RawRouterConfig,
+  warnings: string[],
+): RawRouterConfig => {
+  const { jev: ignored, ...project } = raw;
+  let found = ignored !== undefined;
+  if (isObjectRecord(project.profiles)) {
+    project.profiles = Object.fromEntries(
+      Object.entries(project.profiles).map(([name, profile]) => {
+        if (!isObjectRecord(profile)) return [name, profile];
+        const { jev, ...tiers } = profile;
+        if (jev !== undefined) found = true;
+        return [name, tiers];
+      }),
+    );
+  }
+  if (found)
+    warnings.push(
+      'Ignored project Jev settings: configure Jev only in user config.',
+    );
+  return project;
+};
+
 export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   const warnings: string[] = [];
 
@@ -420,7 +520,10 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       continue;
     }
 
-    normalizedProfiles[name] = { high, medium, low, micro };
+    const jev = isObjectRecord(profileRecord.jev)
+      ? { enabled: profileRecord.jev.enabled === true }
+      : undefined;
+    normalizedProfiles[name] = { high, medium, low, micro, jev };
   }
 
   const phaseBias =
@@ -511,6 +614,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
 
   return {
     config: {
+      jev: normalizeJevConfig(raw.jev, warnings),
       debug: typeof raw.debug === 'boolean' ? raw.debug : false,
       classifierModel,
       phaseBias,
@@ -531,7 +635,7 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
   const baseConfig: RawRouterConfig = { profiles: {} };
   const merged = mergeConfig(
     mergeConfig(baseConfig, globalResult.config),
-    projectResult.config,
+    stripProjectJevConfig(projectResult.config, projectResult.warnings),
   );
   const normalized = normalizeConfig(merged);
   return {

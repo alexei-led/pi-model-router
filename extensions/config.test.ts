@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   collectProfileThinkingLevels,
@@ -8,6 +9,7 @@ import {
   loadRouterConfig,
   mergeConfig,
   normalizeConfig,
+  normalizeJevConfig,
   normalizeModelsMap,
   normalizeTierConfig,
   parseCanonicalModelRef,
@@ -27,7 +29,7 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
 vi.mock('node:fs', () => ({
   existsSync: (path: string) =>
     path.includes('exists') || path.includes('model-router.json'),
-  readFileSync: (path: string) => {
+  readFileSync: vi.fn((path: string) => {
     if (path.includes('invalid-json')) {
       return '{invalid';
     }
@@ -61,7 +63,7 @@ vi.mock('node:fs', () => ({
       });
     }
     return '{}';
-  },
+  }),
 }));
 
 describe('config.ts', () => {
@@ -645,5 +647,165 @@ describe('micro config compatibility', () => {
     expect(config.profiles.p?.micro?.thinking).toBe('minimal');
     expect(config.rules?.[0]?.tier).toBe('micro');
     expect(isRouterTier('micro')).toBe(true);
+  });
+});
+
+describe('config.ts Jev user-config provenance', () => {
+  const personal = { medium: { model: 'openai/test' }, jev: { enabled: true } };
+  const user = {
+    jev: { enabled: true, apiKey: 'synthetic-user-key' },
+    profiles: { personal, work: { medium: { model: 'openai/test' } } },
+  };
+  const loadSources = (global: unknown, project: unknown) => {
+    vi.mocked(readFileSync)
+      .mockReturnValueOnce(JSON.stringify(global))
+      .mockReturnValueOnce(JSON.stringify(project));
+    return loadRouterConfig('/project');
+  };
+
+  it('normalizes approved defaults and keeps work disabled without explicit user opt-in', () => {
+    const { config, warnings } = loadSources(user, {});
+    expect(warnings).toEqual([]);
+    expect(config.jev).toEqual({
+      enabled: true,
+      apiKey: 'synthetic-user-key',
+      endpoint: 'https://api.typesafe.ai/v1/systemone',
+      model: 'jev-1.13.0',
+      timeoutMs: 750,
+      confidenceThreshold: 0.65,
+      maxStateChars: 12000,
+      mode: 'advisory',
+    });
+    expect(config.profiles.personal?.jev?.enabled).toBe(true);
+    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
+  });
+
+  it.each([
+    { enabled: false },
+    { enabled: true },
+    { apiKey: 'synthetic-project-secret' },
+    { endpoint: 'https://attacker.invalid/collect' },
+    { model: 'attacker-model' },
+    {
+      enabled: true,
+      apiKey: 'synthetic-project-secret',
+      endpoint: 'https://attacker.invalid/collect',
+      model: 'attacker-model',
+    },
+  ])('ignores project Jev settings before merging: %j', (jev) => {
+    const { config, warnings } = loadSources(user, {
+      jev,
+      profiles: {
+        personal: { jev: { enabled: false } },
+        work: { jev: { enabled: true } },
+        projectOnly: { ...personal },
+      },
+    });
+    expect(config.jev?.enabled).toBe(true);
+    expect(config.jev?.apiKey).toBe('synthetic-user-key');
+    expect(config.jev?.endpoint).toBe('https://api.typesafe.ai/v1/systemone');
+    expect(config.jev?.model).toBe('jev-1.13.0');
+    expect(config.profiles.personal?.jev?.enabled).toBe(true);
+    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
+    expect(config.profiles.projectOnly?.jev?.enabled).not.toBe(true);
+    expect(warnings).toEqual([
+      'Ignored project Jev settings: configure Jev only in user config.',
+    ]);
+    expect(JSON.stringify(warnings)).not.toContain('synthetic-project-secret');
+    expect(JSON.stringify(warnings)).not.toContain('attacker');
+  });
+
+  it('cannot inherit user credentials through project enablement', () => {
+    const { config } = loadSources(
+      { ...user, jev: { apiKey: 'synthetic-user-key' } },
+      {
+        jev: { enabled: true },
+        profiles: { work: { jev: { enabled: true } } },
+      },
+    );
+    expect(config.jev?.enabled).toBe(false);
+    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
+  });
+
+  it('cannot use a project key or project profile opt-in without user Jev settings', () => {
+    const { config } = loadSources({}, user);
+    expect(config.jev).toBeUndefined();
+    expect(config.profiles.personal?.jev).toBeUndefined();
+  });
+
+  it('uses only enabled from a user profile, never profile credentials or endpoint', () => {
+    const { config } = loadSources(
+      {
+        ...user,
+        profiles: {
+          personal: {
+            ...personal,
+            jev: {
+              enabled: true,
+              apiKey: 'profile-secret',
+              endpoint: 'https://other.invalid',
+            },
+          },
+        },
+      },
+      {},
+    );
+    expect(config.profiles.personal?.jev).toEqual({ enabled: true });
+  });
+
+  it('disables missing or blank keys with a fixed warning', () => {
+    for (const apiKey of [undefined, '']) {
+      const warnings: string[] = [];
+      expect(
+        normalizeJevConfig({ enabled: true, apiKey }, warnings)?.enabled,
+      ).toBe(false);
+      expect(warnings).toEqual(['Jev disabled: missing user-config API key.']);
+    }
+  });
+
+  it.each([
+    null,
+    [],
+    'synthetic-secret',
+    { enabled: 'yes' },
+    { apiKey: 1 },
+    { apiKey: 'bad\nsecret' },
+    { endpoint: 'http://insecure.invalid' },
+    { endpoint: 'https://user:secret@host.invalid' },
+    { endpoint: 'https://host.invalid?token=secret' },
+    { model: '' },
+    { model: {} },
+    { timeoutMs: 0 },
+    { timeoutMs: Number.NaN },
+    { timeoutMs: Number.POSITIVE_INFINITY },
+    { timeoutMs: 1501 },
+    { confidenceThreshold: -1 },
+    { confidenceThreshold: 2 },
+    { confidenceThreshold: Number.NaN },
+    { maxStateChars: 0 },
+    { maxStateChars: 12001 },
+    { maxStateChars: 1.5 },
+    { mode: 'authoritative' },
+  ])('rejects malformed Jev config without echoing fields: %j', (value) => {
+    const warnings: string[] = [];
+    expect(normalizeJevConfig(value, warnings)).toBeUndefined();
+    expect(warnings).toEqual(['Ignored invalid Jev configuration.']);
+  });
+
+  it('never includes JSON parse source or thrown read errors in warnings', () => {
+    const secret = 'synthetic-json-key-never-log';
+    vi.mocked(readFileSync).mockReturnValueOnce(
+      `{"jev":{"apiKey":"${secret}"} invalid`,
+    );
+    const invalid = parseConfigFile('/exists/model-router.json');
+    vi.mocked(readFileSync).mockImplementationOnce(() => {
+      throw new Error(secret);
+    });
+    const error = parseConfigFile('/exists/model-router.json');
+    expect(invalid.warnings).toEqual([
+      'Failed to parse router config at /exists/model-router.json.',
+    ]);
+    expect(error.warnings).toEqual(invalid.warnings);
+    expect(JSON.stringify([invalid, error])).not.toContain(secret);
   });
 });

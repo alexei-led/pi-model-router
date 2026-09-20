@@ -42,7 +42,23 @@ export interface RoutedTierConfig {
   resolvedThinkingLevels?: ThinkingLevel[] | undefined;
 }
 
+export interface JevConfig {
+  enabled: boolean;
+  apiKey: string;
+  endpoint: string;
+  model: string;
+  timeoutMs: number;
+  confidenceThreshold: number;
+  maxStateChars: number;
+  mode: 'advisory';
+}
+
+export interface JevProfileConfig {
+  enabled: boolean;
+}
+
 export interface RouterProfile {
+  jev?: JevProfileConfig | undefined;
   high?: RoutedTierConfig | undefined;
   medium?: RoutedTierConfig | undefined;
   low?: RoutedTierConfig | undefined;
@@ -50,6 +66,7 @@ export interface RouterProfile {
 }
 
 export interface RouterConfig {
+  jev?: JevConfig | undefined;
   debug?: boolean | undefined;
   classifierModel?: ClassifierConfig | undefined;
   phaseBias?: number | undefined;
@@ -74,6 +91,31 @@ export interface RoutePair {
   tier: RouterTier;
   model: string;
   thinking: ThinkingLevel;
+}
+
+export interface JevRouteCandidate extends RoutePair {
+  id: string;
+}
+
+export interface JevDependencies {
+  fetch?: typeof fetch;
+  now?: () => number;
+}
+
+export interface JevRequest {
+  taskSummary: string;
+  candidates: readonly JevRouteCandidate[];
+  profile: JevProfileConfig | undefined;
+  /** Absolute monotonic deadline supplied by the routing orchestrator. */
+  routingDeadline: number;
+  signal?: AbortSignal | undefined;
+}
+
+/** Only allowlisted local identity and numeric diagnostics cross the adapter boundary. */
+export interface JevAdvice {
+  candidateId: string;
+  confidence: number;
+  latencyMs: number;
 }
 
 export interface RoutingDecision {
@@ -127,6 +169,7 @@ export interface RouterPersistedState {
 }
 
 export interface RawRouterConfig {
+  jev?: unknown;
   debug?: unknown;
   classifierModel?: unknown;
   phaseBias?: unknown;

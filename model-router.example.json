@@ -1,5 +1,15 @@
 {
   "debug": false,
+  "jev": {
+    "enabled": false,
+    "apiKey": "<rendered by chezmoi/1Password in user config only>",
+    "endpoint": "https://api.typesafe.ai/v1/systemone",
+    "model": "jev-1.13.0",
+    "timeoutMs": 750,
+    "confidenceThreshold": 0.65,
+    "maxStateChars": 12000,
+    "mode": "advisory"
+  },
   "classifierModel": "flash",
   "phaseBias": 0.5,
   "maxSessionBudget": 1.0,
@@ -35,6 +45,7 @@
   ],
   "profiles": {
     "auto": {
+      "jev": { "enabled": false },
       "high": {
         "model": "gpt-pro",
         "thinking": "high",

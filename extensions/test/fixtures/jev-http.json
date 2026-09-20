@@ -1,0 +1,95 @@
+{
+  "source": "https://docs.typesafe.ai/api.md and https://docs.typesafe.ai/primitives/choice.md",
+  "captured": "2026-09-20",
+  "note": "Documentation-captured HTTP contract, adapted to local route IDs; synthetic task/model IDs and credentials only. No authenticated live call. uncertain is a client-defined Choice option, not an API status.",
+  "request": {
+    "method": "POST",
+    "endpoint": "https://api.typesafe.ai/v1/systemone",
+    "headers": {
+      "Authorization": "Bearer <REDACTED>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "state": { "untrustedTaskSummary": "Synthetic bounded task summary" },
+      "questions": {
+        "route": {
+          "type": "choice",
+          "instructions": "Choose a supplied route, or uncertain.",
+          "criteria": {
+            "medium|openai%2Ftest|medium": "medium complexity; model openai/test; thinking medium",
+            "high|openai%2Ftest|high": "high complexity; model openai/test; thinking high",
+            "uncertain": "Insufficient information to select a route safely."
+          }
+        }
+      }
+    }
+  },
+  "valid": {
+    "model": "jev-1.13.0",
+    "answers": {
+      "route": {
+        "type": "choice",
+        "choice": "medium|openai%2Ftest|medium",
+        "probabilities": {
+          "medium|openai%2Ftest|medium": 0.9,
+          "high|openai%2Ftest|high": 0.05,
+          "uncertain": 0.05
+        },
+        "confidence": 0.85
+      }
+    },
+    "usage": { "input_tokens": 318, "output_tokens": 34 }
+  },
+  "uncertain": {
+    "answers": {
+      "route": {
+        "type": "choice",
+        "choice": "uncertain",
+        "confidence": 0.85,
+        "probabilities": {
+          "medium|openai%2Ftest|medium": 0.05,
+          "high|openai%2Ftest|high": 0.05,
+          "uncertain": 0.9
+        }
+      }
+    }
+  },
+  "invalidCandidate": {
+    "answers": {
+      "route": {
+        "type": "choice",
+        "choice": "foreign-route",
+        "confidence": 1,
+        "probabilities": { "foreign-route": 1 }
+      }
+    }
+  },
+  "lowConfidence": {
+    "answers": {
+      "route": {
+        "type": "choice",
+        "choice": "medium|openai%2Ftest|medium",
+        "confidence": 0.1,
+        "probabilities": {
+          "medium|openai%2Ftest|medium": 0.4,
+          "high|openai%2Ftest|high": 0.3,
+          "uncertain": 0.3
+        }
+      }
+    }
+  },
+  "errors": [
+    { "status": 401, "body": "redacted authentication error" },
+    { "status": 429, "body": "redacted rate limit error" },
+    { "status": 500, "body": "redacted server error" },
+    { "status": 529, "body": "redacted overload error" }
+  ],
+  "timeout": { "delayMs": 751 },
+  "malformed": [
+    "{invalid",
+    "null",
+    "{}",
+    "{\"answers\":{\"route\":\"unexpected\"}}"
+  ]
+}
