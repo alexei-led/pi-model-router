@@ -269,6 +269,39 @@ describe('config.ts', () => {
   });
 
   describe('normalizeConfig', () => {
+    it('preserves omitted thinking provenance and canonical model identities', () => {
+      const { config } = normalizeConfig({
+        models: {
+          backup: { model: ' test / fallback ', thinkingLevels: ['low'] },
+        },
+        profiles: {
+          p: {
+            high: { model: ' test / primary ', thinking: 'medium' },
+            medium: {
+              model: 'test/primary',
+              fallbacks: ['backup', ' test / other '],
+            },
+            micro: { model: 'test/tiny' },
+          },
+        },
+      });
+      expect(config.models?.backup?.model).toBe('test/fallback');
+      expect(config.profiles.p?.high).toMatchObject({
+        model: 'test/primary',
+        thinking: 'medium',
+        thinkingExplicit: true,
+      });
+      expect(config.profiles.p?.medium).toMatchObject({
+        thinking: 'medium',
+        thinkingExplicit: false,
+        fallbacks: ['test/fallback', 'test/other'],
+      });
+      expect(config.profiles.p?.micro).toMatchObject({
+        thinking: 'off',
+        thinkingExplicit: false,
+      });
+    });
+
     it('normalize rules, profiles, phaseBias, budget, classifierModel', () => {
       const raw = {
         debug: true,

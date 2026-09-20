@@ -27,7 +27,7 @@ This fork is maintained at [alexei-led/pi-model-router](https://github.com/alexe
   - **Cost Budgeting**: Set a session spend limit; high tier downgrades to medium once exceeded, unless the local safety floor forbids it.
   - **Fallback Chains**: Automatic retry with alternative models if the primary choice fails.
 - **Phase Memory**: Biased stickiness to keep you in the same tier during multi-turn planning or implementation work.
-- **Thinking Control**: Full control over reasoning/thinking levels per tier and profile. Changing pi's thinking level (e.g. via `shift+tab`) automatically applies as an all-tier override for the active router profile.
+- **Thinking Control**: Full control over reasoning/thinking levels per tier and profile. Changing pi's thinking level (e.g. via `shift+tab`) automatically applies as an all-tier override for the active router profile. Overrides that leave no eligible route are rejected atomically (including Pi's selection); otherwise unsupported tiers are skipped.
 - **Persistent State**: Pins, costs, and debug history are remembered across agent restarts and conversation branches. When Pi starts on the router provider, new sessions use the last selected router profile if it is still configured. An explicit `--model` selection takes precedence.
 
 ## Installation
@@ -95,7 +95,7 @@ pi -e ./extensions/index.ts
 ## Reliability
 
 - Generation and classification use Pi's provider registry, including native/custom providers and credential-specific URLs. Only the optional Jev advisor uses separate HTTPS transport.
-- Fallbacks run only before content is emitted; cancellation does not retry. Every target must support the requested input and exact thinking level; unsupported effort is not silently reduced.
+- Fallbacks run only before content is emitted; cancellation does not retry. Every target must support the requested input and exact thinking level; explicit unsupported effort is not silently reduced. Omitted thinking defaults to `off` for non-reasoning targets, including fallbacks.
 - Jev and classifier share one 1500 ms routing deadline. Jev gets at most 750 ms (or its shorter configured timeout); the classifier gets only the remainder and a 256-token output limit. Advisor failures retain local routing, not a failed generation.
 - Valid same-turn tool continuations reuse the actual prior route before either advisor. Pins, rules, budget gates and deterministic mechanical tasks also skip advisors.
 - Context trimming preserves system instructions and whole active tool turns. It is a text estimate, not a guarantee that images or a large active turn fit.
@@ -252,7 +252,7 @@ keeps Jev disabled.
 | `/router profile [name]`    | Switch to a profile or list available ones (enables router if off).             |
 | `/router pin <t\|a>`        | Pin a tier (high/medium/low/micro/auto) for the active profile.                      |
 | `/router fix <tier>`        | Correct the _last_ decision and pin that tier for the current profile.          |
-| `/router thinking <level>`  | Override thinking level for all tiers (e.g. `/router thinking max`). Not all tier models may support every level. |
+| `/router thinking <level>`  | Override thinking level for all tiers (e.g. `/router thinking max`). Unsupported tiers are skipped; an override that leaves no eligible route is rejected without changing any tier. |
 | `/router thinking <tier> <level>` | Override thinking level for a specific tier (e.g. `/router thinking low off`). |
 | `/router disable`           | Disable the router and switch back to the last non-router model.                |
 | `/router widget <on\|off>`  | Toggle the persistent state widget (supports `toggle`).                         |

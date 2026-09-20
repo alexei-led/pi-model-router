@@ -49,7 +49,7 @@ export const isMechanicalTask = (prompt: string): boolean => {
     /^(?:please )?(?:run )?head -n (?:[1-9]|[1-9][0-9]|100) [a-z0-9_./][a-z0-9_./-]*$/i.test(
       text,
     ) ||
-    /^replace the exact comment "\/\/ [^"\n]+" with "\/\/ [^"\n]+" in [a-z0-9_./-]+\.?$/i.test(
+    /^replace the exact comment "\/\/ [^"\r\n\u2028\u2029]+" with "\/\/ [^"\r\n\u2028\u2029]+" in [a-z0-9_./-]+\.?$/i.test(
       text,
     )
   );
@@ -455,8 +455,11 @@ export const availableRoutePairs = (
           // A non-reasoning model defaults to off, but explicit unsupported effort is rejected.
           const thinking =
             thinkingOverrides?.[tier] ??
-            config.thinking ??
-            (model?.reasoning ? primary.thinking : 'off');
+            ((config.thinkingExplicit ?? config.thinking !== undefined)
+              ? primary.thinking
+              : model?.reasoning
+                ? primary.thinking
+                : 'off');
           const pair = { tier, model: `${provider}/${modelId}`, thinking };
           return validateRoutePair(
             pair,

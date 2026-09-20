@@ -1,5 +1,6 @@
 import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
+import { normalizeConfig } from './config';
 import {
   containsAny,
   countToolResults,
@@ -22,7 +23,7 @@ import {
   tierRank,
   validateRoutePair,
 } from './routing';
-import { model } from './test/fixtures';
+import { model, required } from './test/fixtures';
 import type { RouterProfile, RouterTier, RoutingRule } from './types';
 import { ROUTER_TIERS } from './types';
 
@@ -777,12 +778,18 @@ describe('four-level local routing', () => {
 });
 
 describe('local authority across every routing source', () => {
-  const profile: RouterProfile = {
-    micro: { model: 'test/tiny' },
-    low: { model: 'test/small' },
-    medium: { model: 'test/worker' },
-    high: { model: 'test/frontier' },
-  };
+  const profile = required(
+    normalizeConfig({
+      profiles: {
+        balanced: {
+          micro: { model: 'test/tiny' },
+          low: { model: 'test/small' },
+          medium: { model: 'test/worker' },
+          high: { model: 'test/frontier' },
+        },
+      },
+    }).config.profiles.balanced,
+  );
   it.each(
     ROUTER_TIERS.flatMap((tier) =>
       ROUTER_TIERS.map((floor) => ({ tier, floor })),
@@ -886,4 +893,63 @@ describe('local authority across every routing source', () => {
       false,
     );
   });
+});
+
+describe('normalized route thinking', () => {
+  it.each([undefined, 'medium', 'off'] as const)(
+    'resolves omitted versus explicit %s thinking for each actual target',
+    (thinking) => {
+      const profile = required(
+        normalizeConfig({
+          profiles: {
+            p: {
+              medium: {
+                model: 'test/primary',
+                fallbacks: ['test/fallback'],
+                ...(thinking ? { thinking } : {}),
+              },
+            },
+          },
+        }).config.profiles.p,
+      );
+      const pairs = availableRoutePairs(
+        profile,
+        'medium',
+        (_provider, id) => model(id, { reasoning: false }),
+        false,
+      );
+      expect(pairs.map((pair) => pair.thinking)).toEqual(
+        thinking === 'medium' ? [] : ['off', 'off'],
+      );
+      const mixed = availableRoutePairs(
+        profile,
+        'medium',
+        (_provider, id) => model(id, { reasoning: id === 'primary' }),
+        false,
+      );
+      expect(mixed.map((pair) => pair.thinking)).toEqual(
+        thinking === 'medium'
+          ? ['medium']
+          : thinking === 'off'
+            ? ['off', 'off']
+            : ['medium', 'off'],
+      );
+    },
+  );
+
+  it.each(['\r', '\n', '\u2028', '\u2029'])(
+    'rejects executable code after source line terminator %j',
+    (terminator) => {
+      expect(
+        isMechanicalTask(
+          `replace the exact comment "// old" with "// new${terminator}process.exit()" in file.ts`,
+        ),
+      ).toBe(false);
+      expect(
+        isMechanicalTask(
+          `replace the exact comment "// old${terminator}process.exit()" with "// new" in file.ts`,
+        ),
+      ).toBe(false);
+    },
+  );
 });

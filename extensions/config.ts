@@ -185,7 +185,7 @@ export const normalizeModelsMap = (
       continue;
     }
 
-    const model = typeof entry.model === 'string' ? entry.model.trim() : '';
+    let model = typeof entry.model === 'string' ? entry.model.trim() : '';
     if (!model) {
       warnings.push(
         `Model definition "${alias}" is missing the "model" field. Skipped.`,
@@ -194,7 +194,8 @@ export const normalizeModelsMap = (
     }
 
     try {
-      parseCanonicalModelRef(model);
+      const { provider, modelId } = parseCanonicalModelRef(model);
+      model = `${provider}/${modelId}`;
     } catch (error) {
       warnings.push(
         `Model definition "${alias}": ${error instanceof Error ? error.message : String(error)}`,
@@ -270,8 +271,8 @@ export const normalizeTierConfig = (
   const aliasDefinition = resolved.definition;
   let parsedModel: string;
   try {
-    parseCanonicalModelRef(resolved.canonicalRef);
-    parsedModel = resolved.canonicalRef;
+    const { provider, modelId } = parseCanonicalModelRef(resolved.canonicalRef);
+    parsedModel = `${provider}/${modelId}`;
   } catch (error) {
     warnings.push(
       `Profile "${profileName}" ${tier} tier: ${error instanceof Error ? error.message : String(error)} Tier disabled.`,
@@ -297,8 +298,10 @@ export const normalizeTierConfig = (
         // Resolve aliases in fallbacks too
         const resolvedFallback = resolveModelRef(f, models);
         try {
-          parseCanonicalModelRef(resolvedFallback.canonicalRef);
-          fallbacks.push(resolvedFallback.canonicalRef);
+          const { provider, modelId } = parseCanonicalModelRef(
+            resolvedFallback.canonicalRef,
+          );
+          fallbacks.push(`${provider}/${modelId}`);
         } catch (error) {
           warnings.push(
             `Invalid fallback model "${f}" in profile "${profileName}" ${tier} tier: ${error instanceof Error ? error.message : String(error)}`,
@@ -361,6 +364,7 @@ export const normalizeTierConfig = (
 
   return {
     model: parsedModel,
+    thinkingExplicit: isThinkingLevel(value.thinking),
     thinking,
     fallbacks,
     contextWindow: tierContextWindow,
@@ -755,25 +759,4 @@ export const getUnsupportedTiers = (
     }
   }
   return unsupported;
-};
-
-/**
- * Clamps a requested thinking level to the highest supported level
- * in the provided array of supported levels.
- */
-export const clampThinkingLevel = (
-  requested: ThinkingLevel,
-  supported: ThinkingLevel[] | undefined,
-): ThinkingLevel => {
-  if (requested === 'off' || !supported || supported.length === 0) {
-    return 'off';
-  }
-
-  const reqIdx = THINKING_LEVELS.indexOf(requested);
-  for (let i = reqIdx; i >= 0; i--) {
-    const level = THINKING_LEVELS[i];
-    if (level && supported.includes(level)) return level;
-  }
-
-  return 'off';
 };

@@ -17,27 +17,29 @@ vi.mock('./state', async (importOriginal) => ({
   saveLastRouterProfile: stateMocks.saveLastRouterProfile,
 }));
 
-vi.mock('./config', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./config')>()),
-  loadRouterConfig: () => ({
-    config: {
-      ...stateMocks.advisors,
-      profiles: {
-        balanced: {
-          jev: { enabled: true },
-          high: { model: 'openai/gpt-4o' },
-          medium: { model: 'openai/gpt-4o-mini' },
-          micro: { model: 'openai/tiny', thinking: 'off' },
+vi.mock('./config', async (importOriginal) => {
+  const configModule = await importOriginal<typeof import('./config')>();
+  return {
+    ...configModule,
+    loadRouterConfig: () => {
+      return configModule.normalizeConfig({
+        ...stateMocks.advisors,
+        profiles: {
+          balanced: {
+            jev: { enabled: true },
+            high: { model: 'openai/gpt-4o' },
+            medium: { model: 'openai/gpt-4o-mini' },
+            micro: { model: 'openai/tiny', thinking: 'off' },
+          },
+          alternate: {
+            high: { model: 'anthropic/claude-opus-4' },
+            medium: { model: 'anthropic/claude-sonnet-4' },
+          },
         },
-        alternate: {
-          high: { model: 'anthropic/claude-opus-4' },
-          medium: { model: 'anthropic/claude-sonnet-4' },
-        },
-      },
+      });
     },
-    warnings: [],
-  }),
-}));
+  };
+});
 
 describe('index.ts (orchestrator)', () => {
   type EventHandler = (
@@ -80,7 +82,11 @@ describe('index.ts (orchestrator)', () => {
   const buildMockCtx = () => ({
     cwd: '/mock/cwd',
     modelRegistry: {
-      find: vi.fn().mockReturnValue({ provider: 'router', id: 'balanced' }),
+      find: vi
+        .fn()
+        .mockImplementation((provider: string, id: string) =>
+          model(id, { provider }),
+        ),
       getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'key' }),
     },
     model: { provider: 'router', id: 'balanced' },
@@ -143,7 +149,7 @@ describe('index.ts (orchestrator)', () => {
           },
         };
       const fetch = vi.fn<typeof globalThis.fetch>(async () => {
-        const id = 'high|openai%2Fgpt-4o|high';
+        const id = 'high|openai%2Fgpt-4o|medium';
         return new Response(
           JSON.stringify({
             answers: {
@@ -506,6 +512,31 @@ describe('index.ts (orchestrator)', () => {
   });
 
   describe('thinking_level_select event', () => {
+    it.each(['max', 'minimal'])(
+      'rejects unsupported %s selection atomically and restores Pi display',
+      async (level) => {
+        routerExtension(mockPi);
+        const ctx = buildMockCtx();
+        ctx.modelRegistry.find.mockImplementation((provider, id) =>
+          model(id, {
+            provider,
+            thinkingLevelMap: { max: null, minimal: null },
+          }),
+        );
+        for (const handler of handlersFor('session_start'))
+          await handler({}, ctx);
+        mockPi.appendEntry.mockClear();
+        for (const handler of handlersFor('thinking_level_select'))
+          handler({ level, previousLevel: 'medium' }, ctx);
+        expect(mockPi.appendEntry).not.toHaveBeenCalled();
+        expect(mockPi.setThinkingLevel).toHaveBeenLastCalledWith('medium');
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining('leaves no eligible route'),
+          'warning',
+        );
+      },
+    );
+
     it('apply thinking level as all-tier override for active profile', async () => {
       routerExtension(mockPi);
 

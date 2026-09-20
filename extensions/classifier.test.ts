@@ -45,7 +45,7 @@ describe('classifier', () => {
       );
       expect(
         await runClassifier('test/primary', s.registry, s.context),
-      ).toEqual({ tier, reasoning: 'classifier' });
+      ).toEqual({ tier });
     },
   );
   it('uses isolated registry requests, keeps colons, and forwards cancellation', async () => {
@@ -60,7 +60,7 @@ describe('classifier', () => {
         'low',
         abort.signal,
       ),
-    ).toEqual({ tier: 'high', reasoning: 'classifier' });
+    ).toEqual({ tier: 'high' });
     const call = s.streamSimple.mock.calls[0];
     expect(call?.[1]).not.toHaveProperty('systemPrompt');
     expect(call?.[1]).not.toHaveProperty('tools');
@@ -93,11 +93,10 @@ describe('classifier', () => {
       runClassifier('test/primary', s.registry, s.context),
     ).resolves.toBeUndefined();
   });
-  it('returns a fixed reason code instead of classifier explanation text', async () => {
+  it('returns only the tier, discarding classifier explanation text', async () => {
     const s = setup();
     const result = await runClassifier('test/primary', s.registry, s.context);
-    expect(result).toEqual({ tier: 'high', reasoning: 'classifier' });
-    expect(result?.reasoning).not.toContain('Analyze');
+    expect(result).toEqual({ tier: 'high' });
   });
   it('returns no advice when the classifier times out', async () => {
     const s = setup();

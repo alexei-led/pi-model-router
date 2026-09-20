@@ -9,6 +9,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { normalizeConfig } from './config';
 import { createJevCandidate } from './jev';
 import { registerRouterProvider, waitForRegistry } from './provider';
 import { allowed, localSafetyFloor } from './routing';
@@ -48,7 +49,7 @@ const setup = () => {
       },
       ui: { setHiddenThinkingLabel: vi.fn() },
     } as unknown as ExtensionContext,
-    currentConfig: {
+    currentConfig: normalizeConfig({
       profiles: {
         balanced: {
           high: { model: 'test/primary' },
@@ -56,7 +57,7 @@ const setup = () => {
           low: { model: 'test/small' },
         },
       },
-    },
+    }).config,
     selectedProfile: undefined,
     routerEnabled: false,
     lastDecision: undefined,
@@ -117,9 +118,32 @@ describe('router provider', () => {
   it('does not pass or report thinking for a non-reasoning target', async () => {
     const s = setup();
     required(s.models[0]).reasoning = false;
-    await consume(s.stream());
+    const { result } = await consume(s.stream());
+    expect(result.stopReason).toBe('stop');
+    expect(s.delegate).toHaveBeenCalledOnce();
     expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBeUndefined();
     expect(s.state.lastDecision?.thinking).toBe('off');
+  });
+
+  it('canonicalizes padded fallbacks and defaults their omitted effort to off', async () => {
+    const s = setup();
+    s.state.currentConfig = normalizeConfig({
+      profiles: {
+        balanced: {
+          medium: { model: 'test / primary', fallbacks: ['test / fallback'] },
+        },
+      },
+    }).config;
+    required(s.models[1]).reasoning = false;
+    s.delegate.mockReturnValueOnce(failure());
+    const { result } = await consume(s.stream());
+    expect(result.stopReason).toBe('stop');
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.delegate.mock.calls[1]?.[2]?.reasoning).toBeUndefined();
+    expect(s.state.lastDecision).toMatchObject({
+      targetLabel: 'test/fallback',
+      thinking: 'off',
+    });
   });
 
   it('reports actual capacities and re-registers when thinking capabilities change', () => {
@@ -834,6 +858,45 @@ describe('Jev provider integration', () => {
     expect(s.delegate).toHaveBeenCalledOnce();
   });
 
+  it.each([false, true])(
+    'preserves a signed Google target after crossing the soft budget (unavailable=%s)',
+    async (unavailable) => {
+      const s = setup();
+      s.state.pinnedTierByProfile = {};
+      s.state.currentConfig = normalizeConfig({
+        maxSessionBudget: 0.005,
+        profiles: {
+          balanced: {
+            high: { model: 'google/primary' },
+            medium: { model: 'test/fallback' },
+          },
+        },
+      }).config;
+      required(s.models[0]).provider = 'google';
+      const first = userContext('implement a parser');
+      const assistant = toolMessage('google');
+      // The soft budget outranks the high pin on the continuation.
+      s.state.pinnedTierByProfile.balanced = 'high';
+      s.delegate.mockReturnValueOnce(finishTool(assistant));
+      await consume(s.stream(first));
+      expect(s.state.accumulatedCost).toBeGreaterThan(0.005);
+      if (unavailable) s.models.shift();
+      const { result } = await consume(s.stream(toolContext(first, assistant)));
+      if (unavailable) {
+        expect(result.stopReason).toBe('error');
+        expect(s.delegate).toHaveBeenCalledOnce();
+      } else {
+        expect(result.stopReason).toBe('stop');
+        expect(s.delegate).toHaveBeenCalledTimes(2);
+        expect(s.delegate.mock.calls[1]?.[0]).toMatchObject({
+          provider: 'google',
+          id: 'primary',
+        });
+        expect(s.state.lastDecision?.reasonCode).toBe('continuation');
+      }
+    },
+  );
+
   it('fails plainly rather than replaying Google signatures on a different target', async () => {
     const s = setup();
     enableAdvisors(s);
@@ -900,6 +963,8 @@ describe('Jev provider integration', () => {
   it('filters unsupported efforts and vision before Jev and never offers fallback-chain entries', async () => {
     const s = setup();
     enableAdvisors(s);
+    required(required(s.state.currentConfig.profiles.balanced).high).thinking =
+      'high';
     required(s.models[0]).thinkingLevelMap = { medium: null };
     const fetch = mockChoice('high');
     await consume(s.stream(userContext()));
@@ -916,6 +981,8 @@ describe('Jev provider integration', () => {
   it('revalidates Jev choice after registry capabilities change', async () => {
     const s = setup();
     enableAdvisors(s);
+    required(required(s.state.currentConfig.profiles.balanced).high).thinking =
+      'high';
     vi.stubGlobal(
       'fetch',
       vi.fn<typeof fetch>(async (_url, init) => {

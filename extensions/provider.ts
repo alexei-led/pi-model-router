@@ -594,9 +594,24 @@ export const registerRouterProvider = (
             (decision.targetProvider !== priorAssistant.provider ||
               decision.targetModelId !== priorAssistant.model)
           ) {
-            throw new Error(
-              'No compatible route for Google tool continuation.',
-            );
+            const priorPair =
+              pairs.find(
+                (pair) =>
+                  pair.model ===
+                    `${priorAssistant.provider}/${priorAssistant.model}` &&
+                  pair.tier === previousDecision?.tier &&
+                  pair.thinking === previousDecision.thinking,
+              ) ??
+              pairs.find(
+                (pair) =>
+                  pair.model ===
+                  `${priorAssistant.provider}/${priorAssistant.model}`,
+              );
+            if (!priorPair)
+              throw new Error(
+                'No compatible route for Google tool continuation.',
+              );
+            decision = decisionForPair(model.id, priorPair, 'continuation');
           }
 
           state.lastDecision = decision;

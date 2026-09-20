@@ -15,6 +15,7 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
+import { availableRoutePairs } from './routing';
 import type {
   RouterConfig,
   RouterPinByProfile,
@@ -354,16 +355,32 @@ export const registerCommands = (
         : isThinkingLevel(levelValue)
           ? levelValue
           : undefined;
-    let overrides = state.thinkingByProfile[currentProfile];
-    if (!overrides) {
-      overrides = {};
-      state.thinkingByProfile[currentProfile] = overrides;
-    }
+    const overrides = { ...state.thinkingByProfile[currentProfile] };
     const tiers = tier === 'all' ? ROUTER_TIERS : [tier];
     for (const targetTier of tiers) {
       if (nextLevel) overrides[targetTier] = nextLevel;
       else delete overrides[targetTier];
     }
+    const activeProfile = state.currentConfig.profiles[currentProfile];
+    if (
+      nextLevel &&
+      activeProfile &&
+      availableRoutePairs(
+        activeProfile,
+        'micro',
+        (provider, id) => ctx.modelRegistry.find(provider, id),
+        false,
+        overrides,
+        state.currentConfig.models,
+      ).length === 0
+    ) {
+      ctx.ui.notify(
+        `Router thinking unchanged: '${nextLevel}' leaves no eligible route.`,
+        'warning',
+      );
+      return;
+    }
+    state.thinkingByProfile[currentProfile] = overrides;
     if (Object.keys(overrides).length === 0) {
       delete state.thinkingByProfile[currentProfile];
     }
@@ -383,7 +400,7 @@ export const registerCommands = (
       if (unsupported.length > 0) {
         ctx.ui.notify(
           `Router thinking (${tier}) set to ${nextLevel}. ` +
-            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${nextLevel}'.`,
+            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${nextLevel}' and will be skipped when unsupported.`,
           'warning',
         );
       }

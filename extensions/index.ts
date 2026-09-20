@@ -14,6 +14,7 @@ import {
 } from './config';
 import { MAX_DEBUG_HISTORY } from './constants';
 import { registerRouterProvider } from './provider';
+import { availableRoutePairs } from './routing';
 import {
   buildPersistedState,
   isRouterPersistedState,
@@ -521,14 +522,30 @@ const routerExtension = (pi: ExtensionAPI) => {
 
     // User changed pi's thinking level (e.g. via shift+tab).
     // Apply as an all-tier thinking override for the active router profile.
-    let overrides = thinkingByProfile[selectedProfile];
-    if (!overrides) {
-      overrides = {};
-      thinkingByProfile[selectedProfile] = overrides;
-    }
+    const overrides = { ...thinkingByProfile[selectedProfile] };
     for (const t of ROUTER_TIERS) {
       overrides[t] = event.level;
     }
+    const activeProfile = currentConfig.profiles[selectedProfile];
+    if (!activeProfile) return;
+    if (
+      availableRoutePairs(
+        activeProfile,
+        'micro',
+        (provider, id) => ctx.modelRegistry.find(provider, id),
+        false,
+        overrides,
+        currentConfig.models,
+      ).length === 0
+    ) {
+      actions.syncPiThinkingLevel(event.previousLevel);
+      ctx.ui.notify(
+        `Router thinking unchanged: '${event.level}' leaves no eligible route.`,
+        'warning',
+      );
+      return;
+    }
+    thinkingByProfile[selectedProfile] = overrides;
     persistState();
     actions.updateStatus(ctx);
     if (event.level !== 'off') {
@@ -538,7 +555,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       if (unsupported.length > 0) {
         ctx.ui.notify(
           `Router thinking (all) set to ${event.level}. ` +
-            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${event.level}'.`,
+            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${event.level}' and will be skipped when unsupported.`,
           'warning',
         );
       }

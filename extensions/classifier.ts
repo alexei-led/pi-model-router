@@ -10,7 +10,6 @@ import type { ClassifierTier, RouterPhase } from './types';
 
 const CLASSIFIER_TIMEOUT_MS = 10_000;
 const CLASSIFIER_MAX_TOKENS = 256;
-const CLASSIFIER_REASON_CODE = 'classifier';
 
 export const runClassifier = async (
   classifierModelRef: string,
@@ -20,7 +19,7 @@ export const runClassifier = async (
   thinking?: ThinkingLevel,
   signal?: AbortSignal,
   routingDeadline = performance.now() + CLASSIFIER_TIMEOUT_MS,
-): Promise<{ tier: ClassifierTier; reasoning: string } | undefined> => {
+): Promise<{ tier: ClassifierTier } | undefined> => {
   try {
     const remaining = routingDeadline - performance.now();
     if (signal?.aborted || !Number.isFinite(remaining) || remaining <= 0)
@@ -107,7 +106,7 @@ export const runClassifier = async (
         .trim()
         .toLowerCase();
       if (!isRouterTier(tierValue) || tierValue === 'micro') return undefined;
-      return { tier: tierValue, reasoning: CLASSIFIER_REASON_CODE };
+      return { tier: tierValue };
     } finally {
       if (abortListener) {
         classifierSignal.removeEventListener('abort', abortListener);

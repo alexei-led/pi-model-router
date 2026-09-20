@@ -31,6 +31,8 @@ export interface ClassifierConfig {
 
 export interface RoutedTierConfig {
   model: string;
+  /** False for normalization defaults; omitted on legacy in-memory profiles. */
+  thinkingExplicit?: boolean | undefined;
   thinking?: ThinkingLevel | undefined;
   fallbacks?: string[] | undefined;
   contextWindow?: number | undefined;

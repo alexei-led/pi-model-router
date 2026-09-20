@@ -4,6 +4,8 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { registerCommands } from './commands';
+import { normalizeConfig } from './config';
+import { model } from './test/fixtures';
 import type {
   RouterConfig,
   RouterPinByProfile,
@@ -58,7 +60,7 @@ describe('commands.ts', () => {
     modelRegistry: {
       find: vi.fn().mockImplementation((provider: string, modelId: string) => {
         if (provider === 'router' || provider === 'openai') {
-          return { provider, id: modelId };
+          return model(modelId, { provider });
         }
         return null;
       }),
@@ -67,7 +69,7 @@ describe('commands.ts', () => {
   });
 
   const buildDefaultState = (): MutableCommandState => {
-    const config: RouterConfig = {
+    const config: RouterConfig = normalizeConfig({
       phaseBias: 0.5,
       profiles: {
         balanced: {
@@ -78,7 +80,7 @@ describe('commands.ts', () => {
           low: { model: 'openai/gpt-4o-micro' },
         },
       },
-    };
+    }).config;
 
     const lastDecision: RoutingDecision = {
       profile: 'balanced',
@@ -125,6 +127,29 @@ describe('commands.ts', () => {
     registerCommands(pi as unknown as ExtensionAPI, state, actions);
     return { pi, state, actions, ctx, cmd: pi.getRegisteredCommand() };
   };
+
+  it.each(['max', 'minimal'])(
+    'rejects unsupported all-tier %s thinking without mutating state',
+    async (level) => {
+      const { state, actions, ctx, cmd } = setup();
+      state.thinkingByProfile.balanced = { high: 'high' };
+      const before = structuredClone(state.thinkingByProfile);
+      ctx.modelRegistry.find.mockImplementation((provider, id) =>
+        model(id, { provider, thinkingLevelMap: { max: null, minimal: null } }),
+      );
+      await cmd.handler(
+        `thinking ${level}`,
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(state.thinkingByProfile).toEqual(before);
+      expect(actions.persistState).not.toHaveBeenCalled();
+      expect(actions.syncPiThinkingLevel).not.toHaveBeenCalled();
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining('leaves no eligible route'),
+        'warning',
+      );
+    },
+  );
 
   describe('micro commands', () => {
     it('completes, pins, fixes, overrides, and clears micro', async () => {
@@ -260,10 +285,12 @@ describe('commands.ts', () => {
       const { pi, state, actions, ctx, cmd } = setup();
 
       await cmd.handler('disable', ctx as unknown as ExtensionCommandContext);
-      expect(pi.setModel).toHaveBeenCalledWith({
-        provider: 'openai',
-        id: 'gpt-4o',
-      });
+      expect(pi.setModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openai',
+          id: 'gpt-4o',
+        }),
+      );
       expect(state.routerEnabled).toBe(false);
       expect(actions.persistState).toHaveBeenCalled();
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
@@ -627,31 +654,28 @@ describe('commands.ts', () => {
       expect(actions.syncPiThinkingLevel).toHaveBeenCalledWith('medium');
     });
 
-    it('warn about unsupported tiers', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      state.currentConfig.profiles.balanced = {
-        high: {
-          model: 'openai/gpt-4o',
-          resolvedThinkingLevels: ['high', 'medium', 'low'],
+    it('warns when an accepted override skips unsupported tiers', async () => {
+      const { state, ctx, cmd } = setup();
+      state.currentConfig = normalizeConfig({
+        profiles: {
+          balanced: {
+            high: { model: 'openai/gpt-4o', thinkingLevels: ['high'] },
+            medium: {
+              model: 'openai/gpt-4o-mini',
+              thinkingLevels: ['low', 'medium'],
+            },
+          },
         },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['high', 'medium', 'low'],
-        },
-      };
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
-
+      }).config;
       await cmd.handler(
-        'thinking xhigh',
+        'thinking high',
         ctx as unknown as ExtensionCommandContext,
       );
+      expect(state.thinkingByProfile.balanced?.high).toBe('high');
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("may not support 'xhigh'"),
+        expect.stringContaining(
+          "medium tier may not support 'high' and will be skipped when unsupported",
+        ),
         'warning',
       );
     });
