@@ -199,7 +199,6 @@ const routerExtension = (pi: ExtensionAPI) => {
 
       // Ensure the provider is registered with current capacities for this profile
       actions.registerRouterProvider();
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
       const routerModel = ctx.modelRegistry.find('router', profileName);
       if (!routerModel) {
@@ -284,6 +283,7 @@ const routerExtension = (pi: ExtensionAPI) => {
     ctx: ExtensionContext,
     startReason: SessionStartEvent['reason'],
   ) => {
+    lastPersistedSnapshot = undefined;
     ignoreStartupThinkingEvent =
       startReason === 'startup' ||
       startReason === 'new' ||
@@ -294,9 +294,6 @@ const routerExtension = (pi: ExtensionAPI) => {
     actions.reloadConfig(ctx);
     const hasExplicitStartupModel =
       startReason === 'startup' && hasExplicitCliModel();
-
-    // Give the registry a moment to synchronize after re-registration
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
     routerEnabled = ctx.model?.provider === 'router';
     selectedProfile =
@@ -342,7 +339,10 @@ const routerExtension = (pi: ExtensionAPI) => {
         Object.assign(pinnedTierByProfile, savedState.pinByProfile);
       }
       if (savedState.thinkingByProfile) {
-        Object.assign(thinkingByProfile, savedState.thinkingByProfile);
+        Object.assign(
+          thinkingByProfile,
+          structuredClone(savedState.thinkingByProfile),
+        );
       }
       if (savedState.pinTier && selectedProfile) {
         pinnedTierByProfile[selectedProfile] = savedState.pinTier;
@@ -350,12 +350,14 @@ const routerExtension = (pi: ExtensionAPI) => {
       debugEnabled = savedState.debugEnabled ?? debugEnabled;
       widgetEnabled = savedState.widgetEnabled ?? widgetEnabled;
       debugHistory = savedState.debugHistory
-        ? [...savedState.debugHistory].slice(-MAX_DEBUG_HISTORY)
+        ? structuredClone(savedState.debugHistory).slice(-MAX_DEBUG_HISTORY)
         : [];
       if (!hasExplicitStartupModel) {
         lastNonRouterModel =
           savedState.lastNonRouterModel ?? lastNonRouterModel;
-        lastDecision = savedState.lastDecision;
+        lastDecision = savedState.lastDecision
+          ? structuredClone(savedState.lastDecision)
+          : undefined;
       }
       accumulatedCost = savedState.accumulatedCost ?? 0;
     } else if (

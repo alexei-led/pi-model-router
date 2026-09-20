@@ -82,7 +82,8 @@ export const resolveModelRef = (
   ref: string,
   models: Record<string, ModelDefinition> | undefined,
 ): { canonicalRef: string; definition?: ModelDefinition } => {
-  const definition = models?.[ref];
+  const definition =
+    models && Object.hasOwn(models, ref) ? models[ref] : undefined;
   if (definition) {
     return { canonicalRef: definition.model, definition };
   }
@@ -104,8 +105,13 @@ export const mergeConfig = (
   override: Partial<RouterConfig>,
 ): RouterConfig => {
   const mergedProfiles: Record<string, RouterProfile> = { ...base.profiles };
-  for (const [name, profile] of Object.entries(override.profiles ?? {})) {
-    const existing = mergedProfiles[name];
+  for (const [name, profile] of Object.entries(
+    isObjectRecord(override.profiles) ? override.profiles : {},
+  )) {
+    if (!isObjectRecord(profile) || name === '__proto__') continue;
+    const existing = Object.hasOwn(mergedProfiles, name)
+      ? mergedProfiles[name]
+      : undefined;
     const nextProfile = profile as Partial<RouterProfile>;
     mergedProfiles[name] = {
       high: mergeTier(existing?.high, nextProfile.high),
@@ -116,7 +122,7 @@ export const mergeConfig = (
 
   const mergedModels: Record<string, ModelDefinition> = {
     ...(base.models ?? {}),
-    ...(override.models ?? {}),
+    ...(isObjectRecord(override.models) ? override.models : {}),
   };
 
   return {
@@ -160,6 +166,7 @@ export const normalizeModelsMap = (
   if (!raw || !isObjectRecord(raw)) return result;
 
   for (const [alias, entry] of Object.entries(raw)) {
+    if (alias === '__proto__') continue;
     if (!isObjectRecord(entry)) {
       warnings.push(
         `Ignored invalid model definition "${alias}": expected an object.`,
@@ -331,6 +338,7 @@ export const normalizeTierConfig = (
   const resolvedThinkingLevels: ThinkingLevel[] = [...baseThinkingLevels];
   if (
     !explicitThinkingLevels &&
+    effectiveReasoning !== false &&
     thinking !== 'off' &&
     !resolvedThinkingLevels.includes(thinking)
   ) {
@@ -363,7 +371,10 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
 
   const normalizedProfiles: Record<string, RouterProfile> = {};
 
-  for (const [name, profile] of Object.entries(raw.profiles ?? {})) {
+  for (const [name, profile] of Object.entries(
+    isObjectRecord(raw.profiles) ? raw.profiles : {},
+  )) {
+    if (name === '__proto__') continue;
     const high = normalizeTierConfig(
       profile?.high,
       name,
@@ -411,7 +422,12 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
         const matches = rule.matches;
         const tier = rule.tier;
         if (
-          (typeof matches === 'string' || Array.isArray(matches)) &&
+          ((typeof matches === 'string' && matches.trim().length > 0) ||
+            (Array.isArray(matches) &&
+              matches.length > 0 &&
+              matches.every(
+                (m) => typeof m === 'string' && m.trim().length > 0,
+              ))) &&
           isRouterTier(tier)
         ) {
           rules.push({
@@ -518,7 +534,7 @@ export const resolveProfileName = (
   config: RouterConfig,
   requested?: string,
 ): string | undefined => {
-  if (requested && config.profiles[requested]) {
+  if (requested && Object.hasOwn(config.profiles, requested)) {
     return requested;
   }
   return undefined;

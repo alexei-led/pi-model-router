@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js >=22.19](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js&logoColor=white)](package.json)
 
-Smart per-turn model router extension for the [pi-coding-agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent) that optimizes your AI budget and usage limits without sacrificing quality by dynamically routing each turn to the optimal LLM tier. It automatically selects between high, medium, and low-tier models based on task intent, session budget, context size, and custom rules — complete with automatic fallbacks and phase awareness.
+Per-turn model router for [Pi](https://github.com/earendil-works/pi/tree/main/packages/coding-agent). Selects high, medium or low-tier models using task intent, a soft budget policy and custom rules, while keeping the selected `router/<profile>` model stable.
 
 > **Independent fork:** This project is an independently maintained fork of [yeliu84/pi-model-router](https://github.com/yeliu84/pi-model-router), originally created by Ye Liu. It is not an official upstream release. The original MIT license and copyright notice are preserved.
 
@@ -89,6 +89,15 @@ Or load directly for one run:
 pi -e ./extensions/index.ts
 ```
 
+## Reliability
+
+- Both generation and classification use Pi's provider registry, including native/custom providers and credential-specific URLs.
+- Fallbacks run only before content is emitted; cancellation does not retry.
+- Classifier requests use isolated context, a 10-second cancellation deadline and a 256-token output limit. Failures retain local routing.
+- Context trimming preserves system instructions and whole active tool turns. It is a text estimate, not a guarantee that images or a large active turn fit.
+
+See [architecture](https://github.com/alexei-led/pi-model-router/blob/main/docs/ARCHITECTURE.md) and [release procedure](https://github.com/alexei-led/pi-model-router/blob/main/docs/RELEASING.md).
+
 ## Configuration
 
 Copy the example config to one of:
@@ -119,7 +128,7 @@ The extension stores the last selected profile in `~/.pi/agent/model-router-stat
 | Field                   | Description                                                                       |
 | ----------------------- | --------------------------------------------------------------------------------- |
 | `classifierModel`       | (Optional) Model used to categorize intent. Supports model aliases. If omitted, fast heuristics are used. |
-| `maxSessionBudget`      | (Optional) USD budget for the session. Forces `medium` tier once exceeded.        |
+| `maxSessionBudget`      | (Optional) Soft generation-cost threshold in USD. Downgrades high to medium, or low if medium is absent. Not a spending cap; classifier cost is excluded. |
 | `phaseBias`             | (0.0 - 1.0) Stickiness of the current phase. Higher = more stable. Default `0.5`. |
 | `rules`                 | List of custom keyword rules (e.g. `{ "matches": "deploy", "tier": "high" }`).    |
 | `models`                | (Optional) Map of model aliases to definitions with `model`, `contextWindow`, `maxTokens`. |

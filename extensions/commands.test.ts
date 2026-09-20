@@ -962,6 +962,45 @@ describe('commands.ts', () => {
     });
   });
 
+  it.each(['widget', 'debug'])(
+    'rejects unknown %s options without changing state',
+    async (subcommand) => {
+      const pi = buildMockPi();
+      const state = buildDefaultState();
+      const actions = buildMockActions();
+      const ctx = buildMockCtx();
+      registerCommands(pi as unknown as ExtensionAPI, state, actions);
+      await pi
+        .getRegisteredCommand()
+        .handler(
+          `${subcommand} typo`,
+          ctx as unknown as ExtensionCommandContext,
+        );
+      expect(state).toMatchObject({
+        widgetEnabled: false,
+        debugEnabled: false,
+      });
+      expect(actions.persistState).not.toHaveBeenCalled();
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining('Usage:'),
+        'error',
+      );
+    },
+  );
+
+  it('does not report success when the profile shorthand switch fails', async () => {
+    const pi = buildMockPi();
+    const state = buildDefaultState();
+    const actions = buildMockActions();
+    const ctx = buildMockCtx();
+    actions.switchToRouterProfile.mockResolvedValue(false);
+    registerCommands(pi as unknown as ExtensionAPI, state, actions);
+    await pi
+      .getRegisteredCommand()
+      .handler('balanced', ctx as unknown as ExtensionCommandContext);
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
   describe('handleWidget edge cases', () => {
     it('should show error with too many args', async () => {
       const pi = buildMockPi();
@@ -1127,7 +1166,7 @@ describe('commands.ts', () => {
       expect(values).toContain('thinking high');
     });
 
-    it('should return null when thinking first arg is a level-tier overlap', () => {
+    it('completes the level after a tier that is also a thinking level', () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       const actions = buildMockActions();
@@ -1135,9 +1174,8 @@ describe('commands.ts', () => {
       registerCommands(pi as unknown as ExtensionAPI, state, actions);
       const cmd = pi.getRegisteredCommand();
 
-      // 'high' is both a tier and a level; level check comes first, so no further completions
       const completions = cmd.getArgumentCompletions('thinking high a');
-      expect(completions).toBeNull();
+      expect(completions?.map((c) => c.value)).toEqual(['thinking high auto']);
     });
 
     it('should return null for thinking completions after level arg', () => {

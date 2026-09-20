@@ -1,6 +1,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import {
+  isObjectRecord,
+  isRouterTier,
+  isThinkingLevel,
+  parseCanonicalModelRef,
+} from './config';
 import type {
   RouterLastProfileState,
   RouterPersistedState,
@@ -11,13 +17,45 @@ import type {
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+const isPhase = (value: unknown) =>
+  value === 'planning' || value === 'implementation' || value === 'lightweight';
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+const isModelRef = (value: unknown) => {
+  if (typeof value !== 'string') return false;
+  try {
+    parseCanonicalModelRef(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const isDecision = (value: unknown): value is RoutingDecision =>
+  isObjectRecord(value) &&
+  isRouterTier(value.tier) &&
+  isPhase(value.phase) &&
+  isThinkingLevel(value.thinking) &&
+  isFiniteNumber(value.timestamp) &&
+  [
+    'profile',
+    'targetProvider',
+    'targetModelId',
+    'targetLabel',
+    'reasoning',
+  ].every((key) => typeof value[key] === 'string') &&
+  ['isClassifier', 'isFallback', 'isBudgetForced', 'isRuleMatched'].every(
+    (key) => value[key] === undefined || typeof value[key] === 'boolean',
+  );
+const isMap = (value: unknown, validate: (entry: unknown) => boolean) =>
+  isObjectRecord(value) &&
+  Object.entries(value).every(
+    ([key, entry]) => key !== '__proto__' && validate(entry),
+  );
 
 export const isRouterLastProfileState = (
   value: unknown,
 ): value is RouterLastProfileState =>
-  isRecord(value) &&
+  isObjectRecord(value) &&
   typeof value.selectedProfile === 'string' &&
   value.selectedProfile.length > 0 &&
   typeof value.timestamp === 'number';
@@ -58,16 +96,35 @@ export const saveLastRouterProfile = (
 export const isRouterPersistedState = (
   value: unknown,
 ): value is RouterPersistedState => {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  if (!isRecord(value)) {
-    return false;
-  }
+  if (!isObjectRecord(value)) return false;
   return (
     typeof value.enabled === 'boolean' &&
     typeof value.selectedProfile === 'string' &&
-    typeof value.timestamp === 'number'
+    isFiniteNumber(value.timestamp) &&
+    (value.pinTier === undefined || isRouterTier(value.pinTier)) &&
+    (value.pinByProfile === undefined ||
+      isMap(value.pinByProfile, isRouterTier)) &&
+    (value.thinkingByProfile === undefined ||
+      isMap(
+        value.thinkingByProfile,
+        (tiers) =>
+          isObjectRecord(tiers) &&
+          Object.entries(tiers).every(
+            ([tier, level]) => isRouterTier(tier) && isThinkingLevel(level),
+          ),
+      )) &&
+    (value.lastDecision === undefined || isDecision(value.lastDecision)) &&
+    (value.debugHistory === undefined ||
+      (Array.isArray(value.debugHistory) &&
+        value.debugHistory.every(isDecision))) &&
+    (value.lastPhase === undefined || isPhase(value.lastPhase)) &&
+    (value.lastNonRouterModel === undefined ||
+      isModelRef(value.lastNonRouterModel)) &&
+    (value.accumulatedCost === undefined ||
+      (isFiniteNumber(value.accumulatedCost) && value.accumulatedCost >= 0)) &&
+    ['debugEnabled', 'widgetEnabled'].every(
+      (key) => value[key] === undefined || typeof value[key] === 'boolean',
+    )
   );
 };
 
@@ -83,7 +140,7 @@ export const buildPersistedState = (
   lastNonRouterModel: string | undefined,
   accumulatedCost: number,
 ): RouterPersistedState => {
-  return {
+  return structuredClone({
     enabled: routerEnabled,
     selectedProfile: selectedProfile ?? '',
     pinTier: selectedProfile ? pinnedTierByProfile[selectedProfile] : undefined,
@@ -97,5 +154,5 @@ export const buildPersistedState = (
     lastNonRouterModel,
     accumulatedCost,
     timestamp: Date.now(),
-  };
+  });
 };

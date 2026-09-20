@@ -1,10 +1,11 @@
 {
   "name": "@alexeiled/pi-model-router",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "files": [
     "extensions",
-    "!extensions/*.test.ts",
+    "!extensions/**/*.test.ts",
+    "!extensions/test",
     "LICENSE",
     "model-router.example.json",
     "README.md",

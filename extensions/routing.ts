@@ -1,13 +1,7 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { Context, Message } from '@earendil-works/pi-ai';
-import { streamSimple } from '@earendil-works/pi-ai/compat';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { isRouterTier, parseCanonicalModelRef } from './config';
-import {
-  hasUsableRequestAuth,
-  type RegistryWithProviderAuth,
-  resolveDelegatedModel,
-} from './constants';
 import type {
   RouterPhase,
   RouterProfile,
@@ -148,6 +142,7 @@ export const decideRouting = (
   rules?: RoutingRule[],
   isBudgetExceeded = false,
 ): RoutingDecision => {
+  if (previousDecision?.profile !== profileName) previousDecision = undefined;
   const prompt = getLastUserText(context).toLowerCase();
   const recentConversation = getRecentConversationText(context);
   const toolResultCount = countToolResults(context);
@@ -372,7 +367,10 @@ export const decideRouting = (
   }
 
   // Resolve to nearest available tier if the selected tier is disabled
-  const resolvedTier = resolveAvailableTier(profile, tier);
+  const resolvedTier =
+    isBudgetForced && !profile.medium && profile.low
+      ? 'low'
+      : resolveAvailableTier(profile, tier);
   if (resolvedTier !== tier) {
     reasoning = `Resolved from ${tier} to ${resolvedTier} tier (${tier} tier is not configured). Original: ${reasoning}`;
     phase = phaseForTier(resolvedTier);
@@ -399,20 +397,13 @@ export const runClassifier = async (
   context: Context,
   currentPhase?: RouterPhase,
   thinking?: ThinkingLevel,
+  signal?: AbortSignal,
 ): Promise<{ tier: RouterTier; reasoning: string } | undefined> => {
   try {
     const { provider, modelId } = parseCanonicalModelRef(classifierModelRef);
     const model = modelRegistry.find(provider, modelId);
-    if (!model) return undefined;
-
-    const auth = await modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok || !hasUsableRequestAuth(auth)) return undefined;
-    const apiKey = auth.apiKey;
-    const headers = auth.headers;
-    const requestModel = await resolveDelegatedModel(
-      modelRegistry as unknown as RegistryWithProviderAuth,
-      model,
-    );
+    if (!model || provider === 'router') return undefined;
+    signal?.throwIfAborted();
 
     const promptText = getLastUserText(context);
     const historyText = getRecentConversationText(context, 4);
@@ -447,17 +438,24 @@ ${currentPhase === 'implementation' ? 'Consider that the conversation is current
     const reasoningOption =
       model.reasoning && thinking && thinking !== 'off' ? thinking : undefined;
 
-    const stream = streamSimple(requestModel, classifierContext, {
-      apiKey,
-      headers,
+    const timeout = AbortSignal.timeout(10_000);
+    const stream = modelRegistry.streamSimple(model, classifierContext, {
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      maxTokens: 256,
       ...(reasoningOption ? { reasoning: reasoningOption } : {}),
     });
     let fullText = '';
+    let completed = false;
     for await (const event of stream) {
-      if (event.type === 'text_delta' && typeof event.delta === 'string') {
-        fullText += event.delta;
+      if (event.type === 'error') return undefined;
+      if (event.type === 'text_delta') fullText += event.delta;
+      if (event.type === 'done') {
+        completed = true;
+        fullText = extractTextFromContent(event.message.content);
+        break;
       }
     }
+    if (!completed) return undefined;
 
     const lines = fullText.trim().split('\n');
     const tierLine = lines.find((l) => l.toLowerCase().startsWith('tier:'));
@@ -471,7 +469,7 @@ ${currentPhase === 'implementation' ? 'Consider that the conversation is current
         return {
           tier: tierValue,
           reasoning: reasoningLine
-            ? reasoningLine.split(':')[1].trim()
+            ? reasoningLine.slice(reasoningLine.indexOf(':') + 1).trim()
             : 'Classifier decision.',
         };
       }

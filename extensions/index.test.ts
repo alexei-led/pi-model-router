@@ -13,7 +13,8 @@ vi.mock('./state', async (importOriginal) => ({
   saveLastRouterProfile: stateMocks.saveLastRouterProfile,
 }));
 
-vi.mock('./config', () => ({
+vi.mock('./config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./config')>()),
   loadRouterConfig: () => ({
     config: {
       profiles: {
@@ -29,30 +30,6 @@ vi.mock('./config', () => ({
     },
     warnings: [],
   }),
-  profileNames: () => ['alternate', 'balanced'],
-  resolveProfileName: (
-    config: { profiles: Record<string, unknown> },
-    name: unknown,
-  ) => (typeof name === 'string' && config.profiles[name] ? name : undefined),
-  parseCanonicalModelRef: (_ref: string) => ({
-    provider: 'openai',
-    modelId: 'gpt-4o',
-  }),
-  resolveContextWindow: () => 100000,
-  resolveMaxTokens: () => 4000,
-  collectProfileThinkingLevels: () => new Set<string>(),
-  getUnsupportedTiers: () => [] as string[],
-  ROUTER_TIERS: ['high', 'medium', 'low'] as const,
-  ROUTER_PIN_VALUES: ['auto', 'high', 'medium', 'low'] as const,
-  THINKING_LEVELS: [
-    'off',
-    'minimal',
-    'low',
-    'medium',
-    'high',
-    'xhigh',
-  ] as const,
-  isRouterTier: (v: unknown) => v === 'high' || v === 'medium' || v === 'low',
 }));
 
 describe('index.ts (orchestrator)', () => {
@@ -104,6 +81,39 @@ describe('index.ts (orchestrator)', () => {
       theme: { fg: (_color: string, text: string) => text },
       notify: vi.fn(),
     },
+  });
+
+  it('keeps restored branch snapshots immutable when thinking changes', async () => {
+    routerExtension(mockPi);
+    const ctx = buildMockCtx();
+    const saved = {
+      enabled: true,
+      selectedProfile: 'balanced',
+      timestamp: 1,
+      thinkingByProfile: { balanced: Object.freeze({ high: 'high' }) },
+    };
+    ctx.sessionManager.getBranch = () => [
+      { type: 'custom', customType: 'router-state', data: saved },
+    ];
+    for (const handler of eventListeners.session_start)
+      await handler({ reason: 'switch' }, ctx);
+    const before = structuredClone(mockPi.appendEntry.mock.calls.at(-1)?.[1]);
+    for (const handler of eventListeners.thinking_level_select)
+      await handler({ level: 'low' }, ctx);
+    expect(saved.thinkingByProfile.balanced.high).toBe('high');
+    expect(mockPi.appendEntry.mock.calls[0]?.[1]).toEqual(before);
+    expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+      thinkingByProfile: { balanced: { high: 'low' } },
+    });
+  });
+
+  it('persists identical initial state separately on a new branch', async () => {
+    routerExtension(mockPi);
+    for (const handler of eventListeners.session_start) {
+      await handler({ reason: 'new' }, buildMockCtx());
+      await handler({ reason: 'new' }, buildMockCtx());
+    }
+    expect(mockPi.appendEntry).toHaveBeenCalledTimes(2);
   });
 
   it('should initialize and register commands, provider, and event hooks', () => {

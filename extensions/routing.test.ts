@@ -1,6 +1,5 @@
 import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
-import { streamSimple } from '@earendil-works/pi-ai/compat';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   buildRoutingDecision,
   containsAny,
@@ -13,13 +12,8 @@ import {
   hasImageAttachment,
   phaseForTier,
   resolveAvailableTier,
-  runClassifier,
 } from './routing';
 import type { RouterProfile, RoutingRule } from './types';
-
-vi.mock('@earendil-works/pi-ai/compat', () => ({
-  streamSimple: vi.fn(),
-}));
 
 describe('routing.ts', () => {
   describe('extractTextFromContent', () => {
@@ -222,6 +216,28 @@ describe('routing.ts', () => {
   });
 
   describe('decideRouting', () => {
+    it('uses an available low tier instead of re-escalating after the budget downgrade', () => {
+      const profile: RouterProfile = {
+        high: { model: 'test/high' },
+        low: { model: 'test/low' },
+      };
+      const context: Context = {
+        messages: [{ role: 'user', content: 'deep design', timestamp: 1 }],
+      };
+      expect(
+        decideRouting(
+          context,
+          'balanced',
+          profile,
+          undefined,
+          undefined,
+          undefined,
+          0.5,
+          undefined,
+          true,
+        ),
+      ).toMatchObject({ tier: 'low', isBudgetForced: true });
+    });
     const profile: RouterProfile = {
       high: { model: 'openai/gpt-4o', resolvedContextWindow: 100 },
       medium: { model: 'openai/gpt-4o-mini', resolvedContextWindow: 100 },
@@ -513,114 +529,6 @@ describe('routing.ts', () => {
       const decision = decideRouting(context, 'p', profile, undefined);
       expect(decision.tier).toBe('medium');
       expect(decision.reasoning).toContain('Defaulted to medium');
-    });
-  });
-
-  describe('runClassifier', () => {
-    const mockRegistry = {
-      find: (provider: string, modelId: string) => {
-        if (provider === 'openai' && modelId === 'gpt-4o') {
-          return { provider, id: modelId, reasoning: true };
-        }
-        return undefined;
-      },
-      getApiKeyAndHeaders: async () => ({
-        ok: true as const,
-        apiKey: 'test-key',
-        headers: {},
-      }),
-    } as unknown as Parameters<typeof runClassifier>[1];
-
-    const context: Context = {
-      messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }],
-    };
-
-    it('should return parsed classification result from stream delta', async () => {
-      const mockStream = (async function* () {
-        yield { type: 'text_delta', delta: 'Tier: high\n' };
-        yield { type: 'text_delta', delta: 'Reasoning: Needs deep reasoner.' };
-      })();
-      vi.mocked(streamSimple).mockReturnValue(
-        mockStream as unknown as ReturnType<typeof streamSimple>,
-      );
-
-      const result = await runClassifier(
-        'openai/gpt-4o',
-        mockRegistry,
-        context,
-        'planning',
-        'high',
-      );
-      expect(result).toEqual({
-        tier: 'high',
-        reasoning: 'Needs deep reasoner.',
-      });
-    });
-
-    it('should accept headers-only authentication and isolate classifier context', async () => {
-      let delegatedContext: Context | undefined;
-      let delegatedOptions: unknown;
-      const headersOnlyRegistry = {
-        find: () =>
-          ({
-            provider: 'openai',
-            id: 'gpt-4o',
-            api: 'openai-responses',
-            baseUrl: 'https://api.openai.com',
-            reasoning: true,
-          }) as unknown,
-        getApiKeyAndHeaders: async () => ({
-          ok: true as const,
-          headers: { Authorization: 'Bearer headers-only-token' },
-        }),
-      } as unknown as Parameters<typeof runClassifier>[1];
-      const mockStream = (async function* () {
-        yield { type: 'text_delta', delta: 'Tier: low\n' };
-        yield { type: 'text_delta', delta: 'Reasoning: Small request.' };
-      })();
-      vi.mocked(streamSimple).mockImplementation((_model, context, options) => {
-        delegatedContext = context;
-        delegatedOptions = options;
-        return mockStream as unknown as ReturnType<typeof streamSimple>;
-      });
-
-      const context = {
-        systemPrompt: 'private system prompt',
-        tools: [{ name: 'private-tool' }],
-        messages: [{ role: 'user', content: 'classify this' }],
-      } as unknown as Context;
-      const result = await runClassifier(
-        'openai/gpt-4o',
-        headersOnlyRegistry,
-        context,
-      );
-
-      expect(result).toEqual({
-        tier: 'low',
-        reasoning: 'Small request.',
-      });
-      expect(delegatedContext?.systemPrompt).toBeUndefined();
-      expect(delegatedContext && 'tools' in delegatedContext).toBe(false);
-      expect(delegatedOptions).toMatchObject({
-        apiKey: undefined,
-        headers: { Authorization: 'Bearer headers-only-token' },
-      });
-    });
-
-    it('should return undefined if stream fails or format is invalid', async () => {
-      const mockStream = (async function* () {
-        yield { type: 'text_delta', delta: 'Invalid response format' };
-      })();
-      vi.mocked(streamSimple).mockReturnValue(
-        mockStream as unknown as ReturnType<typeof streamSimple>,
-      );
-
-      const result = await runClassifier(
-        'openai/gpt-4o',
-        mockRegistry,
-        context,
-      );
-      expect(result).toBeUndefined();
     });
   });
 });
