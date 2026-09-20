@@ -24,13 +24,13 @@ describe('ui.ts', () => {
         targetProvider: 'google',
         targetModelId: 'gemini-2.5-pro',
         targetLabel: 'google/gemini-2.5-pro',
-        reasoning: 'Exploratory prompts',
+        reasonCode: 'heuristic',
         thinking: 'high',
         timestamp: Date.now(),
       };
       const formatted = formatDecision(decision);
       expect(formatted).toBe(
-        'balanced: high -> google/gemini-2.5-pro [high] (Exploratory prompts)',
+        'balanced: high -> google/gemini-2.5-pro [high] (heuristic)',
       );
     });
   });
@@ -162,7 +162,7 @@ describe('ui.ts', () => {
         targetProvider: 'google',
         targetModelId: 'gemini-2.5-pro',
         targetLabel: 'google/gemini-2.5-pro',
-        reasoning: 'planning keywords',
+        reasonCode: 'heuristic',
         thinking: 'high',
         timestamp: Date.now(),
       };
@@ -235,7 +235,7 @@ describe('ui.ts', () => {
         targetProvider: 'openai',
         targetModelId: 'gpt-4o-mini',
         targetLabel: 'openai/gpt-4o-mini',
-        reasoning: 'implementation work',
+        reasonCode: 'heuristic',
         thinking: 'medium',
         timestamp: Date.now(),
       };
@@ -270,7 +270,7 @@ describe('ui.ts', () => {
         targetProvider: 'google',
         targetModelId: 'gemini-2.5-pro',
         targetLabel: 'google/gemini-2.5-pro',
-        reasoning: 'planning keywords',
+        reasonCode: 'heuristic',
         thinking: 'high',
         timestamp: Date.now(),
       };
@@ -306,7 +306,7 @@ describe('ui.ts', () => {
         targetProvider: 'google',
         targetModelId: 'gemini-2.5-flash',
         targetLabel: 'google/gemini-2.5-flash',
-        reasoning: 'test',
+        reasonCode: 'heuristic',
         thinking: 'medium',
         timestamp: Date.now(),
       };
@@ -343,7 +343,7 @@ describe('ui.ts', () => {
         targetProvider: 'google',
         targetModelId: 'gemini-2.5-flash',
         targetLabel: 'google/gemini-2.5-flash',
-        reasoning: 'test',
+        reasonCode: 'heuristic',
         thinking: 'medium',
         timestamp: Date.now(),
       };
@@ -386,7 +386,7 @@ describe('four-tier rendering', () => {
         targetModelId: 'model',
         targetLabel: 'test/model',
         thinking: tier === 'micro' ? 'off' : tier,
-        reasoning: 'legacy local reason',
+        reasonCode: 'heuristic',
         timestamp: 1,
       };
       const ctx = {
@@ -424,9 +424,9 @@ describe('four-tier rendering', () => {
 });
 
 describe('local floor status', () => {
-  it.each(['local-safety-floor', 'budget-floor-conflict'])(
+  it.each(['pinned', 'budget-floor-conflict'] as const)(
     'shows the actual route rather than waiting when the floor rejects a pin: %s',
-    (reasoning) => {
+    (reasonCode) => {
       const ctx = { ui: { setStatus: vi.fn(), setWidget: vi.fn() } };
       updateStatus(ctx as unknown as ExtensionContext, {
         routerEnabled: true,
@@ -441,7 +441,7 @@ describe('local floor status', () => {
           targetLabel: 'test/model',
           thinking: 'high',
           timestamp: 1,
-          reasoning,
+          reasonCode,
         },
         lastNonRouterModel: undefined,
         accumulatedCost: 0,
@@ -454,4 +454,89 @@ describe('local floor status', () => {
       );
     },
   );
+});
+
+describe('safe source rendering', () => {
+  it('never displays old or invalid reason text, incidental remote metadata, or legacy', () => {
+    const decision = {
+      profile: 'p',
+      tier: 'high',
+      phase: 'planning',
+      targetProvider: 'test',
+      targetModelId: 'model',
+      targetLabel: 'test/model',
+      thinking: 'high',
+      timestamp: 1,
+      reasoning: 'private key and remote explanation',
+      reasonCode: 'legacy',
+      endpoint: 'https://remote.invalid',
+      apiKey: 'private key',
+      rawResponse: 'remote explanation',
+    } as unknown as RoutingDecision;
+    expect(formatDecision(decision)).toBe('p: high -> test/model [high]');
+    const ctx = {
+      ui: {
+        setStatus: vi.fn(),
+        setWidget: vi.fn(),
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    };
+    updateStatus(ctx as unknown as ExtensionContext, {
+      routerEnabled: true,
+      selectedProfile: 'p',
+      pinnedTierByProfile: {},
+      lastDecision: decision,
+      lastNonRouterModel: undefined,
+      accumulatedCost: 0,
+      widgetEnabled: true,
+      currentConfig: { profiles: {} },
+    });
+    const rendered = JSON.stringify(ctx.ui.setWidget.mock.calls);
+    for (const text of ['private key', 'remote', 'legacy'])
+      expect(rendered).not.toContain(text);
+    expect(
+      formatDecision({
+        ...decision,
+        reasonCode: 'secret',
+      } as unknown as RoutingDecision),
+    ).not.toContain('secret');
+  });
+  it('shows fixed source, latency and error class without remote text', () => {
+    const ctx = {
+      ui: {
+        setStatus: vi.fn(),
+        setWidget: vi.fn(),
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    };
+    updateStatus(ctx as unknown as ExtensionContext, {
+      routerEnabled: true,
+      selectedProfile: 'p',
+      pinnedTierByProfile: {},
+      lastNonRouterModel: undefined,
+      accumulatedCost: 0,
+      widgetEnabled: true,
+      currentConfig: { profiles: {} },
+      lastDecision: {
+        profile: 'p',
+        tier: 'medium',
+        phase: 'implementation',
+        targetProvider: 'test',
+        targetModelId: 'model',
+        targetLabel: 'test/model',
+        thinking: 'medium',
+        timestamp: 1,
+        reasonCode: 'heuristic',
+        routingLatencyMs: 1500,
+        errorClass: 'deadline',
+      },
+    });
+    expect(ctx.ui.setWidget.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining([
+        'Source: heuristic',
+        'Routing: 1500ms',
+        'Routing error: deadline',
+      ]),
+    );
+  });
 });

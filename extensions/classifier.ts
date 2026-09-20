@@ -19,9 +19,12 @@ export const runClassifier = async (
   currentPhase?: RouterPhase,
   thinking?: ThinkingLevel,
   signal?: AbortSignal,
+  routingDeadline = performance.now() + CLASSIFIER_TIMEOUT_MS,
 ): Promise<{ tier: ClassifierTier; reasoning: string } | undefined> => {
   try {
-    if (signal?.aborted) return undefined;
+    const remaining = routingDeadline - performance.now();
+    if (signal?.aborted || !Number.isFinite(remaining) || remaining <= 0)
+      return undefined;
     const { provider, modelId } = parseCanonicalModelRef(classifierModelRef);
     if (provider === 'router') return undefined;
     const model = modelRegistry.find(provider, modelId);
@@ -50,7 +53,9 @@ export const runClassifier = async (
         },
       ],
     };
-    const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
+    const timeout = AbortSignal.timeout(
+      Math.max(1, Math.ceil(Math.min(CLASSIFIER_TIMEOUT_MS, remaining))),
+    );
     const classifierSignal = signal
       ? AbortSignal.any([signal, timeout])
       : timeout;

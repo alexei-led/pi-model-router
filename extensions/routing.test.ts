@@ -11,6 +11,7 @@ import {
 } from './context';
 import {
   allowed,
+  availableRoutePairs,
   buildRoutingDecision,
   decideRouting,
   isMechanicalTask,
@@ -19,7 +20,9 @@ import {
   resolveAvailableTier,
   resolveRoutePair,
   tierRank,
+  validateRoutePair,
 } from './routing';
+import { model } from './test/fixtures';
 import type { RouterProfile, RouterTier, RoutingRule } from './types';
 import { ROUTER_TIERS } from './types';
 
@@ -198,7 +201,7 @@ describe('routing.ts', () => {
         profile,
         'high',
         'planning',
-        'Reasoning string',
+        'heuristic',
       );
       expect(decision.profile).toBe('balanced');
       expect(decision.tier).toBe('high');
@@ -207,7 +210,7 @@ describe('routing.ts', () => {
       expect(decision.targetModelId).toBe('gpt-4o-pro');
       expect(decision.targetLabel).toBe('openai/gpt-4o-pro');
       expect(decision.thinking).toBe('high');
-      expect(decision.reasoning).toBe('Reasoning string');
+      expect(decision.reasonCode).toBe('heuristic');
     });
 
     it('throw if tier is not in profile', () => {
@@ -217,7 +220,7 @@ describe('routing.ts', () => {
           profile,
           'medium',
           'implementation',
-          'Reason',
+          'heuristic',
         ),
       ).toThrow();
     });
@@ -262,7 +265,7 @@ describe('routing.ts', () => {
       };
       const decision = decideRouting(context, 'p', profile, undefined, 'high');
       expect(decision.tier).toBe('high');
-      expect(decision.reasoning).toContain('Pinned to high tier');
+      expect(decision.reasonCode).toBe('pinned');
     });
 
     it('match custom rule first', () => {
@@ -287,7 +290,7 @@ describe('routing.ts', () => {
       );
       expect(decision.tier).toBe('high');
       expect(decision.isRuleMatched).toBe(true);
-      expect(decision.reasoning).toBe('High rule');
+      expect(decision.reasonCode).toBe('custom-rule');
     });
 
     it('match custom rule case-insensitively', () => {
@@ -315,7 +318,7 @@ describe('routing.ts', () => {
       );
       expect(decision.tier).toBe('high');
       expect(decision.isRuleMatched).toBe(true);
-      expect(decision.reasoning).toBe('High rule');
+      expect(decision.reasonCode).toBe('custom-rule');
     });
 
     it('collect all matching rules and pick the highest tier', () => {
@@ -344,7 +347,7 @@ describe('routing.ts', () => {
       );
       expect(decision.tier).toBe('high');
       expect(decision.isRuleMatched).toBe(true);
-      expect(decision.reasoning).toBe('High rule');
+      expect(decision.reasonCode).toBe('custom-rule');
     });
 
     it('route explicit high/low hints', () => {
@@ -411,7 +414,7 @@ describe('routing.ts', () => {
         profile,
         'high',
         'planning',
-        'Initial plan',
+        'heuristic',
       );
       const decision = decideRouting(context, 'p', profile, previous);
       expect(decision.tier).toBe('high');
@@ -434,7 +437,7 @@ describe('routing.ts', () => {
         profile,
         'high',
         'planning',
-        'Previous planning',
+        'heuristic',
       );
       const decision = decideRouting(
         context,
@@ -447,7 +450,7 @@ describe('routing.ts', () => {
       );
       expect(decision.tier).toBe('high');
       expect(decision.phase).toBe('planning');
-      expect(decision.reasoning).toContain('planning-phase bias');
+      expect(decision.reasonCode).toBe('heuristic');
     });
 
     it('detect implementation from previous implementation phase', () => {
@@ -465,12 +468,12 @@ describe('routing.ts', () => {
         profile,
         'medium',
         'implementation',
-        'Previous impl',
+        'heuristic',
       );
       const decision = decideRouting(context, 'p', profile, previous);
       expect(decision.tier).toBe('medium');
       expect(decision.phase).toBe('implementation');
-      expect(decision.reasoning).toContain('implementation');
+      expect(decision.reasonCode).toBe('heuristic');
     });
 
     it('detect implementation from toolResultCount > 0', () => {
@@ -499,7 +502,7 @@ describe('routing.ts', () => {
       const decision = decideRouting(context, 'p', profile, undefined);
       expect(decision.tier).toBe('medium');
       expect(decision.phase).toBe('implementation');
-      expect(decision.reasoning).toContain('implementation');
+      expect(decision.reasonCode).toBe('heuristic');
     });
 
     it('detect implementation from recent conversation containing plan:', () => {
@@ -520,7 +523,7 @@ describe('routing.ts', () => {
       const decision = decideRouting(context, 'p', profile, undefined);
       expect(decision.tier).toBe('medium');
       expect(decision.phase).toBe('implementation');
-      expect(decision.reasoning).toContain('implementation');
+      expect(decision.reasonCode).toBe('heuristic');
     });
 
     it('default to medium tier when no heuristic rules match for moderate-length prompts', () => {
@@ -536,7 +539,7 @@ describe('routing.ts', () => {
       };
       const decision = decideRouting(context, 'p', profile, undefined);
       expect(decision.tier).toBe('medium');
-      expect(decision.reasoning).toContain('Defaulted to medium');
+      expect(decision.reasonCode).toBe('heuristic');
     });
   });
 });
@@ -645,7 +648,7 @@ describe('four-level local routing', () => {
     ).toMatchObject({
       tier: 'micro',
       thinking: 'off',
-      reasoning: 'micro-mechanical',
+      reasonCode: 'micro-mechanical',
     });
   });
 
@@ -708,7 +711,7 @@ describe('four-level local routing', () => {
       ),
     ).toMatchObject({
       tier: 'high',
-      reasoning: 'local-safety-floor',
+      reasonCode: 'pinned',
     });
     expect(
       decideRouting(
@@ -724,7 +727,7 @@ describe('four-level local routing', () => {
       ),
     ).toMatchObject({
       tier: 'high',
-      reasoning: 'budget-floor-conflict',
+      reasonCode: 'budget-floor-conflict',
       isBudgetForced: false,
     });
     const partial = { high: profile.high, low: profile.low };
@@ -742,7 +745,7 @@ describe('four-level local routing', () => {
       ),
     ).toMatchObject({
       tier: 'high',
-      reasoning: 'budget-floor-conflict',
+      reasonCode: 'budget-floor-conflict',
     });
   });
 
@@ -770,5 +773,117 @@ describe('four-level local routing', () => {
     expect(
       resolveRoutePair(profile, 'micro', { micro: 'minimal' }).thinking,
     ).toBe('minimal');
+  });
+});
+
+describe('local authority across every routing source', () => {
+  const profile: RouterProfile = {
+    micro: { model: 'test/tiny' },
+    low: { model: 'test/small' },
+    medium: { model: 'test/worker' },
+    high: { model: 'test/frontier' },
+  };
+  it.each(
+    ROUTER_TIERS.flatMap((tier) =>
+      ROUTER_TIERS.map((floor) => ({ tier, floor })),
+    ),
+  )(
+    'enforces allowed($tier, $floor) in candidate validation and source policy',
+    ({ tier, floor }) => {
+      const expected = tierRank(tier) >= tierRank(floor);
+      const prompt = {
+        micro: 'pwd',
+        low: 'what is this?',
+        medium: 'implement parser',
+        high: 'design security',
+      }[floor];
+      const context: Context = {
+        messages: [{ role: 'user', content: prompt, timestamp: 1 }],
+      };
+      const pair = resolveRoutePair(profile, tier);
+      expect(
+        validateRoutePair(pair, floor, (_provider, id) => model(id), false),
+      ).toBe(expected);
+      // Jev and all fallback routes are constructed only from these validated pairs.
+      expect(
+        availableRoutePairs(
+          profile,
+          floor,
+          (_provider, id) => model(id),
+          false,
+        ).some((candidate) => candidate.tier === tier),
+      ).toBe(expected);
+      for (const budget of [true, false]) {
+        const pinned = decideRouting(
+          context,
+          'p',
+          profile,
+          undefined,
+          tier,
+          undefined,
+          0.5,
+          undefined,
+          budget,
+        );
+        const ruled = decideRouting(
+          context,
+          'p',
+          profile,
+          undefined,
+          undefined,
+          undefined,
+          0.5,
+          [{ matches: prompt, tier, reason: 'private rule text' }],
+          budget,
+        );
+        for (const decision of [pinned, ruled]) {
+          expect(allowed(decision.tier, floor)).toBe(true);
+          expect(JSON.stringify(decision)).not.toContain('private rule text');
+        }
+      }
+    },
+  );
+  it('checks actual model input and effort, including non-reasoning and off support', () => {
+    const pair = {
+      tier: 'medium' as const,
+      model: 'test/worker',
+      thinking: 'medium' as const,
+    };
+    expect(validateRoutePair(pair, 'low', () => undefined, false)).toBe(false);
+    expect(
+      validateRoutePair(
+        pair,
+        'low',
+        () => model('worker', { input: ['text'] }),
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      validateRoutePair(
+        pair,
+        'low',
+        () => model('worker', { reasoning: false }),
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      validateRoutePair(
+        pair,
+        'low',
+        () => model('worker', { thinkingLevelMap: { medium: null } }),
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      validateRoutePair(
+        { ...pair, thinking: 'off' },
+        'low',
+        () => model('worker', { thinkingLevelMap: { off: null } }),
+        false,
+      ),
+    ).toBe(false);
+    expect(validateRoutePair(pair, 'low', () => model(), false, ['high'])).toBe(
+      false,
+    );
   });
 });

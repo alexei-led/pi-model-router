@@ -118,6 +118,25 @@ export interface JevAdvice {
   latencyMs: number;
 }
 
+export const ROUTING_REASON_CODES = [
+  'pinned',
+  'custom-rule',
+  'micro-mechanical',
+  'continuation',
+  'classifier',
+  'jev',
+  'heuristic',
+  'fallback',
+  'budget-floor-conflict',
+  'legacy',
+] as const;
+export type RoutingReasonCode = (typeof ROUTING_REASON_CODES)[number];
+export const isRoutingReasonCode = (
+  value: unknown,
+): value is RoutingReasonCode =>
+  ROUTING_REASON_CODES.some((code) => code === value);
+export type RoutingErrorClass = 'advisor-unavailable' | 'deadline';
+
 export interface RoutingDecision {
   profile: string;
   tier: RouterTier;
@@ -125,7 +144,9 @@ export interface RoutingDecision {
   targetProvider: string;
   targetModelId: string;
   targetLabel: string;
-  reasoning: string;
+  reasonCode: RoutingReasonCode;
+  routingLatencyMs?: number | undefined;
+  errorClass?: RoutingErrorClass | undefined;
   thinking: ThinkingLevel;
   timestamp: number;
   isClassifier?: boolean | undefined;

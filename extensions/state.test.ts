@@ -102,7 +102,7 @@ describe('state.ts', () => {
         targetProvider: 'google',
         targetModelId: 'gemini-2.5-pro',
         targetLabel: 'google/gemini-2.5-pro',
-        reasoning: 'Rules matched',
+        reasonCode: 'heuristic',
         thinking: 'high',
         timestamp: Date.now(),
       };
@@ -171,7 +171,7 @@ describe('four-tier snapshots', () => {
         targetModelId: 'model',
         targetLabel: 'test/model',
         thinking: tier === 'micro' ? 'off' : tier,
-        reasoning: 'legacy local reason',
+        reasonCode: 'heuristic',
         timestamp: 1,
       };
       const withExtraFields = {
@@ -195,6 +195,100 @@ describe('four-tier snapshots', () => {
       expect(state.pinTier).toBe(tier);
       expect(state.lastDecision).toMatchObject(decision);
       expect(JSON.stringify(state)).not.toContain('must not be copied');
+    },
+  );
+});
+
+describe('closed decision snapshot boundary', () => {
+  const safe: RoutingDecision = {
+    profile: 'p',
+    tier: 'high',
+    phase: 'planning',
+    targetProvider: 'test',
+    targetModelId: 'model',
+    targetLabel: 'test/model',
+    thinking: 'high',
+    reasonCode: 'jev',
+    timestamp: 1,
+  };
+  it('omits all incidental data and maps old free-form explanations only to legacy', () => {
+    const tainted = {
+      ...safe,
+      reasonCode: undefined,
+      reasoning: 'secret key task https://remote.invalid',
+      rawResponse: 'remote explanation',
+      endpoint: 'https://remote.invalid',
+      apiKey: 'secret',
+      errorClass: 'remote-error-text',
+      routingLatencyMs: Number.NaN,
+    } as unknown as RoutingDecision;
+    const saved = buildPersistedState({
+      routerEnabled: true,
+      selectedProfile: 'p',
+      pinnedTierByProfile: {},
+      thinkingByProfile: {},
+      debugEnabled: true,
+      widgetEnabled: true,
+      lastDecision: tainted,
+      debugHistory: [tainted],
+      lastNonRouterModel: undefined,
+      accumulatedCost: 0,
+    });
+    expect(saved.lastDecision?.reasonCode).toBe('legacy');
+    expect(saved.debugHistory?.[0]?.reasonCode).toBe('legacy');
+    const json = JSON.stringify(saved);
+    for (const text of [
+      'reasoning',
+      'secret',
+      'remote',
+      'rawResponse',
+      'apiKey',
+      'endpoint',
+    ])
+      expect(json).not.toContain(text);
+    expect(saved.lastDecision?.errorClass).toBeUndefined();
+    expect(saved.lastDecision?.routingLatencyMs).toBeUndefined();
+  });
+  it.each([
+    'pinned',
+    'custom-rule',
+    'micro-mechanical',
+    'continuation',
+    'classifier',
+    'jev',
+    'heuristic',
+    'fallback',
+    'budget-floor-conflict',
+    'legacy',
+  ])('accepts the exact reason code %s', (reasonCode) => {
+    expect(
+      isRouterPersistedState({
+        enabled: true,
+        selectedProfile: 'p',
+        timestamp: 1,
+        lastDecision: { ...safe, reasonCode },
+      }),
+    ).toBe(true);
+  });
+  it.each([
+    'local-safety-floor',
+    'arbitrary text',
+    '',
+    'timeout',
+    'constructor',
+    1,
+    null,
+  ])(
+    'rejects out-of-union reason code %s even alongside legacy reasoning',
+    (reasonCode) => {
+      expect(
+        isRouterPersistedState({
+          enabled: true,
+          selectedProfile: 'p',
+          timestamp: 1,
+          lastDecision: { ...safe, reasonCode, reasoning: 'legacy text' },
+        }),
+      ).toBe(false);
     },
   );
 });

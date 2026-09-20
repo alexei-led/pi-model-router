@@ -14,6 +14,7 @@ import type {
   RouterPinByProfile,
   RoutingDecision,
 } from './types';
+import { isRoutingReasonCode } from './types';
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
 
@@ -36,13 +37,12 @@ const isDecision = (value: unknown): value is RoutingDecision =>
   isPhase(value.phase) &&
   isThinkingLevel(value.thinking) &&
   isFiniteNumber(value.timestamp) &&
-  [
-    'profile',
-    'targetProvider',
-    'targetModelId',
-    'targetLabel',
-    'reasoning',
-  ].every((key) => typeof value[key] === 'string') &&
+  ['profile', 'targetProvider', 'targetModelId', 'targetLabel'].every(
+    (key) => typeof value[key] === 'string',
+  ) &&
+  (value.reasonCode === undefined
+    ? typeof value.reasoning === 'string'
+    : isRoutingReasonCode(value.reasonCode)) &&
   ['isClassifier', 'isFallback', 'isBudgetForced', 'isRuleMatched'].every(
     (key) => value[key] === undefined || typeof value[key] === 'boolean',
   );
@@ -129,14 +129,27 @@ export const isRouterPersistedState = (
 };
 
 // Copy only the decision contract, never incidental runtime properties.
-const snapshotDecision = (decision: RoutingDecision): RoutingDecision => ({
+export const snapshotDecision = (
+  decision: RoutingDecision,
+): RoutingDecision => ({
   profile: decision.profile,
   tier: decision.tier,
   phase: decision.phase,
   targetProvider: decision.targetProvider,
   targetModelId: decision.targetModelId,
   targetLabel: decision.targetLabel,
-  reasoning: decision.reasoning,
+  reasonCode: isRoutingReasonCode(decision.reasonCode)
+    ? decision.reasonCode
+    : 'legacy',
+  routingLatencyMs:
+    isFiniteNumber(decision.routingLatencyMs) && decision.routingLatencyMs >= 0
+      ? decision.routingLatencyMs
+      : undefined,
+  errorClass:
+    decision.errorClass === 'advisor-unavailable' ||
+    decision.errorClass === 'deadline'
+      ? decision.errorClass
+      : undefined,
   thinking: decision.thinking,
   timestamp: decision.timestamp,
   isClassifier: decision.isClassifier,

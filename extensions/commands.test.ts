@@ -87,7 +87,7 @@ describe('commands.ts', () => {
       targetProvider: 'openai',
       targetModelId: 'gpt-4o-mini',
       targetLabel: 'openai/gpt-4o-mini',
-      reasoning: 'Default reasoning',
+      reasonCode: 'heuristic',
       thinking: 'medium',
       timestamp: Date.now(),
     };

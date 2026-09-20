@@ -24,6 +24,7 @@ import type {
 } from './types';
 import {
   formatDecision,
+  formatDecisionSource,
   formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
@@ -186,7 +187,9 @@ export const registerCommands = (
         `Last routed tier: ${state.lastDecision.tier}`,
         `Last phase: ${state.lastDecision.phase}`,
         `Last model: ${state.lastDecision.targetProvider}/${state.lastDecision.targetModelId} (${state.lastDecision.thinking})`,
-        `Reason: ${state.lastDecision.reasoning}`,
+        ...(formatDecisionSource(state.lastDecision)
+          ? [`Reason: ${formatDecisionSource(state.lastDecision)}`]
+          : []),
       );
     }
     if (state.lastConfigWarnings && state.lastConfigWarnings.length > 0) {

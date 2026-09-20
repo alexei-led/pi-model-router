@@ -19,6 +19,7 @@ import {
   isRouterPersistedState,
   loadLastRouterProfile,
   saveLastRouterProfile,
+  snapshotDecision,
 } from './state';
 import type {
   RouterConfig,
@@ -151,7 +152,9 @@ const routerExtension = (pi: ExtensionAPI) => {
   };
 
   const recordDebugDecision = (decision: RoutingDecision) => {
-    debugHistory = [...debugHistory, decision].slice(-MAX_DEBUG_HISTORY);
+    debugHistory = [...debugHistory, snapshotDecision(decision)].slice(
+      -MAX_DEBUG_HISTORY,
+    );
   };
 
   const getThinkingOverride = (profileName: string, tier: RouterTier) => {
@@ -369,13 +372,15 @@ const routerExtension = (pi: ExtensionAPI) => {
       debugEnabled = savedState.debugEnabled ?? debugEnabled;
       widgetEnabled = savedState.widgetEnabled ?? widgetEnabled;
       debugHistory = savedState.debugHistory
-        ? structuredClone(savedState.debugHistory).slice(-MAX_DEBUG_HISTORY)
+        ? savedState.debugHistory
+            .map(snapshotDecision)
+            .slice(-MAX_DEBUG_HISTORY)
         : [];
       if (!hasExplicitStartupModel) {
         lastNonRouterModel =
           savedState.lastNonRouterModel ?? lastNonRouterModel;
         lastDecision = savedState.lastDecision
-          ? structuredClone(savedState.lastDecision)
+          ? snapshotDecision(savedState.lastDecision)
           : undefined;
       }
       accumulatedCost = savedState.accumulatedCost ?? 0;

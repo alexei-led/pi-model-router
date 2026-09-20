@@ -157,3 +157,41 @@ describe('classifier', () => {
     expect(s.streamSimple).not.toHaveBeenCalled();
   });
 });
+
+describe('classifier shared absolute deadline', () => {
+  it('does no work with an expired deadline', async () => {
+    const s = setup();
+    expect(
+      await runClassifier(
+        'test/primary',
+        s.registry,
+        s.context,
+        undefined,
+        undefined,
+        undefined,
+        performance.now() - 1,
+      ),
+    ).toBeUndefined();
+    expect(s.streamSimple).not.toHaveBeenCalled();
+  });
+  it('uses only the remaining monotonic time rather than its independent default timeout', async () => {
+    const s = setup();
+    s.streamSimple.mockReturnValue({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+    } as AssistantMessageEventStream);
+    const started = performance.now();
+    expect(
+      await runClassifier(
+        'test/primary',
+        s.registry,
+        s.context,
+        undefined,
+        undefined,
+        undefined,
+        started + 35,
+      ),
+    ).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(300);
+    expect(s.streamSimple.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+  });
+});

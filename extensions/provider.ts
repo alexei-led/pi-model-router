@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
@@ -16,7 +17,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { runClassifier } from './classifier';
 import {
-  clampThinkingLevel,
   collectProfileThinkingLevels,
   MAX_THINKING_LEVEL,
   parseCanonicalModelRef,
@@ -26,13 +26,18 @@ import {
   resolveMaxTokens,
 } from './config';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
-import { extractTextFromContent, hasImageAttachment } from './context';
+import {
+  extractTextFromContent,
+  getLastUserText,
+  hasImageAttachment,
+} from './context';
+import { createJevCandidate, runJev } from './jev';
 import {
   allowed,
-  buildRoutingDecision,
+  availableRoutePairs,
   decideRouting,
+  decisionForPair,
   localSafetyFloor,
-  phaseForTier,
   resolveAvailableTier,
 } from './routing';
 import type {
@@ -264,6 +269,19 @@ export const registerRouterProvider = (
   const modelsKey = JSON.stringify(modelDefinitions);
   if (state.lastRegisteredModels === modelsKey) return;
 
+  // Runtime only: no task identities or branch metadata enter persisted decisions.
+  let continuation:
+    | {
+        turn: string;
+        policy: string;
+        branch: string[];
+        decision: RoutingDecision;
+        toolCalls: Set<string>;
+        config: RouterConfig;
+      }
+    | undefined;
+  let advisedTurn: string | undefined;
+
   pi.registerProvider('router', {
     baseUrl: 'router://local',
     apiKey: 'pi-model-router',
@@ -306,139 +324,282 @@ export const registerRouterProvider = (
             state.accumulatedCost >= state.currentConfig.maxSessionBudget;
 
           const floor = localSafetyFloor(context);
-          let decision: RoutingDecision = decideRouting(
-            context,
+          const imageAttached = hasImageAttachment(context);
+          const findModel = (provider: string, id: string) =>
+            registry.find(provider, id);
+          const available = () =>
+            availableRoutePairs(
+              profile,
+              floor,
+              findModel,
+              imageAttached,
+              state.thinkingByProfile[model.id],
+              state.currentConfig.models,
+            );
+          let pairs = available();
+          const previousDecision = state.lastDecision;
+          const lastUserIndex = context.messages.findLastIndex(
+            (entry) => entry.role === 'user',
+          );
+          const user = context.messages[lastUserIndex];
+          const turn =
+            user?.role === 'user' && user.timestamp > 0
+              ? createHash('sha256')
+                  .update(
+                    JSON.stringify(
+                      context.messages.slice(0, lastUserIndex + 1),
+                    ),
+                  )
+                  .digest('hex')
+              : undefined;
+          const branch =
+            state.lastExtensionContext?.sessionManager
+              .getBranch()
+              .filter(
+                (entry) =>
+                  entry.type !== 'custom' ||
+                  entry.customType !== 'router-state',
+              )
+              .map((entry) => entry.id) ?? [];
+          // Account scope is the configured provider identity; Pi resolves credentials per request.
+          const policy = JSON.stringify([
             model.id,
             profile,
-            state.lastDecision,
             pinnedTier,
             state.thinkingByProfile[model.id],
-            state.currentConfig.phaseBias,
             state.currentConfig.rules,
+            state.currentConfig.phaseBias,
+            state.currentConfig.classifierModel,
             isBudgetExceeded,
+          ]);
+          const toolContinuation =
+            context.messages.at(-1)?.role === 'toolResult';
+          const latestAssistantIndex = context.messages.findLastIndex(
+            (entry) => entry.role === 'assistant',
           );
-
-          const lastMessage = context.messages[context.messages.length - 1];
-          const previousDecision = state.lastDecision;
-          const isGoogleThinkingToolContinuation =
-            lastMessage?.role === 'toolResult' &&
+          const latestResults = context.messages
+            .slice(latestAssistantIndex + 1)
+            .filter((entry) => entry.role === 'toolResult');
+          const latestAssistant = context.messages[latestAssistantIndex];
+          const reusable =
+            toolContinuation &&
+            continuation &&
+            turn &&
+            continuation.turn === turn &&
+            continuation.policy === policy &&
+            continuation.config === state.currentConfig &&
+            continuation.decision === previousDecision &&
             previousDecision?.profile === model.id &&
-            allowed(previousDecision.tier, floor) &&
-            (!pinnedTier || pinnedTier === previousDecision.tier) &&
-            previousDecision.targetProvider === 'google' &&
-            previousDecision.thinking !== 'off' &&
-            decision.targetProvider === 'google' &&
-            decision.thinking !== 'off' &&
-            previousDecision.targetLabel !== decision.targetLabel;
-
-          if (isGoogleThinkingToolContinuation && previousDecision) {
+            branch.length > 0 &&
+            branch.every((id) => typeof id === 'string' && id.length > 0) &&
+            continuation.branch.length > 0 &&
+            continuation.branch.every((id, i) => branch[i] === id) &&
+            latestResults.length > 0 &&
+            latestAssistant?.role === 'assistant' &&
+            latestAssistant.provider === previousDecision?.targetProvider &&
+            latestAssistant.model === previousDecision.targetModelId &&
+            latestResults.every((entry) =>
+              latestAssistant.content.some(
+                (part) =>
+                  part.type === 'toolCall' && part.id === entry.toolCallId,
+              ),
+            ) &&
+            latestResults.every((entry) =>
+              continuation?.toolCalls.has(entry.toolCallId),
+            ) &&
+            pairs.some(
+              (pair) =>
+                pair.tier === previousDecision?.tier &&
+                pair.model === previousDecision.targetLabel &&
+                pair.thinking === previousDecision.thinking,
+            );
+          let decision: RoutingDecision;
+          if (reusable && previousDecision) {
             decision = {
-              ...decision,
-              tier: previousDecision.tier,
-              phase: previousDecision.phase,
-              targetProvider: previousDecision.targetProvider,
-              targetModelId: previousDecision.targetModelId,
-              targetLabel: previousDecision.targetLabel,
-              thinking: previousDecision.thinking,
-              reasoning:
-                `Preserved ${previousDecision.targetLabel} for a Google tool-result continuation ` +
-                `to avoid thought-signature replay errors. (Original: ${decision.reasoning})`,
+              ...previousDecision,
+              reasonCode: 'continuation',
+              timestamp: Date.now(),
             };
+          } else {
+            continuation = undefined;
+            decision = decideRouting(
+              context,
+              model.id,
+              profile,
+              previousDecision,
+              pinnedTier,
+              state.thinkingByProfile[model.id],
+              state.currentConfig.phaseBias,
+              state.currentConfig.rules,
+              isBudgetExceeded,
+            );
+            const eligibleProfile = { ...profile };
+            for (const tier of ROUTER_TIERS) {
+              if (!pairs.some((pair) => pair.tier === tier))
+                delete eligibleProfile[tier];
+            }
+            const budgetLow =
+              isBudgetExceeded &&
+              decision.isBudgetForced &&
+              !eligibleProfile.medium &&
+              eligibleProfile.low &&
+              allowed('low', floor);
+            const tier = resolveAvailableTier(
+              eligibleProfile,
+              budgetLow ? 'low' : decision.tier,
+              floor,
+            );
+            const pair = pairs.find((candidate) => candidate.tier === tier);
+            if (!pair) throw new Error('No eligible route.');
+            if (
+              pair.model !== decision.targetLabel ||
+              pair.thinking !== decision.thinking ||
+              pair.tier !== decision.tier
+            ) {
+              decision = {
+                ...decision,
+                isBudgetForced: decision.isBudgetForced && pair.tier !== 'high',
+                ...decisionForPair(
+                  model.id,
+                  pair,
+                  isBudgetExceeded && pair.tier === 'high'
+                    ? 'budget-floor-conflict'
+                    : 'fallback',
+                ),
+              };
+            }
           }
 
-          // Classifier Override — skip when budget is already exceeded or this is
-          // a continuation whose prior model must be preserved.
+          // Tool results never invoke advisors, even when their prior route cannot be reused.
           if (
-            state.currentConfig.classifierModel &&
+            !toolContinuation &&
             !pinnedTier &&
             !decision.isRuleMatched &&
             floor !== 'micro' &&
             !isBudgetExceeded &&
-            !isGoogleThinkingToolContinuation
+            user &&
+            turn &&
+            turn !== advisedTurn &&
+            (state.currentConfig.classifierModel ||
+              (state.currentConfig.jev?.enabled && profile.jev?.enabled))
           ) {
-            const classifierResult = await runClassifier(
-              state.currentConfig.classifierModel.model,
-              registry,
-              context,
-              previousDecision?.profile === model.id
-                ? previousDecision.phase
-                : undefined,
-              state.currentConfig.classifierModel.thinking,
-              options?.signal,
-            ).catch(() => undefined);
-            options?.signal?.throwIfAborted();
-            if (classifierResult && allowed(classifierResult.tier, floor)) {
-              const tier = resolveAvailableTier(
-                profile,
-                classifierResult.tier,
-                floor,
+            advisedTurn = turn;
+            const started = performance.now();
+            const routingDeadline = started + 1500;
+            const candidates = pairs
+              .filter(
+                (pair, i) =>
+                  pairs.findIndex((other) => other.tier === pair.tier) === i &&
+                  pair.model === profile[pair.tier]?.model,
+              )
+              .map(createJevCandidate);
+            let advised = false;
+            if (state.currentConfig.jev?.enabled && profile.jev?.enabled) {
+              const advice = await runJev(
+                {
+                  ...state.currentConfig.jev,
+                  timeoutMs: Math.min(750, state.currentConfig.jev.timeoutMs),
+                },
+                {
+                  taskSummary: getLastUserText(context),
+                  candidates,
+                  profile: profile.jev,
+                  routingDeadline,
+                  signal: options?.signal,
+                },
+              ).catch(() => undefined);
+              options?.signal?.throwIfAborted();
+              // Re-read registry capabilities after the network boundary.
+              pairs = available();
+              const candidate = candidates.find(
+                (entry) => entry.id === advice?.candidateId,
               );
-              decision = buildRoutingDecision(
-                model.id,
-                profile,
-                tier,
-                phaseForTier(tier),
-                'classifier',
-                state.thinkingByProfile[model.id],
-                true,
-              );
+              if (
+                candidate &&
+                performance.now() < routingDeadline &&
+                allowed(candidate.tier, floor) &&
+                pairs.some(
+                  (pair) =>
+                    pair.model === candidate.model &&
+                    pair.tier === candidate.tier &&
+                    pair.thinking === candidate.thinking,
+                )
+              ) {
+                decision = decisionForPair(model.id, candidate, 'jev');
+                advised = true;
+              } else decision.errorClass = 'advisor-unavailable';
             }
+            if (
+              !advised &&
+              state.currentConfig.classifierModel &&
+              performance.now() < routingDeadline
+            ) {
+              const classifier = state.currentConfig.classifierModel;
+              const result = await runClassifier(
+                classifier.model,
+                registry,
+                context,
+                previousDecision?.profile === model.id
+                  ? previousDecision.phase
+                  : undefined,
+                classifier.thinking,
+                options?.signal,
+                routingDeadline,
+              ).catch(() => undefined);
+              options?.signal?.throwIfAborted();
+              if (
+                result &&
+                allowed(result.tier, floor) &&
+                performance.now() < routingDeadline
+              ) {
+                const eligibleProfile = { ...profile };
+                pairs = available();
+                for (const tier of ROUTER_TIERS) {
+                  if (!pairs.some((pair) => pair.tier === tier))
+                    delete eligibleProfile[tier];
+                }
+                const tier = resolveAvailableTier(
+                  eligibleProfile,
+                  result.tier,
+                  floor,
+                );
+                const pair = pairs.find((entry) => entry.tier === tier);
+                if (pair)
+                  decision = {
+                    ...decisionForPair(model.id, pair, 'classifier'),
+                    isClassifier: true,
+                    errorClass: decision.errorClass,
+                  };
+              } else decision.errorClass = 'advisor-unavailable';
+            }
+            decision.routingLatencyMs = Math.max(
+              0,
+              performance.now() - started,
+            );
+            if (performance.now() >= routingDeadline)
+              decision.errorClass = 'deadline';
           }
 
-          const imageAttached = hasImageAttachment(context);
-          const checkModelSupportsImage = (modelRef: string) => {
-            try {
-              const { provider, modelId } = parseCanonicalModelRef(modelRef);
-              const m = registry.find(provider, modelId);
-              return m?.input?.includes('image') ?? false;
-            } catch {
-              return false;
-            }
-          };
-
-          if (imageAttached) {
-            const tierModels = [
-              decision.targetLabel,
-              ...(profile[decision.tier]?.fallbacks ?? []),
-            ];
-            if (!tierModels.some(checkModelSupportsImage)) {
-              const tiersToTry = [...ROUTER_TIERS]
-                .reverse()
-                .filter(
-                  (tier) =>
-                    tier !== decision.tier && allowed(tier, decision.tier),
-                );
-
-              let foundTier: RouterTier | undefined;
-              for (const t of tiersToTry) {
-                const tierConfig = profile[t];
-                if (!tierConfig) continue;
-                const tModels = [
-                  tierConfig.model,
-                  ...(tierConfig.fallbacks ?? []),
-                ];
-                if (tModels.some(checkModelSupportsImage)) {
-                  foundTier = t;
-                  break;
-                }
-              }
-
-              if (foundTier) {
-                decision = buildRoutingDecision(
-                  model.id,
-                  profile,
-                  foundTier,
-                  phaseForTier(foundTier),
-                  `Forced ${foundTier} tier because the originally routed ${decision.tier} tier does not support image attachments.`,
-                  state.thinkingByProfile[model.id],
-                  false,
-                );
-              }
-            }
+          // Google thought signatures cannot be replayed against a different thinking model.
+          const priorAssistant = context.messages[latestAssistantIndex];
+          if (
+            toolContinuation &&
+            priorAssistant?.role === 'assistant' &&
+            priorAssistant.provider === 'google' &&
+            priorAssistant.content.some(
+              (entry) =>
+                entry.type === 'thinking' ||
+                (entry.type === 'toolCall' && entry.thoughtSignature),
+            ) &&
+            (decision.targetProvider !== priorAssistant.provider ||
+              decision.targetModelId !== priorAssistant.model)
+          ) {
+            throw new Error(
+              'No compatible route for Google tool continuation.',
+            );
           }
 
           state.lastDecision = decision;
-          actions.recordDebugDecision(decision);
 
           // Sync pi's thinking level display with the router's effective thinking.
           // Wrapped in try/catch: in subagent contexts the extension runtime
@@ -455,20 +616,11 @@ export const registerRouterProvider = (
             // Stale extension context — skip non-critical UI updates.
           }
 
-          let modelsToTry = [
-            ...new Set([
-              decision.targetLabel,
-              ...(profile[decision.tier]?.fallbacks ?? []),
-            ]),
-          ];
-          if (imageAttached) {
-            modelsToTry = modelsToTry.filter(checkModelSupportsImage);
-            if (modelsToTry.length === 0) {
-              throw new Error(
-                'No configured model supports image attachments.',
-              );
-            }
-          }
+          // Explicit fallback refs authorize provider changes; never discover other accounts.
+          const modelsToTry = [
+            decision.targetLabel,
+            ...(profile[decision.tier]?.fallbacks ?? []),
+          ].filter((ref, i, refs) => refs.indexOf(ref) === i);
           let lastError: unknown;
           let success = false;
 
@@ -502,26 +654,33 @@ export const registerRouterProvider = (
                 effectiveContext = truncateContext(context, targetLimit);
               }
 
-              const thinkingOverride = actions.getThinkingOverride(
-                model.id,
-                decision.tier,
+              const pair = available().find(
+                (candidate) =>
+                  candidate.tier === decision.tier &&
+                  candidate.model === modelRef,
               );
-              let requestedReasoning = thinkingOverride ?? decision.thinking;
-
-              if (requestedReasoning !== 'off' && targetModel.reasoning) {
-                const tierConfig = profile[decision.tier];
-                if (tierConfig?.resolvedThinkingLevels) {
-                  requestedReasoning = clampThinkingLevel(
-                    requestedReasoning,
-                    tierConfig.resolvedThinkingLevels,
-                  );
-                }
+              if (!pair)
+                throw new Error(
+                  'Routed model capabilities or thinking are unsupported.',
+                );
+              if (
+                toolContinuation &&
+                priorAssistant?.role === 'assistant' &&
+                priorAssistant.provider === 'google' &&
+                priorAssistant.content.some(
+                  (entry) =>
+                    entry.type === 'thinking' ||
+                    (entry.type === 'toolCall' && entry.thoughtSignature),
+                ) &&
+                (targetProvider !== priorAssistant.provider ||
+                  targetModelId !== priorAssistant.model)
+              ) {
+                throw new Error(
+                  'No compatible route for Google tool continuation.',
+                );
               }
-
               const delegatedReasoning: SimpleStreamOptions['reasoning'] =
-                targetModel.reasoning && requestedReasoning !== 'off'
-                  ? requestedReasoning
-                  : undefined;
+                pair.thinking !== 'off' ? pair.thinking : undefined;
 
               try {
                 if (state.lastExtensionContext) {
@@ -565,7 +724,9 @@ export const registerRouterProvider = (
                 decision.targetModelId = targetModelId;
                 decision.targetLabel = modelRef;
                 decision.thinking = delegatedReasoning ?? 'off';
-                decision.isFallback = i > 0;
+                decision.isFallback =
+                  i > 0 || modelRef !== profile[decision.tier]?.model;
+                if (i > 0) decision.reasonCode = 'fallback';
               };
               for await (const event of delegatedStream) {
                 if (
@@ -600,6 +761,20 @@ export const registerRouterProvider = (
                   const cost = (
                     event.type === 'done' ? event.message : event.error
                   ).usage.cost.total;
+                  if (event.type === 'done' && turn) {
+                    continuation = {
+                      turn,
+                      policy,
+                      branch,
+                      decision,
+                      config: state.currentConfig,
+                      toolCalls: new Set(
+                        event.message.content.flatMap((entry) =>
+                          entry.type === 'toolCall' ? [entry.id] : [],
+                        ),
+                      ),
+                    };
+                  }
                   if (Number.isFinite(cost) && cost > 0)
                     state.accumulatedCost += cost;
                 }
@@ -635,6 +810,7 @@ export const registerRouterProvider = (
                 );
           }
 
+          actions.recordDebugDecision(decision);
           stream.end();
         } catch (error) {
           const reason = options?.signal?.aborted ? 'aborted' : 'error';

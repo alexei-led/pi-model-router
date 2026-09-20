@@ -1,4 +1,9 @@
-import type { Context } from '@earendil-works/pi-ai';
+import {
+  type Api,
+  type Context,
+  getSupportedThinkingLevels,
+  type Model,
+} from '@earendil-works/pi-ai';
 import { parseCanonicalModelRef } from './config';
 import {
   containsAny,
@@ -8,12 +13,14 @@ import {
   getRecentConversationText,
 } from './context';
 import type {
+  ModelDefinition,
   RoutePair,
   RouterPhase,
   RouterProfile,
   RouterThinkingByTier,
   RouterTier,
   RoutingDecision,
+  RoutingReasonCode,
   RoutingRule,
 } from './types';
 import { ROUTER_TIERS } from './types';
@@ -118,7 +125,7 @@ export const buildRoutingDecision = (
   profile: RouterProfile,
   tier: RouterTier,
   phase: RouterPhase,
-  reasoning: string,
+  reasonCode: RoutingReasonCode,
   thinkingOverrides?: RouterThinkingByTier,
   isClassifier?: boolean,
 ): RoutingDecision => {
@@ -132,7 +139,7 @@ export const buildRoutingDecision = (
     targetProvider: provider,
     targetModelId: modelId,
     targetLabel: pair.model,
-    reasoning,
+    reasonCode,
     thinking: pair.thinking,
     timestamp: Date.now(),
     isClassifier,
@@ -243,13 +250,13 @@ export const decideRouting = (
 
   let phase: RouterPhase = previousDecision?.phase ?? 'implementation';
   let tier: RouterTier = 'medium';
-  let reasoning = 'Defaulted to medium tier for general coding work.';
+  let reasonCode: RoutingReasonCode = 'heuristic';
   let isRuleMatched = false;
 
   if (pinnedTier) {
     phase = phaseForTier(pinnedTier);
     tier = pinnedTier;
-    reasoning = `Pinned to ${pinnedTier} tier via /router-pin.`;
+    reasonCode = 'pinned';
   } else {
     // Check custom rules first
     if (rules) {
@@ -272,12 +279,7 @@ export const decideRouting = (
       if (winningRule && highestTier) {
         tier = highestTier;
         phase = phaseForTier(tier);
-        const matches = Array.isArray(winningRule.matches)
-          ? winningRule.matches
-          : [winningRule.matches];
-        reasoning =
-          winningRule.reason ??
-          `Matched custom routing rule for: ${matches.join(', ')}`;
+        reasonCode = 'custom-rule';
         isRuleMatched = true;
       }
     }
@@ -300,21 +302,16 @@ export const decideRouting = (
       if (floor === 'micro') {
         phase = 'lightweight';
         tier = 'micro';
-        reasoning = 'micro-mechanical';
+        reasonCode = 'micro-mechanical';
       } else if (containsAny(prompt, explicitHighHints)) {
         phase = 'planning';
         tier = 'high';
-        reasoning =
-          'Detected an explicit request for deeper or higher-quality reasoning.';
       } else if (containsAny(prompt, explicitLowHints)) {
         phase = 'lightweight';
         tier = 'low';
-        reasoning =
-          'Detected an explicit request for a faster or lighter response.';
       } else if (containsAny(prompt, summaryKeywords)) {
         phase = 'lightweight';
         tier = 'low';
-        reasoning = 'Detected summary or lightweight transformation keywords.';
       } else if (
         containsAny(prompt, planningKeywords) ||
         prompt.startsWith('why ') ||
@@ -323,15 +320,9 @@ export const decideRouting = (
       ) {
         phase = 'planning';
         tier = 'high';
-        reasoning =
-          previousDecision?.phase === 'planning'
-            ? 'Continued planning phase based on complexity or keywords.'
-            : 'Detected planning, broad analysis, or a high-complexity request.';
       } else if (containsAny(prompt, implementationKeywords)) {
         phase = 'implementation';
         tier = 'medium';
-        reasoning =
-          'Detected implementation-oriented work with bounded execution scope.';
       } else if (
         containsAny(prompt, lookupKeywords) &&
         wordCount <= 24 &&
@@ -339,7 +330,6 @@ export const decideRouting = (
       ) {
         phase = 'lightweight';
         tier = 'low';
-        reasoning = 'Detected a short read-only lookup request.';
       } else if (
         previousDecision?.phase === 'planning' &&
         toolResultCount === 0 &&
@@ -347,8 +337,6 @@ export const decideRouting = (
       ) {
         phase = 'planning';
         tier = 'high';
-        reasoning =
-          'Kept the planning-phase bias because the conversation still looks exploratory.';
       } else if (
         toolResultCount > 0 ||
         previousDecision?.phase === 'implementation' ||
@@ -356,12 +344,9 @@ export const decideRouting = (
       ) {
         phase = 'implementation';
         tier = 'medium';
-        reasoning =
-          'Detected active implementation work from prior tools or recent plan execution context.';
       } else if (wordCount <= lowThreshold) {
         phase = 'lightweight';
         tier = 'low';
-        reasoning = 'Detected a short bounded request.';
       }
     }
   }
@@ -369,7 +354,7 @@ export const decideRouting = (
   if (!allowed(tier, floor)) {
     tier = floor;
     phase = phaseForTier(tier);
-    reasoning = 'local-safety-floor';
+    // Preserve the local source when safety raises its selected tier.
   }
 
   let isBudgetForced = false;
@@ -377,10 +362,10 @@ export const decideRouting = (
     if (allowed('medium', floor)) {
       tier = 'medium';
       phase = 'implementation';
-      reasoning = 'Budget exceeded. Downgraded from high to medium tier.';
+      reasonCode = 'fallback';
       isBudgetForced = true;
     } else {
-      reasoning = 'budget-floor-conflict';
+      reasonCode = 'budget-floor-conflict';
     }
   }
 
@@ -394,18 +379,13 @@ export const decideRouting = (
     floor,
   );
   if (resolvedTier !== tier) {
-    if (
-      reasoning !== 'local-safety-floor' &&
-      reasoning !== 'budget-floor-conflict'
-    ) {
-      reasoning = `Resolved from ${tier} to ${resolvedTier} tier (${tier} tier is not configured). Original: ${reasoning}`;
-    }
+    if (reasonCode !== 'budget-floor-conflict') reasonCode = 'fallback';
     phase = phaseForTier(resolvedTier);
     tier = resolvedTier;
   }
 
   if (isBudgetForced && tier === 'high') {
-    reasoning = 'budget-floor-conflict';
+    reasonCode = 'budget-floor-conflict';
     isBudgetForced = false;
   }
 
@@ -414,11 +394,103 @@ export const decideRouting = (
     profile,
     tier,
     phase,
-    reasoning,
+    reasonCode,
     thinkingOverrides,
     false,
   );
   decision.isRuleMatched = isRuleMatched;
   decision.isBudgetForced = isBudgetForced;
   return decision;
+};
+
+/** Revalidate the actual target; primary-model declarations never authorize a fallback's effort. */
+export const validateRoutePair = (
+  pair: RoutePair,
+  floor: RouterTier,
+  findModel: (provider: string, modelId: string) => Model<Api> | undefined,
+  imageAttached: boolean,
+  declaredLevels?: ModelDefinition['thinkingLevels'],
+): boolean => {
+  if (!allowed(pair.tier, floor)) return false;
+  try {
+    const { provider, modelId } = parseCanonicalModelRef(pair.model);
+    if (provider === 'router') return false;
+    const model = findModel(provider, modelId);
+    return Boolean(
+      model &&
+        (!imageAttached || model.input.includes('image')) &&
+        getSupportedThinkingLevels(model).includes(pair.thinking) &&
+        (!declaredLevels ||
+          pair.thinking === 'off' ||
+          declaredLevels.includes(pair.thinking)),
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const availableRoutePairs = (
+  profile: RouterProfile,
+  floor: RouterTier,
+  findModel: (provider: string, modelId: string) => Model<Api> | undefined,
+  imageAttached: boolean,
+  thinkingOverrides?: RouterThinkingByTier,
+  models?: Record<string, ModelDefinition>,
+): RoutePair[] =>
+  ROUTER_TIERS.flatMap((tier) => {
+    const config = profile[tier];
+    if (!config || !allowed(tier, floor)) return [];
+    const primary = resolveRoutePair(profile, tier, thinkingOverrides);
+    return [...new Set([primary.model, ...(config.fallbacks ?? [])])].flatMap(
+      (ref) => {
+        try {
+          const { provider, modelId } = parseCanonicalModelRef(ref);
+          const model = findModel(provider, modelId);
+          const ownConfig =
+            ref === primary.model
+              ? config
+              : Object.values(models ?? {}).find(
+                  (entry) => entry.model === ref,
+                );
+          // A non-reasoning model defaults to off, but explicit unsupported effort is rejected.
+          const thinking =
+            thinkingOverrides?.[tier] ??
+            config.thinking ??
+            (model?.reasoning ? primary.thinking : 'off');
+          const pair = { tier, model: `${provider}/${modelId}`, thinking };
+          return validateRoutePair(
+            pair,
+            floor,
+            findModel,
+            imageAttached,
+            ref === primary.model
+              ? (config.thinkingLevels ?? config.resolvedThinkingLevels)
+              : ownConfig?.thinkingLevels,
+          )
+            ? [pair]
+            : [];
+        } catch {
+          return [];
+        }
+      },
+    );
+  });
+
+export const decisionForPair = (
+  profile: string,
+  pair: RoutePair,
+  reasonCode: RoutingReasonCode,
+): RoutingDecision => {
+  const { provider, modelId } = parseCanonicalModelRef(pair.model);
+  return {
+    profile,
+    tier: pair.tier,
+    phase: phaseForTier(pair.tier),
+    targetProvider: provider,
+    targetModelId: modelId,
+    targetLabel: pair.model,
+    thinking: pair.thinking,
+    reasonCode,
+    timestamp: Date.now(),
+  };
 };

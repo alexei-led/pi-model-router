@@ -311,7 +311,7 @@ describe('jev.ts HTTP contract', () => {
       targetModelId: 'test',
       targetLabel: 'openai/test',
       thinking: 'medium',
-      reasoning: 'jev',
+      reasonCode: 'jev',
       timestamp: 1,
     };
     const input = {
