@@ -14,6 +14,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { runClassifier } from './classifier';
 import {
   clampThinkingLevel,
   collectProfileThinkingLevels,
@@ -25,6 +26,13 @@ import {
   resolveMaxTokens,
 } from './config';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
+import { extractTextFromContent, hasImageAttachment } from './context';
+import {
+  buildRoutingDecision,
+  decideRouting,
+  phaseForTier,
+  resolveAvailableTier,
+} from './routing';
 import type {
   RouterConfig,
   RouterPinByProfile,
@@ -67,16 +75,6 @@ export const waitForRegistry = async (
   }
   return undefined;
 };
-
-import {
-  buildRoutingDecision,
-  decideRouting,
-  extractTextFromContent,
-  hasImageAttachment,
-  phaseForTier,
-  resolveAvailableTier,
-  runClassifier,
-} from './routing';
 
 export const createErrorMessage = (
   model: Model<Api>,
@@ -130,19 +128,28 @@ const truncateContext = (context: Context, limit: number): Context => {
 
   // Drop only complete turns. Splitting an assistant/tool-result pair corrupts transcripts.
   // This text estimate cannot guarantee a fit for images/tools or one oversized active turn.
+  const systemMessages = messages.filter(
+    (message) => message.role === 'system',
+  );
   let remaining = totalTokens;
-  let startIndex = 0;
-  for (let i = 1; i < messages.length && remaining > limit; i++) {
-    if (messages[i].role !== 'user') continue;
-    while (startIndex < i) remaining -= messageTokens[startIndex++];
+  let nextRemovableIndex = 0;
+  for (let i = 0; i < messages.length && remaining > limit; i += 1) {
+    if (messages[i]?.role !== 'user') continue;
+    while (nextRemovableIndex < i) {
+      const candidate = messages[nextRemovableIndex];
+      if (candidate?.role !== 'system') {
+        remaining -= messageTokens[nextRemovableIndex] ?? 0;
+      }
+      nextRemovableIndex += 1;
+    }
   }
   return {
     ...context,
     messages: [
+      ...systemMessages,
       ...messages
-        .slice(0, startIndex)
-        .filter((message) => message.role === 'system'),
-      ...messages.slice(startIndex),
+        .slice(nextRemovableIndex)
+        .filter((message) => message.role !== 'system'),
     ],
   };
 };
@@ -201,24 +208,29 @@ export const registerRouterProvider = (
   const profileList = profileNames(state.currentConfig);
 
   // Map profiles to their capacities
-  const modelDefinitions = profileList.map((name) => {
+  const modelDefinitions = profileList.flatMap((name) => {
     const profile = state.currentConfig.profiles[name];
+    if (!profile) return [];
 
     // Report the MAX context window and max output tokens across all tiers.
     // The honesty check + truncateContext handles the case where the
     // actually routed model is smaller.
     let maxContextWindow = 0;
-    let maxMaxTokens = 0;
+    let maxOutputTokens = 0;
     for (const tier of ROUTER_TIERS) {
       if (!profile[tier]) continue;
-      const cw = resolveContextWindow(
+      const contextWindow = resolveContextWindow(
         tier,
         profile,
         state.currentModelRegistry,
       );
-      const mot = resolveMaxTokens(tier, profile, state.currentModelRegistry);
-      if (cw > maxContextWindow) maxContextWindow = cw;
-      if (mot > maxMaxTokens) maxMaxTokens = mot;
+      const maxTokens = resolveMaxTokens(
+        tier,
+        profile,
+        state.currentModelRegistry,
+      );
+      if (contextWindow > maxContextWindow) maxContextWindow = contextWindow;
+      if (maxTokens > maxOutputTokens) maxOutputTokens = maxTokens;
     }
 
     const hasReasoning = supportsReasoning(profile, state.currentModelRegistry);
@@ -233,16 +245,18 @@ export const registerRouterProvider = (
       if (Object.keys(map).length > 0) thinkingLevelMap = map;
     }
 
-    return {
-      id: name,
-      name: `Router ${name}`,
-      reasoning: hasReasoning,
-      ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
-      input: ['text', 'image'] as ('text' | 'image')[],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: maxContextWindow || DEFAULT_CONTEXT_WINDOW,
-      maxTokens: maxMaxTokens || DEFAULT_MAX_TOKENS,
-    };
+    return [
+      {
+        id: name,
+        name: `Router ${name}`,
+        reasoning: hasReasoning,
+        ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+        input: ['text', 'image'] satisfies ('text' | 'image')[],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: maxContextWindow || DEFAULT_CONTEXT_WINDOW,
+        maxTokens: maxOutputTokens || DEFAULT_MAX_TOKENS,
+      },
+    ];
   });
 
   const modelsKey = JSON.stringify(modelDefinitions);
@@ -260,7 +274,7 @@ export const registerRouterProvider = (
     ): AssistantMessageEventStream {
       const stream = createAssistantMessageEventStream();
 
-      (async () => {
+      void (async () => {
         let partialMessage: AssistantMessage | undefined;
         try {
           // Wait for the router to be fully initialized (session_start sets currentModelRegistry).
@@ -447,9 +461,8 @@ export const registerRouterProvider = (
           let lastError: unknown;
           let success = false;
 
-          for (let i = 0; i < modelsToTry.length; i++) {
+          for (const [i, modelRef] of modelsToTry.entries()) {
             options?.signal?.throwIfAborted();
-            const modelRef = modelsToTry[i];
             const { provider: targetProvider, modelId: targetModelId } =
               parseCanonicalModelRef(modelRef);
 
@@ -488,15 +501,15 @@ export const registerRouterProvider = (
                 const tierConfig = profile[decision.tier];
                 if (tierConfig?.resolvedThinkingLevels) {
                   requestedReasoning = clampThinkingLevel(
-                    requestedReasoning as ThinkingLevel,
+                    requestedReasoning,
                     tierConfig.resolvedThinkingLevels,
-                  ) as typeof requestedReasoning;
+                  );
                 }
               }
 
-              const delegatedReasoning =
+              const delegatedReasoning: SimpleStreamOptions['reasoning'] =
                 targetModel.reasoning && requestedReasoning !== 'off'
-                  ? (requestedReasoning as SimpleStreamOptions['reasoning'])
+                  ? requestedReasoning
                   : undefined;
 
               try {
@@ -522,7 +535,7 @@ export const registerRouterProvider = (
                 ...delegationOptions
               } = options ?? {};
 
-              const delegatedOptions = {
+              const delegatedOptions: SimpleStreamOptions = {
                 ...delegationOptions,
                 ...(delegatedReasoning
                   ? { reasoning: delegatedReasoning }

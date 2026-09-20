@@ -9,8 +9,8 @@ import {
   type ProviderConfig,
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
+import { runClassifier } from './classifier';
 import { registerRouterProvider } from './provider';
-import { runClassifier } from './routing';
 import { done, model } from './test/fixtures';
 
 describe('Pi registry integration', () => {
@@ -45,7 +45,10 @@ describe('Pi registry integration', () => {
               throw new Error('Unexpected login');
             },
             resolve: async () => ({
-              auth: { headers, baseUrl: 'https://tenant.example.invalid' },
+              auth: {
+                ...(headers ? { headers } : {}),
+                baseUrl: 'https://tenant.example.invalid',
+              },
               source: 'test',
             }),
           },

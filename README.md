@@ -63,13 +63,15 @@ npm run check
 npm test
 ```
 
-`npm run check` runs Biome lint, formatting and import-order checks, then the
-TypeScript compiler. Warnings fail the check. CI and releases use the same gate.
+`npm run check` runs Biome lint, formatting, import-order and async-safety checks, then
+TypeScript 7 with strict indexing, optional-property and unused-code checks. Warnings fail
+the check. CI and releases use the same gate.
 
 - `npm run format` formats TypeScript and root JSON files.
 - `npm run lint` checks lint rules; `npm run lint:fix` applies safe lint fixes.
 - `npx biome check --write .` also fixes formatting and import order.
 - `npm run tsc` runs only the type checker.
+- `npm test` uses Vitest worker threads; this keeps the small suite fast without weakening assertions.
 
 [Biome](https://biomejs.dev/) replaces Prettier and supplies linting in one pinned
 direct tooling dependency, without ESLint or formatter plugins. Type checking stays with

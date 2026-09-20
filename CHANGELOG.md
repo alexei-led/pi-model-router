@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2 — 2026-09-20
+
+- Fix context trimming so preserved system instructions count toward the actual token estimate.
+- Display the thinking level used by the completed route, not a pending profile override.
+- Separate classifier, context extraction and pure routing modules; share one runtime state adapter across provider and commands.
+- Validate raw configuration at the boundary and enable strict TypeScript indexing, optional-property and unused-code checks.
+- Add focused Biome async-safety, import-order, cycle and Node import rules.
+- Use Vitest worker threads for the small suite; remove arbitrary test sleeps and obvious test comments while preserving the full assertion set.
+- Align package metadata, architecture documentation and release instructions.
+
 ## 0.5.1 — 2026-09-20
 
 - Delegate generation and classification through Pi's native model registry instead of duplicating auth/dispatch logic. Cover keyless and headers-only auth, native providers and credential URLs with in-memory SDK integration tests.

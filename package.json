@@ -1,6 +1,6 @@
 {
   "name": "@alexeiled/pi-model-router",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "type": "module",
   "files": [
     "extensions",
@@ -11,7 +11,7 @@
     "README.md",
     "CHANGELOG.md"
   ],
-  "description": "Smart per-turn model router for Pi that optimizes your AI budget and usage limits by dynamically switching LLM tiers based on task complexity, budget, and phase awareness.",
+  "description": "Independently maintained Pi model router with tiered routing, soft budget controls, classifier fallback, and custom-provider support.",
   "keywords": [
     "pi-package",
     "pi",
@@ -24,7 +24,7 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "packageManager": "npm@11.18.0",
+  "packageManager": "npm@12.0.2",
   "author": "Alexei Ledenev",
   "contributors": [
     "Ye Liu"
@@ -52,7 +52,7 @@
     "tsc": "tsc --noEmit",
     "build": "tsc",
     "prepublishOnly": "npm run check && npm test",
-    "test": "vitest run",
+    "test": "vitest run --pool=threads",
     "check": "biome check --error-on-warnings . && npm run tsc",
     "lint": "biome lint --error-on-warnings .",
     "lint:fix": "biome lint --write --error-on-warnings .",

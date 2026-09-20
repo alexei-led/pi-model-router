@@ -1,15 +1,17 @@
 import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
 import {
-  buildRoutingDecision,
   containsAny,
   countToolResults,
   countWords,
-  decideRouting,
   extractTextFromContent,
   getLastUserText,
   getRecentConversationText,
   hasImageAttachment,
+} from './context';
+import {
+  buildRoutingDecision,
+  decideRouting,
   phaseForTier,
   resolveAvailableTier,
 } from './routing';
@@ -17,11 +19,11 @@ import type { RouterProfile, RoutingRule } from './types';
 
 describe('routing.ts', () => {
   describe('extractTextFromContent', () => {
-    it('should return string directly if content is string', () => {
+    it('return string directly if content is string', () => {
       expect(extractTextFromContent('hello world')).toBe('hello world');
     });
 
-    it('should extract text and toolCall parts from message structure', () => {
+    it('extract text and toolCall parts from message structure', () => {
       const parts: Message['content'] = [
         { type: 'text' as const, text: 'some text' },
         { type: 'thinking' as const, thinking: 'some thought' },
@@ -40,12 +42,12 @@ describe('routing.ts', () => {
   });
 
   describe('getLastUserText', () => {
-    it('should return empty string if no messages', () => {
+    it('return empty string if no messages', () => {
       const context: Context = { messages: [] };
       expect(getLastUserText(context)).toBe('');
     });
 
-    it('should extract the last user message text', () => {
+    it('extract the last user message text', () => {
       const context: Context = {
         messages: [
           { role: 'user', content: 'first user', timestamp: Date.now() },
@@ -67,7 +69,7 @@ describe('routing.ts', () => {
   });
 
   describe('getRecentConversationText', () => {
-    it('should combine last N messages in lowercase', () => {
+    it('combine last N messages in lowercase', () => {
       const context: Context = {
         messages: [
           { role: 'user', content: 'First', timestamp: Date.now() },
@@ -81,7 +83,7 @@ describe('routing.ts', () => {
   });
 
   describe('countToolResults', () => {
-    it('should count messages with role toolResult', () => {
+    it('count messages with role toolResult', () => {
       const context: Context = {
         messages: [
           { role: 'user', content: 'hey', timestamp: Date.now() },
@@ -109,14 +111,14 @@ describe('routing.ts', () => {
   });
 
   describe('countWords', () => {
-    it('should count words correctly', () => {
+    it('count words correctly', () => {
       expect(countWords('   one two   three\nfour ')).toBe(4);
       expect(countWords('')).toBe(0);
     });
   });
 
   describe('hasImageAttachment', () => {
-    it('should return true if any message contains image part', () => {
+    it('return true if any message contains image part', () => {
       const context: Context = {
         messages: [
           {
@@ -131,7 +133,7 @@ describe('routing.ts', () => {
       expect(hasImageAttachment(context)).toBe(true);
     });
 
-    it('should return false if no image part exists', () => {
+    it('return false if no image part exists', () => {
       const context: Context = {
         messages: [
           { role: 'user', content: 'text message', timestamp: Date.now() },
@@ -142,14 +144,14 @@ describe('routing.ts', () => {
   });
 
   describe('containsAny', () => {
-    it('should check if string contains any keyword', () => {
+    it('check if string contains any keyword', () => {
       expect(containsAny('hello world', ['earth', 'world'])).toBe(true);
       expect(containsAny('hello world', ['mars'])).toBe(false);
     });
   });
 
   describe('phaseForTier', () => {
-    it('should return correct phase for tier', () => {
+    it('return correct phase for tier', () => {
       expect(phaseForTier('high')).toBe('planning');
       expect(phaseForTier('medium')).toBe('implementation');
       expect(phaseForTier('low')).toBe('lightweight');
@@ -157,7 +159,7 @@ describe('routing.ts', () => {
   });
 
   describe('resolveAvailableTier', () => {
-    it('should return preferred if available', () => {
+    it('return preferred if available', () => {
       expect(
         resolveAvailableTier(
           { high: { model: 'a' }, medium: { model: 'b' } },
@@ -166,13 +168,13 @@ describe('routing.ts', () => {
       ).toBe('high');
     });
 
-    it('should fall up if preferred is unavailable', () => {
+    it('fall up if preferred is unavailable', () => {
       expect(resolveAvailableTier({ high: { model: 'a' } }, 'low')).toBe(
         'high',
       );
     });
 
-    it('should fall down if falling up finds nothing', () => {
+    it('fall down if falling up finds nothing', () => {
       expect(resolveAvailableTier({ low: { model: 'a' } }, 'medium')).toBe(
         'low',
       );
@@ -184,7 +186,7 @@ describe('routing.ts', () => {
       high: { model: 'openai/gpt-4o-pro', thinking: 'high' },
     };
 
-    it('should construct correct decision object', () => {
+    it('construct correct decision object', () => {
       const decision = buildRoutingDecision(
         'balanced',
         profile,
@@ -202,7 +204,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toBe('Reasoning string');
     });
 
-    it('should throw if tier is not in profile', () => {
+    it('throw if tier is not in profile', () => {
       expect(() =>
         buildRoutingDecision(
           'balanced',
@@ -248,7 +250,7 @@ describe('routing.ts', () => {
       { matches: 'force-high', tier: 'high', reason: 'High rule' },
     ];
 
-    it('should respect manual pinned tier', () => {
+    it('respect manual pinned tier', () => {
       const context: Context = {
         messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }],
       };
@@ -257,7 +259,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toContain('Pinned to high tier');
     });
 
-    it('should match custom rule first', () => {
+    it('match custom rule first', () => {
       const context: Context = {
         messages: [
           {
@@ -282,7 +284,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toBe('High rule');
     });
 
-    it('should match custom rule case-insensitively', () => {
+    it('match custom rule case-insensitively', () => {
       const rulesWithCapitalCase = [
         { matches: 'Force-High', tier: 'high' as const, reason: 'High rule' },
       ];
@@ -310,7 +312,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toBe('High rule');
     });
 
-    it('should collect all matching rules and pick the highest tier', () => {
+    it('collect all matching rules and pick the highest tier', () => {
       const rulesWithMultipleMatches = [
         { matches: 'summary', tier: 'low' as const, reason: 'Low rule' },
         { matches: 'refactor', tier: 'high' as const, reason: 'High rule' },
@@ -339,7 +341,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toBe('High rule');
     });
 
-    it('should route explicit high/low hints', () => {
+    it('route explicit high/low hints', () => {
       const contextHigh: Context = {
         messages: [
           {
@@ -361,7 +363,7 @@ describe('routing.ts', () => {
       expect(decisionLow.tier).toBe('low');
     });
 
-    it('should downgrade high to medium if budget is exceeded', () => {
+    it('downgrade high to medium if budget is exceeded', () => {
       const context: Context = {
         messages: [
           { role: 'user', content: 'think hard', timestamp: Date.now() },
@@ -382,7 +384,7 @@ describe('routing.ts', () => {
       expect(decision.isBudgetForced).toBe(true);
     });
 
-    it('should maintain planning phase bias (stickiness)', () => {
+    it('maintain planning phase bias (stickiness)', () => {
       const context: Context = {
         messages: [
           {
@@ -410,7 +412,7 @@ describe('routing.ts', () => {
       expect(decision.phase).toBe('planning');
     });
 
-    it('should keep planning phase bias when previous phase was planning, no tools, and word count > lowThreshold', () => {
+    it('keep planning phase bias when previous phase was planning, no tools, and word count > lowThreshold', () => {
       const context: Context = {
         messages: [
           {
@@ -442,7 +444,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toContain('planning-phase bias');
     });
 
-    it('should detect implementation from previous implementation phase', () => {
+    it('detect implementation from previous implementation phase', () => {
       const context: Context = {
         messages: [
           {
@@ -465,7 +467,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toContain('implementation');
     });
 
-    it('should detect implementation from toolResultCount > 0', () => {
+    it('detect implementation from toolResultCount > 0', () => {
       const context: Context = {
         messages: [
           {
@@ -494,7 +496,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toContain('implementation');
     });
 
-    it('should detect implementation from recent conversation containing plan:', () => {
+    it('detect implementation from recent conversation containing plan:', () => {
       const context: Context = {
         messages: [
           {
@@ -515,7 +517,7 @@ describe('routing.ts', () => {
       expect(decision.reasoning).toContain('implementation');
     });
 
-    it('should default to medium tier when no heuristic rules match for moderate-length prompts', () => {
+    it('default to medium tier when no heuristic rules match for moderate-length prompts', () => {
       const context: Context = {
         messages: [
           {

@@ -1,7 +1,7 @@
 import type { Context } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
-import { runClassifier } from './routing';
+import { runClassifier } from './classifier';
 import { done, events, failure, model } from './test/fixtures';
 
 const setup = () => {

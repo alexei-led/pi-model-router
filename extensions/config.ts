@@ -9,6 +9,7 @@ import type {
   ConfigLoadResult,
   ModelDefinition,
   ParsedConfigFile,
+  RawRouterConfig,
   RoutedTierConfig,
   RouterConfig,
   RouterProfile,
@@ -19,7 +20,7 @@ import type {
 export const ROUTER_TIERS = ['high', 'medium', 'low'] as const;
 
 // Pi accepts this model capability at runtime, but older peer type releases omit it.
-export const MAX_THINKING_LEVEL = 'max' as ThinkingLevel;
+export const MAX_THINKING_LEVEL: ThinkingLevel = 'max';
 
 export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   'off',
@@ -31,6 +32,9 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   MAX_THINKING_LEVEL,
 ];
 export const ROUTER_PIN_VALUES = ['auto', 'high', 'medium', 'low'] as const;
+export type RouterPinValue = (typeof ROUTER_PIN_VALUES)[number];
+export const isRouterPinValue = (value: unknown): value is RouterPinValue =>
+  ROUTER_PIN_VALUES.some((candidate) => candidate === value);
 
 export const DEFAULT_THINKING_LEVELS: readonly ThinkingLevel[] = [
   'high',
@@ -44,7 +48,7 @@ export const isObjectRecord = (
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export const isThinkingLevel = (value: unknown): value is ThinkingLevel =>
-  typeof value === 'string' && THINKING_LEVELS.includes(value as ThinkingLevel);
+  typeof value === 'string' && THINKING_LEVELS.some((level) => level === value);
 
 export const isRouterTier = (value: unknown): value is RouterTier =>
   value === 'high' || value === 'medium' || value === 'low';
@@ -55,14 +59,14 @@ export const parseConfigFile = (path: string): ParsedConfigFile => {
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
     if (!isObjectRecord(parsed)) {
       return {
         config: {},
         warnings: [`Ignored router config at ${path}: expected a JSON object.`],
       };
     }
-    return { config: parsed as Partial<RouterConfig>, warnings: [] };
+    return { config: parsed, warnings: [] };
   } catch (error) {
     return {
       config: {},
@@ -90,40 +94,42 @@ export const resolveModelRef = (
   return { canonicalRef: ref };
 };
 
-const mergeTier = (
-  existing?: RoutedTierConfig,
-  next?: Partial<RoutedTierConfig>,
-): RoutedTierConfig | undefined => {
-  if (!existing && !next) return undefined;
-  if (!next) return existing;
-  if (!existing) return next as RoutedTierConfig;
-  return { ...existing, ...next };
+const mergeRawValue = (existing: unknown, next: unknown): unknown => {
+  if (next === undefined) return existing;
+  if (isObjectRecord(existing) && isObjectRecord(next)) {
+    return { ...existing, ...next };
+  }
+  return next;
 };
 
 export const mergeConfig = (
-  base: RouterConfig,
-  override: Partial<RouterConfig>,
-): RouterConfig => {
-  const mergedProfiles: Record<string, RouterProfile> = { ...base.profiles };
-  for (const [name, profile] of Object.entries(
-    isObjectRecord(override.profiles) ? override.profiles : {},
-  )) {
-    if (!isObjectRecord(profile) || name === '__proto__') continue;
-    const existing = Object.hasOwn(mergedProfiles, name)
+  base: RawRouterConfig,
+  override: RawRouterConfig,
+): RawRouterConfig => {
+  const baseProfiles = isObjectRecord(base.profiles) ? base.profiles : {};
+  const overrideProfiles = isObjectRecord(override.profiles)
+    ? override.profiles
+    : {};
+  const mergedProfiles: Record<string, unknown> = { ...baseProfiles };
+  for (const [name, profile] of Object.entries(overrideProfiles)) {
+    if (name === '__proto__') continue;
+    if (!isObjectRecord(profile)) {
+      mergedProfiles[name] = profile;
+      continue;
+    }
+    const existing = isObjectRecord(mergedProfiles[name])
       ? mergedProfiles[name]
-      : undefined;
-    const nextProfile = profile as Partial<RouterProfile>;
+      : {};
     mergedProfiles[name] = {
-      high: mergeTier(existing?.high, nextProfile.high),
-      medium: mergeTier(existing?.medium, nextProfile.medium),
-      low: mergeTier(existing?.low, nextProfile.low),
+      high: mergeRawValue(existing.high, profile.high),
+      medium: mergeRawValue(existing.medium, profile.medium),
+      low: mergeRawValue(existing.low, profile.low),
     };
   }
 
-  const mergedModels: Record<string, ModelDefinition> = {
-    ...(base.models ?? {}),
-    ...(isObjectRecord(override.models) ? override.models : {}),
-  };
+  const baseModels = isObjectRecord(base.models) ? base.models : {};
+  const overrideModels = isObjectRecord(override.models) ? override.models : {};
+  const mergedModels = { ...baseModels, ...overrideModels };
 
   return {
     debug: override.debug ?? base.debug,
@@ -159,7 +165,7 @@ export const parseCanonicalModelRef = (
  * Validate and normalize the models map from config.
  */
 export const normalizeModelsMap = (
-  raw: Record<string, unknown> | undefined,
+  raw: unknown,
   warnings: string[],
 ): Record<string, ModelDefinition> => {
   const result: Record<string, ModelDefinition> = {};
@@ -321,8 +327,8 @@ export const normalizeTierConfig = (
   // Validate tier-level thinkingLevels array
   let tierThinkingLevels: ThinkingLevel[] | undefined;
   if (Array.isArray(value.thinkingLevels)) {
-    tierThinkingLevels = (value.thinkingLevels as unknown[]).filter(
-      (l): l is ThinkingLevel => isThinkingLevel(l),
+    tierThinkingLevels = value.thinkingLevels.filter((l): l is ThinkingLevel =>
+      isThinkingLevel(l),
     );
     if (tierThinkingLevels.length === 0) tierThinkingLevels = undefined;
   }
@@ -359,14 +365,11 @@ export const normalizeTierConfig = (
   };
 };
 
-export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
+export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   const warnings: string[] = [];
 
   // Normalize models map first so aliases are available during tier normalization
-  const normalizedModels = normalizeModelsMap(
-    raw.models as Record<string, unknown> | undefined,
-    warnings,
-  );
+  const normalizedModels = normalizeModelsMap(raw.models, warnings);
   const hasModels = Object.keys(normalizedModels).length > 0;
 
   const normalizedProfiles: Record<string, RouterProfile> = {};
@@ -375,22 +378,23 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
     isObjectRecord(raw.profiles) ? raw.profiles : {},
   )) {
     if (name === '__proto__') continue;
+    const profileRecord = isObjectRecord(profile) ? profile : {};
     const high = normalizeTierConfig(
-      profile?.high,
+      profileRecord.high,
       name,
       'high',
       warnings,
       hasModels ? normalizedModels : undefined,
     );
     const medium = normalizeTierConfig(
-      profile?.medium,
+      profileRecord.medium,
       name,
       'medium',
       warnings,
       hasModels ? normalizedModels : undefined,
     );
     const low = normalizeTierConfig(
-      profile?.low,
+      profileRecord.low,
       name,
       'low',
       warnings,
@@ -446,7 +450,7 @@ export const normalizeConfig = (raw: RouterConfig): ConfigLoadResult => {
 
   // Resolve classifierModel — accepts string or { model, thinking } object
   let classifierModel: ClassifierConfig | undefined;
-  const rawClassifier = raw.classifierModel as unknown;
+  const rawClassifier = raw.classifierModel;
   if (typeof rawClassifier === 'string' && rawClassifier.trim()) {
     const resolved = resolveModelRef(
       rawClassifier.trim(),
@@ -510,7 +514,7 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
   const projectPath = join(cwd, '.pi', 'model-router.json');
   const globalResult = parseConfigFile(globalPath);
   const projectResult = parseConfigFile(projectPath);
-  const baseConfig: RouterConfig = { profiles: {} };
+  const baseConfig: RawRouterConfig = { profiles: {} };
   const merged = mergeConfig(
     mergeConfig(baseConfig, globalResult.config),
     projectResult.config,
@@ -649,9 +653,8 @@ export const clampThinkingLevel = (
 
   const reqIdx = THINKING_LEVELS.indexOf(requested);
   for (let i = reqIdx; i >= 0; i--) {
-    if (supported.includes(THINKING_LEVELS[i])) {
-      return THINKING_LEVELS[i];
-    }
+    const level = THINKING_LEVELS[i];
+    if (level && supported.includes(level)) return level;
   }
 
   return 'off';

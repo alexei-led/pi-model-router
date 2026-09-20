@@ -8,10 +8,10 @@ import {
   parseCanonicalModelRef,
 } from './config';
 import type {
+  PersistedStateInput,
   RouterLastProfileState,
   RouterPersistedState,
   RouterPinByProfile,
-  RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
 
@@ -128,23 +128,29 @@ export const isRouterPersistedState = (
   );
 };
 
-export const buildPersistedState = (
-  routerEnabled: boolean,
-  selectedProfile: string | undefined,
-  pinnedTierByProfile: RouterPinByProfile,
-  thinkingByProfile: RouterThinkingByProfile,
-  debugEnabled: boolean,
-  widgetEnabled: boolean,
-  debugHistory: RoutingDecision[],
-  lastDecision: RoutingDecision | undefined,
-  lastNonRouterModel: string | undefined,
-  accumulatedCost: number,
-): RouterPersistedState => {
+export const buildPersistedState = ({
+  routerEnabled,
+  selectedProfile,
+  pinnedTierByProfile,
+  thinkingByProfile,
+  debugEnabled,
+  widgetEnabled,
+  debugHistory,
+  lastDecision,
+  lastNonRouterModel,
+  accumulatedCost,
+}: PersistedStateInput): RouterPersistedState => {
+  const pinByProfile: RouterPinByProfile = {};
+  for (const [profile, tier] of Object.entries(pinnedTierByProfile)) {
+    if (tier) pinByProfile[profile] = tier;
+  }
   return structuredClone({
     enabled: routerEnabled,
     selectedProfile: selectedProfile ?? '',
-    pinTier: selectedProfile ? pinnedTierByProfile[selectedProfile] : undefined,
-    pinByProfile: { ...pinnedTierByProfile },
+    ...(selectedProfile && pinnedTierByProfile[selectedProfile]
+      ? { pinTier: pinnedTierByProfile[selectedProfile] }
+      : {}),
+    pinByProfile,
     thinkingByProfile: { ...thinkingByProfile },
     debugEnabled,
     widgetEnabled,

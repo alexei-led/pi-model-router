@@ -6,6 +6,9 @@ import type {
 import type { AutocompleteItem } from '@earendil-works/pi-tui';
 import {
   getUnsupportedTiers,
+  isRouterPinValue,
+  isRouterTier,
+  isThinkingLevel,
   parseCanonicalModelRef,
   profileNames,
   ROUTER_PIN_VALUES,
@@ -110,7 +113,7 @@ export const registerCommands = (
     args: string[],
   ): AutocompleteItem[] | null => {
     // thinking [tier] <level|auto>
-    const tierValues = [...ROUTER_TIERS];
+    const tierValues: RouterTier[] = [...ROUTER_TIERS];
     const levelValues = ['auto', ...THINKING_LEVELS];
 
     if (args.length <= 1) {
@@ -136,8 +139,8 @@ export const registerCommands = (
       ];
     }
 
-    if ((tierValues as string[]).includes(args[0])) {
-      const tier = args[0];
+    const tier = args[0];
+    if (isRouterTier(tier)) {
       const levelPrefix = args[1] ?? '';
       return levelValues
         .filter((v) => v.startsWith(levelPrefix))
@@ -248,7 +251,7 @@ export const registerCommands = (
 
     const pinValue = args[0];
 
-    if (!ROUTER_PIN_VALUES.some((value) => value === pinValue)) {
+    if (!isRouterPinValue(pinValue)) {
       ctx.ui.notify(
         `Invalid router pin: ${pinValue}. Use one of: ${ROUTER_PIN_VALUES.join(', ')}`,
         'error',
@@ -256,7 +259,8 @@ export const registerCommands = (
       return;
     }
 
-    const nextTier = pinValue === 'auto' ? undefined : (pinValue as RouterTier);
+    const nextTier: RouterTier | undefined =
+      pinValue === 'auto' ? undefined : pinValue;
     if (nextTier) {
       state.pinnedTierByProfile[currentProfile] = nextTier;
     } else {
@@ -303,16 +307,20 @@ export const registerCommands = (
     let tier: RouterTier | 'all' | undefined;
     let levelValue = '';
 
-    const tierValues = ['high', 'medium', 'low'];
     const levelValues = ['auto', ...THINKING_LEVELS];
 
     if (args.length === 1) {
-      levelValue = args[0];
+      const level = args[0];
+      if (!level) return;
+      levelValue = level;
       tier = 'all';
     } else if (args.length === 2) {
-      if (tierValues.includes(args[0]) || args[0] === 'all') {
-        tier = args[0] as RouterTier | 'all';
-        levelValue = args[1];
+      const requestedTier = args[0];
+      const requestedLevel = args[1];
+      if (!requestedTier || !requestedLevel) return;
+      if (isRouterTier(requestedTier) || requestedTier === 'all') {
+        tier = requestedTier === 'all' ? 'all' : requestedTier;
+        levelValue = requestedLevel;
       } else {
         ctx.ui.notify(
           `Invalid tier: ${args[0]}. Use high, medium, or low.`,
@@ -322,7 +330,7 @@ export const registerCommands = (
       }
     }
 
-    if (tier !== 'all' && !tierValues.includes(tier as string)) {
+    if (tier !== 'all' && !tier) {
       ctx.ui.notify(
         `Invalid tier: ${tier}. Use high, medium, or low.`,
         'error',
@@ -338,10 +346,17 @@ export const registerCommands = (
     }
 
     const nextLevel =
-      levelValue === 'auto' ? undefined : (levelValue as ThinkingLevel);
-    state.thinkingByProfile[currentProfile] ??= {};
-    const overrides = state.thinkingByProfile[currentProfile];
-    const tiers = tier === 'all' ? ROUTER_TIERS : [tier as RouterTier];
+      levelValue === 'auto'
+        ? undefined
+        : isThinkingLevel(levelValue)
+          ? levelValue
+          : undefined;
+    let overrides = state.thinkingByProfile[currentProfile];
+    if (!overrides) {
+      overrides = {};
+      state.thinkingByProfile[currentProfile] = overrides;
+    }
+    const tiers = tier === 'all' ? ROUTER_TIERS : [tier];
     for (const targetTier of tiers) {
       if (nextLevel) overrides[targetTier] = nextLevel;
       else delete overrides[targetTier];
@@ -359,10 +374,9 @@ export const registerCommands = (
     }
     // Only warn when the level isn't supported by some tiers; skip for 'off' and 'auto'
     if (nextLevel && nextLevel !== 'off') {
-      const unsupported = getUnsupportedTiers(
-        state.currentConfig.profiles[currentProfile],
-        nextLevel,
-      );
+      const activeProfile = state.currentConfig.profiles[currentProfile];
+      if (!activeProfile) return;
+      const unsupported = getUnsupportedTiers(activeProfile, nextLevel);
       if (unsupported.length > 0) {
         ctx.ui.notify(
           `Router thinking (${tier}) set to ${nextLevel}. ` +
@@ -416,7 +430,7 @@ export const registerCommands = (
       return;
     }
     const tier = args[0]?.toLowerCase();
-    if (!ROUTER_TIERS.includes(tier as RouterTier)) {
+    if (!isRouterTier(tier)) {
       ctx.ui.notify('Usage: /router fix <high|medium|low>', 'error');
       return;
     }
@@ -424,7 +438,7 @@ export const registerCommands = (
       ctx.ui.notify('No recent routing decision to fix.', 'warning');
       return;
     }
-    state.pinnedTierByProfile[state.lastDecision.profile] = tier as RouterTier;
+    state.pinnedTierByProfile[state.lastDecision.profile] = tier;
     actions.persistState();
     actions.updateStatus(ctx);
     ctx.ui.notify(
@@ -515,10 +529,12 @@ export const registerCommands = (
       }
 
       if (parts.length === 1 && !hasTrailingSpace) {
-        return getSubcommandCompletions(parts[0]);
+        const subcommand = parts[0];
+        return subcommand ? getSubcommandCompletions(subcommand) : null;
       }
 
       const subcommand = parts[0];
+      if (!subcommand) return null;
       const subArgs = parts.slice(1);
       if (hasTrailingSpace && parts.length === 1) {
         subArgs.push('');
@@ -597,6 +613,10 @@ export const registerCommands = (
       const parts = args?.trim().split(/\s+/) ?? [];
       const subcommand = parts[0];
       const subArgs = parts.slice(1);
+      if (!subcommand) {
+        await handleStatus(subArgs, ctx);
+        return;
+      }
 
       switch (subcommand) {
         case 'profile':

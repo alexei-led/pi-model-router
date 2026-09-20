@@ -117,23 +117,23 @@ describe('commands.ts', () => {
     syncPiThinkingLevel: vi.fn(),
   });
 
-  describe('Registration & Subcommand Completion', () => {
-    it('should register router command', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
+  const setup = () => {
+    const pi = buildMockPi();
+    const state = buildDefaultState();
+    const actions = buildMockActions();
+    const ctx = buildMockCtx();
+    registerCommands(pi as unknown as ExtensionAPI, state, actions);
+    return { pi, state, actions, ctx, cmd: pi.getRegisteredCommand() };
+  };
 
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
+  describe('Registration & Subcommand Completion', () => {
+    it('register router command', () => {
+      const { pi } = setup();
       expect(pi.getRegisteredCommand()).toBeDefined();
     });
 
-    it('should autocomplete subcommands', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('autocomplete subcommands', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('');
       expect(completions).toBeDefined();
@@ -143,13 +143,8 @@ describe('commands.ts', () => {
       expect(names).toContain('pin');
     });
 
-    it('should autocomplete profile names', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('autocomplete profile names', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('profile ');
       expect(completions).toBeDefined();
@@ -158,13 +153,8 @@ describe('commands.ts', () => {
       expect(values).toContain('profile cheap');
     });
 
-    it('should autocomplete pin arguments', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('autocomplete pin arguments', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('pin ');
       expect(completions).toBeDefined();
@@ -176,31 +166,19 @@ describe('commands.ts', () => {
   });
 
   describe('Handler Subcommands', () => {
-    it('should handle /router status', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router status', async () => {
+      const { actions, ctx, cmd } = setup();
 
       await cmd.handler('status', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalled();
-      const notifyMessage = ctx.ui.notify.mock.calls[0][0];
+      const notifyMessage = ctx.ui.notify.mock.calls[0]?.[0] ?? '';
       expect(notifyMessage).toContain('Model Router Status:');
       expect(notifyMessage).toContain('Selected profile: balanced');
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
 
-    it('should handle /router profile switch', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router profile switch', async () => {
+      const { actions, ctx, cmd } = setup();
 
       await cmd.handler(
         'profile cheap',
@@ -213,14 +191,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should handle /router pin', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router pin', async () => {
+      const { state, actions, ctx, cmd } = setup();
 
       await cmd.handler('pin high', ctx as unknown as ExtensionCommandContext);
       expect(state.pinnedTierByProfile.balanced).toBe('high');
@@ -231,19 +203,12 @@ describe('commands.ts', () => {
         'info',
       );
 
-      // Clear pin
       await cmd.handler('pin auto', ctx as unknown as ExtensionCommandContext);
       expect(state.pinnedTierByProfile.balanced).toBeUndefined();
     });
 
-    it('should handle /router thinking', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router thinking', async () => {
+      const { state, actions, ctx, cmd } = setup();
 
       await cmd.handler(
         'thinking high xhigh',
@@ -254,14 +219,8 @@ describe('commands.ts', () => {
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
 
-    it('should handle /router disable', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router disable', async () => {
+      const { pi, state, actions, ctx, cmd } = setup();
 
       await cmd.handler('disable', ctx as unknown as ExtensionCommandContext);
       expect(pi.setModel).toHaveBeenCalledWith({
@@ -273,14 +232,8 @@ describe('commands.ts', () => {
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
 
-    it('should handle /router fix', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router fix', async () => {
+      const { state, actions, ctx, cmd } = setup();
 
       await cmd.handler('fix low', ctx as unknown as ExtensionCommandContext);
       expect(state.pinnedTierByProfile.balanced).toBe('low');
@@ -288,14 +241,8 @@ describe('commands.ts', () => {
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
 
-    it('should handle /router widget toggles', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router widget toggles', async () => {
+      const { state, ctx, cmd } = setup();
 
       await cmd.handler('widget on', ctx as unknown as ExtensionCommandContext);
       expect(state.widgetEnabled).toBe(true);
@@ -307,14 +254,8 @@ describe('commands.ts', () => {
       expect(state.widgetEnabled).toBe(false);
     });
 
-    it('should handle /router debug history control', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router debug history control', async () => {
+      const { state, ctx, cmd } = setup();
 
       await cmd.handler(
         'debug show',
@@ -332,14 +273,8 @@ describe('commands.ts', () => {
       expect(state.debugHistory.length).toBe(0);
     });
 
-    it('should handle /router reload config', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('handle /router reload config', async () => {
+      const { actions, ctx, cmd } = setup();
 
       await cmd.handler('reload', ctx as unknown as ExtensionCommandContext);
       expect(actions.reloadConfig).toHaveBeenCalledWith(ctx, {
@@ -350,14 +285,8 @@ describe('commands.ts', () => {
   });
 
   describe('handleStatus edge cases', () => {
-    it('should show error when status has extra args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error when status has extra args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'status extra',
@@ -369,7 +298,7 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should handle status without lastDecision', async () => {
+    it('handle status without lastDecision', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.lastDecision = undefined;
@@ -380,12 +309,12 @@ describe('commands.ts', () => {
       const cmd = pi.getRegisteredCommand();
 
       await cmd.handler('status', ctx as unknown as ExtensionCommandContext);
-      const notifyMessage = ctx.ui.notify.mock.calls[0][0];
+      const notifyMessage = ctx.ui.notify.mock.calls[0]?.[0] ?? '';
       expect(notifyMessage).toContain('Model Router Status:');
       expect(notifyMessage).not.toContain('Last routed tier:');
     });
 
-    it('should show config warnings in status', async () => {
+    it('show config warnings in status', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.lastConfigWarnings = ['Warning 1', 'Warning 2'];
@@ -396,13 +325,13 @@ describe('commands.ts', () => {
       const cmd = pi.getRegisteredCommand();
 
       await cmd.handler('status', ctx as unknown as ExtensionCommandContext);
-      const notifyMessage = ctx.ui.notify.mock.calls[0][0];
+      const notifyMessage = ctx.ui.notify.mock.calls[0]?.[0] ?? '';
       expect(notifyMessage).toContain('⚠️ Configuration Warnings:');
       expect(notifyMessage).toContain('Warning 1');
       expect(notifyMessage).toContain('Warning 2');
     });
 
-    it('should show maxSessionBudget in status', async () => {
+    it('show maxSessionBudget in status', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.currentConfig.maxSessionBudget = 10.0;
@@ -413,20 +342,14 @@ describe('commands.ts', () => {
       const cmd = pi.getRegisteredCommand();
 
       await cmd.handler('status', ctx as unknown as ExtensionCommandContext);
-      const notifyMessage = ctx.ui.notify.mock.calls[0][0];
+      const notifyMessage = ctx.ui.notify.mock.calls[0]?.[0] ?? '';
       expect(notifyMessage).toContain('$10.00');
     });
   });
 
   describe('handleProfile edge cases', () => {
-    it('should show current profile when no argument given', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show current profile when no argument given', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler('profile', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -435,14 +358,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error when profile has too many arguments', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error when profile has too many arguments', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'profile one two',
@@ -454,7 +371,7 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should not notify on profile switch failure', async () => {
+    it('not notify on profile switch failure', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       const actions = buildMockActions();
@@ -472,7 +389,6 @@ describe('commands.ts', () => {
         'nonexistent',
         ctx,
       );
-      // When switchToRouterProfile returns false, no success notification
       expect(ctx.ui.notify).not.toHaveBeenCalledWith(
         expect.stringContaining('Switched to router profile'),
         'info',
@@ -481,7 +397,7 @@ describe('commands.ts', () => {
   });
 
   describe('handlePin edge cases', () => {
-    it('should show error when no active profile', async () => {
+    it('show error when no active profile', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.selectedProfile = undefined;
@@ -498,14 +414,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show current pin when no arguments', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show current pin when no arguments', async () => {
+      const { actions, ctx, cmd } = setup();
 
       await cmd.handler('pin', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -515,14 +425,8 @@ describe('commands.ts', () => {
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
 
-    it('should show error when pin has too many arguments', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error when pin has too many arguments', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'pin high extra',
@@ -534,14 +438,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error when pin value is invalid', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error when pin value is invalid', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'pin invalid',
@@ -555,7 +453,7 @@ describe('commands.ts', () => {
   });
 
   describe('handleThinking branches', () => {
-    it('should show error when no active profile', async () => {
+    it('show error when no active profile', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.selectedProfile = undefined;
@@ -575,14 +473,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show current thinking when no arguments', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show current thinking when no arguments', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler('thinking', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -591,14 +483,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error with too many arguments', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with too many arguments', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'thinking high medium low',
@@ -610,14 +496,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error with invalid tier', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with invalid tier', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'thinking badtier high',
@@ -629,14 +509,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error with invalid level', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with invalid level', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'thinking badlevel',
@@ -648,7 +522,7 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should apply auto to all tiers and clear overrides', async () => {
+    it('apply auto to all tiers and clear overrides', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.thinkingByProfile.balanced = { high: 'xhigh', medium: 'medium' };
@@ -662,20 +536,13 @@ describe('commands.ts', () => {
         'thinking auto',
         ctx as unknown as ExtensionCommandContext,
       );
-      // All tier overrides should be cleared, and the profile entry deleted
       expect(state.thinkingByProfile.balanced).toBeUndefined();
       expect(actions.persistState).toHaveBeenCalled();
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
 
-    it('should apply thinking level to specific tier', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('apply thinking level to specific tier', async () => {
+      const { state, actions, ctx, cmd } = setup();
 
       await cmd.handler(
         'thinking low minimal',
@@ -685,7 +552,7 @@ describe('commands.ts', () => {
       expect(actions.persistState).toHaveBeenCalled();
     });
 
-    it('should clear specific tier with auto', async () => {
+    it('clear specific tier with auto', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.thinkingByProfile.balanced = { high: 'xhigh' };
@@ -699,19 +566,12 @@ describe('commands.ts', () => {
         'thinking high auto',
         ctx as unknown as ExtensionCommandContext,
       );
-      // The profile entry should be cleaned up since it's empty
       expect(state.thinkingByProfile.balanced).toBeUndefined();
       expect(actions.persistState).toHaveBeenCalled();
     });
 
-    it('should sync pi thinking level when setting a level', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('sync pi thinking level when setting a level', async () => {
+      const { actions, ctx, cmd } = setup();
 
       await cmd.handler(
         'thinking high',
@@ -720,27 +580,19 @@ describe('commands.ts', () => {
       expect(actions.syncPiThinkingLevel).toHaveBeenCalledWith('high');
     });
 
-    it('should restore last decision thinking when setting auto', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('restore last decision thinking when setting auto', async () => {
+      const { actions, ctx, cmd } = setup();
 
       await cmd.handler(
         'thinking auto',
         ctx as unknown as ExtensionCommandContext,
       );
-      // lastDecision.thinking is 'medium'
       expect(actions.syncPiThinkingLevel).toHaveBeenCalledWith('medium');
     });
 
-    it('should warn about unsupported tiers', async () => {
+    it('warn about unsupported tiers', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
-      // Set up profile with resolvedThinkingLevels that exclude 'xhigh'
       state.currentConfig.profiles.balanced = {
         high: {
           model: 'openai/gpt-4o',
@@ -761,14 +613,13 @@ describe('commands.ts', () => {
         'thinking xhigh',
         ctx as unknown as ExtensionCommandContext,
       );
-      // Should warn that tiers don't support xhigh
       expect(ctx.ui.notify).toHaveBeenCalledWith(
         expect.stringContaining("may not support 'xhigh'"),
         'warning',
       );
     });
 
-    it('should not warn for off level', async () => {
+    it('not warn for off level', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.currentConfig.profiles.balanced = {
@@ -787,21 +638,14 @@ describe('commands.ts', () => {
         'thinking off',
         ctx as unknown as ExtensionCommandContext,
       );
-      // Should NOT warn for 'off'
       const warnCalls = ctx.ui.notify.mock.calls.filter(
         (c: unknown[]) => c[1] === 'warning',
       );
       expect(warnCalls.length).toBe(0);
     });
 
-    it('should accept "all" as explicit tier arg', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('accept "all" as explicit tier arg', async () => {
+      const { state, actions, ctx, cmd } = setup();
 
       await cmd.handler(
         'thinking all high',
@@ -815,14 +659,8 @@ describe('commands.ts', () => {
   });
 
   describe('handleDisable edge cases', () => {
-    it('should show error with extra args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with extra args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'disable extra',
@@ -834,7 +672,7 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should warn when no lastNonRouterModel', async () => {
+    it('warn when no lastNonRouterModel', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.lastNonRouterModel = undefined;
@@ -851,7 +689,7 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error when model not found in registry', async () => {
+    it('show error when model not found in registry', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.lastNonRouterModel = 'unknown/model-x';
@@ -869,7 +707,7 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error when setModel fails', async () => {
+    it('show error when setModel fails', async () => {
       const pi = buildMockPi();
       pi.setModel.mockResolvedValue(false);
       const state = buildDefaultState();
@@ -884,20 +722,13 @@ describe('commands.ts', () => {
         expect.stringContaining('Failed to switch to'),
         'error',
       );
-      // State should NOT be changed on failure
       expect(state.routerEnabled).toBe(true);
     });
   });
 
   describe('handleFix edge cases', () => {
-    it('should show error with wrong number of args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with wrong number of args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler('fix', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -906,14 +737,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error with too many args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with too many args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'fix high extra',
@@ -925,14 +750,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error with invalid tier', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with invalid tier', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'fix badtier',
@@ -944,7 +763,7 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should warn when no last decision', async () => {
+    it('warn when no last decision', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.lastDecision = undefined;
@@ -1002,14 +821,8 @@ describe('commands.ts', () => {
   });
 
   describe('handleWidget edge cases', () => {
-    it('should show error with too many args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with too many args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'widget on extra',
@@ -1021,7 +834,7 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should toggle widget when no arg given', async () => {
+    it('toggle widget when no arg given', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.widgetEnabled = false;
@@ -1041,7 +854,7 @@ describe('commands.ts', () => {
   });
 
   describe('handleDebug edge cases', () => {
-    it('should enable debug explicitly', async () => {
+    it('enable debug explicitly', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.debugEnabled = false;
@@ -1056,7 +869,7 @@ describe('commands.ts', () => {
       expect(actions.persistState).toHaveBeenCalled();
     });
 
-    it('should disable debug explicitly', async () => {
+    it('disable debug explicitly', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.debugEnabled = true;
@@ -1071,7 +884,7 @@ describe('commands.ts', () => {
       expect(actions.persistState).toHaveBeenCalled();
     });
 
-    it('should toggle debug when no arg given', async () => {
+    it('toggle debug when no arg given', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.debugEnabled = false;
@@ -1088,7 +901,7 @@ describe('commands.ts', () => {
       expect(state.debugEnabled).toBe(false);
     });
 
-    it('should show message when debug history is empty', async () => {
+    it('show message when debug history is empty', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
       state.debugHistory.length = 0;
@@ -1108,14 +921,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error with too many args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with too many args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'debug on extra',
@@ -1129,14 +936,8 @@ describe('commands.ts', () => {
   });
 
   describe('handleReload edge cases', () => {
-    it('should show error with extra args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error with extra args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'reload extra',
@@ -1150,54 +951,32 @@ describe('commands.ts', () => {
   });
 
   describe('Autocomplete completions', () => {
-    it('should return thinking completions for first arg', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('return thinking completions for first arg', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('thinking ');
       expect(completions).toBeDefined();
       const values = completions?.map((c) => c.value);
-      // Should have levels and tiers
       expect(values).toContain('thinking auto');
       expect(values).toContain('thinking high');
     });
 
     it('completes the level after a tier that is also a thinking level', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('thinking high a');
       expect(completions?.map((c) => c.value)).toEqual(['thinking high auto']);
     });
 
-    it('should return null for thinking completions after level arg', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
+    it('return null for thinking completions after level arg', () => {
+      const { cmd } = setup();
 
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
-
-      // 'auto' is a level, so no further completions
       const completions = cmd.getArgumentCompletions('thinking auto ');
       expect(completions).toBeNull();
     });
 
-    it('should return fix completions', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('return fix completions', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('fix ');
       expect(completions).toBeDefined();
@@ -1207,13 +986,8 @@ describe('commands.ts', () => {
       expect(values).toContain('fix low');
     });
 
-    it('should return widget completions', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('return widget completions', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('widget ');
       expect(completions).toBeDefined();
@@ -1223,13 +997,8 @@ describe('commands.ts', () => {
       expect(values).toContain('widget toggle');
     });
 
-    it('should return debug completions', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('return debug completions', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('debug ');
       expect(completions).toBeDefined();
@@ -1240,25 +1009,15 @@ describe('commands.ts', () => {
       expect(values).toContain('debug clear');
     });
 
-    it('should return null for unknown subcommand completions', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('return null for unknown subcommand completions', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('unknown ');
       expect(completions).toBeNull();
     });
 
-    it('should filter subcommand completions by prefix', () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('filter subcommand completions by prefix', () => {
+      const { cmd } = setup();
 
       const completions = cmd.getArgumentCompletions('st');
       expect(completions).toBeDefined();
@@ -1269,14 +1028,8 @@ describe('commands.ts', () => {
   });
 
   describe('Default handler branch', () => {
-    it('should show error for unknown subcommand', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error for unknown subcommand', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'nonexistent',
@@ -1288,14 +1041,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should treat profile name as subcommand (backward compat)', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('treat profile name as subcommand (backward compat)', async () => {
+      const { actions, ctx, cmd } = setup();
 
       await cmd.handler('cheap', ctx as unknown as ExtensionCommandContext);
       expect(actions.switchToRouterProfile).toHaveBeenCalledWith('cheap', ctx);
@@ -1305,14 +1052,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error when profile name has extra args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error when profile name has extra args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'balanced extra',
@@ -1324,14 +1065,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should fall through to status on empty args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('fall through to status on empty args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler('', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -1340,14 +1075,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show help with /router help', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show help with /router help', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler('help', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -1356,14 +1085,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show help with /router ?', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show help with /router ?', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler('?', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -1372,14 +1095,8 @@ describe('commands.ts', () => {
       );
     });
 
-    it('should show error when help has extra args', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
-
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
+    it('show error when help has extra args', async () => {
+      const { ctx, cmd } = setup();
 
       await cmd.handler(
         'help extra',

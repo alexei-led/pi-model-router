@@ -10,49 +10,60 @@ export type RouterThinkingByProfile = Record<string, RouterThinkingByTier>;
 export interface RoutingRule {
   matches: string | string[];
   tier: RouterTier;
-  reason?: string;
+  reason?: string | undefined;
 }
 
 export interface ModelDefinition {
   model: string;
-  contextWindow?: number;
-  maxTokens?: number;
-  reasoning?: boolean;
-  thinkingLevels?: ThinkingLevel[];
+  contextWindow?: number | undefined;
+  maxTokens?: number | undefined;
+  reasoning?: boolean | undefined;
+  thinkingLevels?: ThinkingLevel[] | undefined;
 }
 
 export interface ClassifierConfig {
   model: string;
-  thinking?: ThinkingLevel;
+  thinking?: ThinkingLevel | undefined;
 }
 
 export interface RoutedTierConfig {
   model: string;
-  thinking?: ThinkingLevel;
-  fallbacks?: string[];
-  contextWindow?: number;
-  maxTokens?: number;
-  reasoning?: boolean;
-  thinkingLevels?: ThinkingLevel[];
-  resolvedContextWindow?: number;
-  resolvedMaxTokens?: number;
-  resolvedThinkingLevels?: ThinkingLevel[];
+  thinking?: ThinkingLevel | undefined;
+  fallbacks?: string[] | undefined;
+  contextWindow?: number | undefined;
+  maxTokens?: number | undefined;
+  reasoning?: boolean | undefined;
+  thinkingLevels?: ThinkingLevel[] | undefined;
+  resolvedContextWindow?: number | undefined;
+  resolvedMaxTokens?: number | undefined;
+  resolvedThinkingLevels?: ThinkingLevel[] | undefined;
 }
 
 export interface RouterProfile {
-  high?: RoutedTierConfig;
-  medium?: RoutedTierConfig;
-  low?: RoutedTierConfig;
+  high?: RoutedTierConfig | undefined;
+  medium?: RoutedTierConfig | undefined;
+  low?: RoutedTierConfig | undefined;
 }
 
 export interface RouterConfig {
-  debug?: boolean;
-  classifierModel?: ClassifierConfig;
-  phaseBias?: number;
-  maxSessionBudget?: number;
-  rules?: RoutingRule[];
+  debug?: boolean | undefined;
+  classifierModel?: ClassifierConfig | undefined;
+  phaseBias?: number | undefined;
+  maxSessionBudget?: number | undefined;
+  rules?: RoutingRule[] | undefined;
   profiles: Record<string, RouterProfile>;
-  models?: Record<string, ModelDefinition>;
+  models?: Record<string, ModelDefinition> | undefined;
+}
+
+export interface RouterStatusState {
+  routerEnabled: boolean;
+  selectedProfile: string | undefined;
+  pinnedTierByProfile: RouterPinByProfile;
+  lastDecision: RoutingDecision | undefined;
+  lastNonRouterModel: string | undefined;
+  accumulatedCost: number;
+  widgetEnabled: boolean;
+  currentConfig: RouterConfig;
 }
 
 export interface RoutingDecision {
@@ -65,10 +76,10 @@ export interface RoutingDecision {
   reasoning: string;
   thinking: ThinkingLevel;
   timestamp: number;
-  isClassifier?: boolean;
-  isFallback?: boolean;
-  isBudgetForced?: boolean;
-  isRuleMatched?: boolean;
+  isClassifier?: boolean | undefined;
+  isFallback?: boolean | undefined;
+  isBudgetForced?: boolean | undefined;
+  isRuleMatched?: boolean | undefined;
 }
 
 export interface RouterLastProfileState {
@@ -76,20 +87,43 @@ export interface RouterLastProfileState {
   timestamp: number;
 }
 
+export interface PersistedStateInput {
+  routerEnabled: boolean;
+  selectedProfile: string | undefined;
+  pinnedTierByProfile: RouterPinByProfile;
+  thinkingByProfile: RouterThinkingByProfile;
+  debugEnabled: boolean;
+  widgetEnabled: boolean;
+  debugHistory: RoutingDecision[];
+  lastDecision: RoutingDecision | undefined;
+  lastNonRouterModel: string | undefined;
+  accumulatedCost: number;
+}
+
 export interface RouterPersistedState {
   enabled: boolean;
   selectedProfile: string;
-  pinTier?: RouterTier;
-  pinByProfile?: RouterPinByProfile;
-  thinkingByProfile?: RouterThinkingByProfile;
-  debugEnabled?: boolean;
-  widgetEnabled?: boolean;
-  debugHistory?: RoutingDecision[];
-  lastPhase?: RouterPhase;
-  lastDecision?: RoutingDecision;
-  lastNonRouterModel?: string;
-  accumulatedCost?: number;
+  pinTier?: RouterTier | undefined;
+  pinByProfile?: RouterPinByProfile | undefined;
+  thinkingByProfile?: RouterThinkingByProfile | undefined;
+  debugEnabled?: boolean | undefined;
+  widgetEnabled?: boolean | undefined;
+  debugHistory?: RoutingDecision[] | undefined;
+  lastPhase?: RouterPhase | undefined;
+  lastDecision?: RoutingDecision | undefined;
+  lastNonRouterModel?: string | undefined;
+  accumulatedCost?: number | undefined;
   timestamp: number;
+}
+
+export interface RawRouterConfig {
+  debug?: unknown;
+  classifierModel?: unknown;
+  phaseBias?: unknown;
+  maxSessionBudget?: unknown;
+  rules?: unknown;
+  profiles?: unknown;
+  models?: unknown;
 }
 
 export interface ConfigLoadResult {
@@ -98,12 +132,6 @@ export interface ConfigLoadResult {
 }
 
 export interface ParsedConfigFile {
-  config: Partial<RouterConfig>;
+  config: RawRouterConfig;
   warnings: string[];
-}
-
-export interface CustomSessionEntry {
-  type: string;
-  customType?: string;
-  data?: unknown;
 }

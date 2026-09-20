@@ -6,6 +6,11 @@ import {
   type Model,
 } from '@earendil-works/pi-ai';
 
+export const required = <T>(value: T | undefined, label = 'value'): T => {
+  if (value === undefined) throw new Error(`Missing ${label}`);
+  return value;
+};
+
 export const model = (
   id = 'primary',
   overrides: Partial<Model<Api>> = {},

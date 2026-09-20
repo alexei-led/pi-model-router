@@ -93,27 +93,27 @@ describe('config.ts', () => {
   });
 
   describe('parseConfigFile', () => {
-    it('should return empty config and no warnings for non-existent file', () => {
+    it('return empty config and no warnings for non-existent file', () => {
       const result = parseConfigFile('/path/does-not-exist');
       expect(result.config).toEqual({});
       expect(result.warnings).toEqual([]);
     });
 
-    it('should return warnings on json syntax errors', () => {
+    it('return warnings on json syntax errors', () => {
       const result = parseConfigFile('/path/exists-invalid-json');
       expect(result.config).toEqual({});
       expect(result.warnings.length).toBeGreaterThan(0);
       expect(result.warnings[0]).toContain('Failed to parse router config');
     });
 
-    it('should return warnings if root is not an object', () => {
+    it('return warnings if root is not an object', () => {
       const result = parseConfigFile('/path/exists-not-object');
       expect(result.config).toEqual({});
       expect(result.warnings.length).toBeGreaterThan(0);
       expect(result.warnings[0]).toContain('expected a JSON object');
     });
 
-    it('should parse valid json object', () => {
+    it('parse valid json object', () => {
       const result = parseConfigFile('/path/exists-global');
       expect(result.config).toHaveProperty('debug', true);
       expect(result.warnings).toEqual([]);
@@ -125,13 +125,13 @@ describe('config.ts', () => {
       gpt4: { model: 'openai/gpt-4o', contextWindow: 128000 },
     };
 
-    it('should resolve defined alias', () => {
+    it('resolve defined alias', () => {
       const resolved = resolveModelRef('gpt4', models);
       expect(resolved.canonicalRef).toBe('openai/gpt-4o');
       expect(resolved.definition).toBe(models.gpt4);
     });
 
-    it('should return canonical ref if not an alias', () => {
+    it('return canonical ref if not an alias', () => {
       const resolved = resolveModelRef('anthropic/claude-3-opus', models);
       expect(resolved.canonicalRef).toBe('anthropic/claude-3-opus');
       expect(resolved.definition).toBeUndefined();
@@ -139,7 +139,7 @@ describe('config.ts', () => {
   });
 
   describe('mergeConfig', () => {
-    it('should merge profiles and models override', () => {
+    it('merge profiles and models override', () => {
       const base: RouterConfig = {
         debug: false,
         profiles: {
@@ -167,29 +167,31 @@ describe('config.ts', () => {
         },
       };
 
-      const merged = mergeConfig(base, override);
+      const merged = normalizeConfig(mergeConfig(base, override)).config;
       expect(merged.debug).toBe(true);
-      expect(merged.profiles.balanced.medium?.model).toBe('openai/gpt-4o-mini');
-      expect(merged.profiles.balanced.high?.model).toBe('openai/gpt-4o');
+      expect(merged.profiles.balanced?.medium?.model).toBe(
+        'openai/gpt-4o-mini',
+      );
+      expect(merged.profiles.balanced?.high?.model).toBe('openai/gpt-4o');
       expect(merged.profiles.cheap?.low?.model).toBe('openai/gpt-4o-mini');
-      expect(merged.models?.gpt4.model).toBe('openai/gpt-4o');
-      expect(merged.models?.claude.model).toBe('anthropic/claude-3.5-sonnet');
+      expect(merged.models?.gpt4?.model).toBe('openai/gpt-4o');
+      expect(merged.models?.claude?.model).toBe('anthropic/claude-3.5-sonnet');
     });
   });
 
   describe('parseCanonicalModelRef', () => {
-    it('should parse correct references', () => {
+    it('parse correct references', () => {
       const parsed = parseCanonicalModelRef('openai/gpt-4o');
       expect(parsed).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
     });
 
-    it('should throw on missing slash', () => {
+    it('throw on missing slash', () => {
       expect(() => parseCanonicalModelRef('gpt-4o')).toThrow(
         'Invalid model reference',
       );
     });
 
-    it('should throw on empty provider or modelId', () => {
+    it('throw on empty provider or modelId', () => {
       expect(() => parseCanonicalModelRef('/gpt-4o')).toThrow(
         'Invalid model reference',
       );
@@ -203,7 +205,7 @@ describe('config.ts', () => {
   });
 
   describe('normalizeModelsMap', () => {
-    it('should extract valid models and log warnings', () => {
+    it('extract valid models and log warnings', () => {
       const warnings: string[] = [];
       const raw = {
         valid: { model: 'openai/gpt-4o', contextWindow: 100000 },
@@ -229,21 +231,21 @@ describe('config.ts', () => {
       gpt4: { model: 'openai/gpt-4o', contextWindow: 80000 },
     };
 
-    it('should return undefined if input is not object', () => {
+    it('return undefined if input is not object', () => {
       const warnings: string[] = [];
       expect(
         normalizeTierConfig('string', 'p', 'high', warnings),
       ).toBeUndefined();
     });
 
-    it('should return undefined and warning if missing model', () => {
+    it('return undefined and warning if missing model', () => {
       const warnings: string[] = [];
       const result = normalizeTierConfig({}, 'p', 'high', warnings);
       expect(result).toBeUndefined();
       expect(warnings[0]).toContain('missing a model');
     });
 
-    it('should resolve and normalize details', () => {
+    it('resolve and normalize details', () => {
       const warnings: string[] = [];
       const raw = {
         model: 'gpt4',
@@ -265,7 +267,7 @@ describe('config.ts', () => {
   });
 
   describe('normalizeConfig', () => {
-    it('should normalize rules, profiles, phaseBias, budget, classifierModel', () => {
+    it('normalize rules, profiles, phaseBias, budget, classifierModel', () => {
       const raw = {
         debug: true,
         phaseBias: 0.8,
@@ -301,7 +303,7 @@ describe('config.ts', () => {
   });
 
   describe('loadRouterConfig', () => {
-    it('should merge and normalize global and project config files', () => {
+    it('merge and normalize global and project config files', () => {
       const { config } = loadRouterConfig('/path/exists');
       expect(config.debug).toBe(true);
       expect(config.profiles.globalProfile?.medium?.model).toBe(
@@ -314,7 +316,7 @@ describe('config.ts', () => {
   });
 
   describe('profileNames', () => {
-    it('should return sorted profile names', () => {
+    it('return sorted profile names', () => {
       const config: RouterConfig = {
         profiles: {
           zebra: {},
@@ -334,11 +336,11 @@ describe('config.ts', () => {
       },
     };
 
-    it('should return requested if valid', () => {
+    it('return requested if valid', () => {
       expect(resolveProfileName(config, 'balanced')).toBe('balanced');
     });
 
-    it('should return undefined if invalid or missing', () => {
+    it('return undefined if invalid or missing', () => {
       expect(resolveProfileName(config, 'unknown')).toBeUndefined();
       expect(resolveProfileName(config)).toBeUndefined();
     });
@@ -366,7 +368,7 @@ describe('config.ts', () => {
       }),
     };
 
-    it('should resolve using registry if available', () => {
+    it('resolve using registry if available', () => {
       const registry = mockRegistry as unknown as Parameters<
         typeof resolveContextWindow
       >[2];
@@ -376,7 +378,7 @@ describe('config.ts', () => {
       expect(mot).toBe(8888);
     });
 
-    it('should fall back to pre-resolved config values if registry lookup fails or is missing', () => {
+    it('fall back to pre-resolved config values if registry lookup fails or is missing', () => {
       const cw = resolveContextWindow('high', profile, undefined);
       const mot = resolveMaxTokens('high', profile, undefined);
       expect(cw).toBe(60000);
@@ -385,7 +387,7 @@ describe('config.ts', () => {
   });
 
   describe('resolveContextWindow and resolveMaxTokens – additional coverage', () => {
-    it('should return default when tier is missing from profile', () => {
+    it('return default when tier is missing from profile', () => {
       const profile: RouterProfile = {
         high: {
           model: 'openai/gpt-4o',
@@ -397,7 +399,7 @@ describe('config.ts', () => {
       expect(resolveMaxTokens('low', profile, undefined)).toBe(16_384);
     });
 
-    it('should fall back to resolvedContextWindow/MaxTokens when registry model has no values', () => {
+    it('fall back to resolvedContextWindow/MaxTokens when registry model has no values', () => {
       const profile: RouterProfile = {
         high: {
           model: 'openai/gpt-4o',
@@ -418,7 +420,7 @@ describe('config.ts', () => {
       expect(resolveMaxTokens('high', profile, registryNoValues)).toBe(4000);
     });
 
-    it('should catch parseCanonicalModelRef errors and return resolved values', () => {
+    it('catch parseCanonicalModelRef errors and return resolved values', () => {
       const profile: RouterProfile = {
         high: {
           model: 'invalid-no-slash',
@@ -433,7 +435,6 @@ describe('config.ts', () => {
           error: 'not-mocked',
         }),
       } as unknown as Parameters<typeof resolveContextWindow>[2];
-      // parseCanonicalModelRef will throw for 'invalid-no-slash', so it falls through to resolved values
       expect(resolveContextWindow('high', profile, registryWithFind)).toBe(
         50000,
       );
@@ -442,7 +443,7 @@ describe('config.ts', () => {
   });
 
   describe('collectProfileThinkingLevels', () => {
-    it('should collect thinking levels from all tiers', () => {
+    it('collect thinking levels from all tiers', () => {
       const profile: RouterProfile = {
         high: {
           model: 'openai/gpt-4o',
@@ -461,13 +462,13 @@ describe('config.ts', () => {
       expect(levels.size).toBe(4);
     });
 
-    it('should return empty set for profile with no tiers', () => {
+    it('return empty set for profile with no tiers', () => {
       const profile: RouterProfile = {};
       const levels = collectProfileThinkingLevels(profile);
       expect(levels.size).toBe(0);
     });
 
-    it('should skip tiers without resolvedThinkingLevels', () => {
+    it('skip tiers without resolvedThinkingLevels', () => {
       const profile: RouterProfile = {
         high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high'] },
         medium: { model: 'openai/gpt-4o-mini' },
@@ -479,7 +480,7 @@ describe('config.ts', () => {
   });
 
   describe('getUnsupportedTiers', () => {
-    it('should return tiers that do not include the requested thinking level', () => {
+    it('return tiers that do not include the requested thinking level', () => {
       const profile: RouterProfile = {
         high: {
           model: 'openai/gpt-4o',
@@ -495,7 +496,7 @@ describe('config.ts', () => {
       expect(unsupported).toEqual(['medium', 'low']);
     });
 
-    it('should return empty array if all tiers support the level', () => {
+    it('return empty array if all tiers support the level', () => {
       const profile: RouterProfile = {
         high: {
           model: 'openai/gpt-4o',
@@ -510,7 +511,7 @@ describe('config.ts', () => {
       expect(unsupported).toEqual([]);
     });
 
-    it('should skip missing tiers (undefined tier config)', () => {
+    it('skip missing tiers (undefined tier config)', () => {
       const profile: RouterProfile = {
         high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high'] },
       };
@@ -518,7 +519,7 @@ describe('config.ts', () => {
       expect(unsupported).toEqual(['high']);
     });
 
-    it('should treat tiers with undefined resolvedThinkingLevels as unsupported', () => {
+    it('treat tiers with undefined resolvedThinkingLevels as unsupported', () => {
       const profile: RouterProfile = {
         high: { model: 'openai/gpt-4o' },
         medium: {
@@ -532,7 +533,7 @@ describe('config.ts', () => {
   });
 
   describe('normalizeConfig – classifier config variants', () => {
-    it('should normalize classifierModel as object with valid thinking', () => {
+    it('normalize classifierModel as object with valid thinking', () => {
       const raw = {
         profiles: {
           balanced: { high: { model: 'openai/gpt-4o' } },
@@ -547,7 +548,7 @@ describe('config.ts', () => {
       expect(warnings).toEqual([]);
     });
 
-    it('should warn and ignore invalid thinking on classifierModel object', () => {
+    it('warn and ignore invalid thinking on classifierModel object', () => {
       const raw = {
         profiles: {
           balanced: { high: { model: 'openai/gpt-4o' } },
@@ -563,7 +564,7 @@ describe('config.ts', () => {
       expect(warnings[0]).toContain('invalid thinking level');
     });
 
-    it('should warn when classifierModel object is missing model field', () => {
+    it('warn when classifierModel object is missing model field', () => {
       const raw = {
         profiles: {
           balanced: { high: { model: 'openai/gpt-4o' } },
