@@ -599,8 +599,10 @@ describe('config.ts', () => {
       );
       expect(config.classifierModel?.model).toBe('openai/gpt-4o');
       expect(config.classifierModel?.thinking).toBeUndefined();
-      expect(warnings.length).toBe(1);
-      expect(warnings[0]).toContain('invalid thinking level');
+      expect(warnings).toEqual([
+        'classifierModel has an invalid thinking level. Ignored.',
+      ]);
+      expect(JSON.stringify(warnings)).not.toContain('super-invalid');
     });
 
     it('warn when classifierModel object is missing model field', () => {

@@ -270,17 +270,36 @@ export const registerRouterProvider = (
   if (state.lastRegisteredModels === modelsKey) return;
 
   // Runtime only: no task identities or branch metadata enter persisted decisions.
-  let continuation:
-    | {
-        turn: string;
-        policy: string;
-        branch: string[];
-        decision: RoutingDecision;
-        toolCalls: Set<string>;
-        config: RouterConfig;
-      }
-    | undefined;
-  let advisedTurn: string | undefined;
+  type ContinuationRecord = {
+    turn: string;
+    policy: string;
+    branch: string[];
+    decision: RoutingDecision;
+    toolCalls: Set<string>;
+    config: RouterConfig;
+  };
+  // Streams can complete out of order. Keep a small turn-keyed history rather
+  // than letting the latest stream replace another stream's continuation.
+  const continuations = new Map<string, ContinuationRecord>();
+  const advisedTurns = new Map<string, true>();
+  const rememberContinuation = (record: ContinuationRecord) => {
+    continuations.delete(record.turn);
+    continuations.set(record.turn, record);
+    while (continuations.size > 16) {
+      const oldest = continuations.keys().next().value;
+      if (oldest === undefined) break;
+      continuations.delete(oldest);
+    }
+  };
+  const rememberAdvisedTurn = (turn: string) => {
+    advisedTurns.delete(turn);
+    advisedTurns.set(turn, true);
+    while (advisedTurns.size > 16) {
+      const oldest = advisedTurns.keys().next().value;
+      if (oldest === undefined) break;
+      advisedTurns.delete(oldest);
+    }
+  };
 
   pi.registerProvider('router', {
     baseUrl: 'router://local',
@@ -377,6 +396,9 @@ export const registerRouterProvider = (
           ]);
           const toolContinuation =
             context.messages.at(-1)?.role === 'toolResult';
+          const continuationRecord =
+            toolContinuation && turn ? continuations.get(turn) : undefined;
+          const continuationDecision = continuationRecord?.decision;
           const latestAssistantIndex = context.messages.findLastIndex(
             (entry) => entry.role === 'assistant',
           );
@@ -386,21 +408,21 @@ export const registerRouterProvider = (
           const latestAssistant = context.messages[latestAssistantIndex];
           const reusable =
             toolContinuation &&
-            continuation &&
+            continuationRecord &&
+            continuationDecision &&
             turn &&
-            continuation.turn === turn &&
-            continuation.policy === policy &&
-            continuation.config === state.currentConfig &&
-            continuation.decision === previousDecision &&
-            previousDecision?.profile === model.id &&
+            continuationRecord.turn === turn &&
+            continuationRecord.policy === policy &&
+            continuationRecord.config === state.currentConfig &&
+            continuationDecision?.profile === model.id &&
             branch.length > 0 &&
             branch.every((id) => typeof id === 'string' && id.length > 0) &&
-            continuation.branch.length > 0 &&
-            continuation.branch.every((id, i) => branch[i] === id) &&
+            continuationRecord.branch.length > 0 &&
+            continuationRecord.branch.every((id, i) => branch[i] === id) &&
             latestResults.length > 0 &&
             latestAssistant?.role === 'assistant' &&
-            latestAssistant.provider === previousDecision?.targetProvider &&
-            latestAssistant.model === previousDecision.targetModelId &&
+            latestAssistant.provider === continuationDecision.targetProvider &&
+            latestAssistant.model === continuationDecision.targetModelId &&
             latestResults.every((entry) =>
               latestAssistant.content.some(
                 (part) =>
@@ -408,23 +430,23 @@ export const registerRouterProvider = (
               ),
             ) &&
             latestResults.every((entry) =>
-              continuation?.toolCalls.has(entry.toolCallId),
+              continuationRecord.toolCalls.has(entry.toolCallId),
             ) &&
             pairs.some(
               (pair) =>
-                pair.tier === previousDecision?.tier &&
-                pair.model === previousDecision.targetLabel &&
-                pair.thinking === previousDecision.thinking,
+                pair.tier === continuationDecision.tier &&
+                pair.model === continuationDecision.targetLabel &&
+                pair.thinking === continuationDecision.thinking,
             );
           let decision: RoutingDecision;
-          if (reusable && previousDecision) {
+          if (reusable && continuationDecision) {
             decision = {
-              ...previousDecision,
+              ...continuationDecision,
               reasonCode: 'continuation',
               timestamp: Date.now(),
             };
           } else {
-            continuation = undefined;
+            if (toolContinuation && turn) continuations.delete(turn);
             decision = decideRouting(
               context,
               model.id,
@@ -485,11 +507,11 @@ export const registerRouterProvider = (
             !isBudgetExceeded &&
             user &&
             turn &&
-            turn !== advisedTurn &&
+            !advisedTurns.has(turn) &&
             (state.currentConfig.classifierModel ||
               (state.currentConfig.jev?.enabled && profile.jev?.enabled))
           ) {
-            advisedTurn = turn;
+            rememberAdvisedTurn(turn);
             const started = performance.now();
             const routingDeadline = started + 1500;
             const candidates = pairs
@@ -605,8 +627,8 @@ export const registerRouterProvider = (
                 (pair) =>
                   pair.model ===
                     `${priorAssistant.provider}/${priorAssistant.model}` &&
-                  pair.tier === previousDecision?.tier &&
-                  pair.thinking === previousDecision.thinking,
+                  pair.tier === continuationDecision?.tier &&
+                  pair.thinking === continuationDecision?.thinking,
               ) ??
               pairs.find(
                 (pair) =>
@@ -783,7 +805,7 @@ export const registerRouterProvider = (
                     event.type === 'done' ? event.message : event.error
                   ).usage.cost.total;
                   if (event.type === 'done' && turn) {
-                    continuation = {
+                    rememberContinuation({
                       turn,
                       policy,
                       branch,
@@ -794,7 +816,7 @@ export const registerRouterProvider = (
                           entry.type === 'toolCall' ? [entry.id] : [],
                         ),
                       ),
-                    };
+                    });
                   }
                   if (Number.isFinite(cost) && cost > 0)
                     state.accumulatedCost += cost;
@@ -835,8 +857,8 @@ export const registerRouterProvider = (
           actions.recordDebugDecision(decision);
           stream.end();
         } catch (error) {
-          if (!generationSucceeded && activeTurn && advisedTurn === activeTurn)
-            advisedTurn = undefined;
+          if (!generationSucceeded && activeTurn)
+            advisedTurns.delete(activeTurn);
           const reason = options?.signal?.aborted ? 'aborted' : 'error';
           stream.push({
             type: 'error',

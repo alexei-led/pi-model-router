@@ -608,6 +608,11 @@ const toolContext = (
 });
 const finishTool = (assistant = toolMessage()) =>
   events({ type: 'done', reason: 'toolUse', message: assistant });
+const gatedFinishTool = (gate: Promise<void>, assistant = toolMessage()) =>
+  (async function* () {
+    await gate;
+    yield { type: 'done', reason: 'toolUse', message: assistant };
+  })() as unknown as AssistantMessageEventStream;
 
 describe('Jev provider integration', () => {
   afterEach(() => {
@@ -667,6 +672,57 @@ describe('Jev provider integration', () => {
       expect(s.state.lastDecision?.reasonCode).toBe('heuristic');
     },
   );
+
+  it('filters advisor candidates using the high floor for polite destructive requests', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as ChoiceRequest;
+      const ids = Object.keys(body.questions.route.criteria);
+      expect(ids.every((id) => id.startsWith('high|'))).toBe(true);
+      return choiceResponse(init, 'high');
+    });
+    vi.stubGlobal('fetch', fetch);
+    const result = await consume(
+      s.stream(userContext('Could you wipe the production database?')),
+    );
+    expect(result.result.stopReason).toBe('stop');
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision?.tier).toBe('high');
+  });
+
+  it('keeps interleaved stream continuations keyed to their originating turn', async () => {
+    const s = setup();
+    let releaseFirst: () => void = () => undefined;
+    let releaseSecond: () => void = () => undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const firstAssistant = toolMessage('test', 'primary');
+    const secondAssistant = toolMessage('test', 'primary');
+    s.delegate
+      .mockImplementationOnce(() => gatedFinishTool(firstGate, firstAssistant))
+      .mockImplementationOnce(() =>
+        gatedFinishTool(secondGate, secondAssistant),
+      );
+
+    const first = consume(s.stream(userContext('implement first', 1)));
+    const second = consume(s.stream(userContext('implement second', 2)));
+    await vi.waitFor(() => expect(s.delegate).toHaveBeenCalledTimes(2));
+    releaseSecond();
+    await second;
+    releaseFirst();
+    await first;
+
+    await consume(
+      s.stream(toolContext(userContext('implement first', 1), firstAssistant)),
+    );
+    expect(s.state.lastDecision?.reasonCode).toBe('continuation');
+    expect(s.delegate).toHaveBeenCalledTimes(3);
+  });
 
   it('applies only a local allowlisted pair and delegates once through Pi', async () => {
     const s = setup();

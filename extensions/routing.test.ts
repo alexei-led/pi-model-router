@@ -800,10 +800,22 @@ describe('four-level local routing', () => {
       'What does the auth module do?',
       'What is the production configuration?',
       'Can you explain the design document?',
+      'Which tests are failing?',
+      'Where is the code?',
+      'summarize the changelog',
     ]) {
       expect(
         decideRouting(context(prompt), 'p', { low: profile.low }, undefined)
           .tier,
+      ).toBe('low');
+      expect(
+        decideRouting(
+          context(prompt),
+          'p',
+          { low: profile.low },
+          undefined,
+          'low',
+        ).tier,
       ).toBe('low');
     }
     expect(() =>
@@ -814,6 +826,17 @@ describe('four-level local routing', () => {
         undefined,
       ),
     ).toThrow('No eligible route');
+  });
+
+  it.each([
+    'Could you wipe the production database?',
+    'Could you erase the deployment artifacts?',
+    'Could you drop the production tables?',
+  ])('keeps polite destructive requests at a high floor: %s', (prompt) => {
+    expect(localSafetyFloor(context(prompt))).toBe('high');
+    expect(
+      decideRouting(context(prompt), 'p', profile, undefined, 'low'),
+    ).toMatchObject({ tier: 'high', reasonCode: 'pinned' });
   });
 
   it('normalizes route identity and honors explicit thinking overrides', () => {

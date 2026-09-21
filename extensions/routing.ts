@@ -65,10 +65,13 @@ const isImplementationFollowUp = (prompt: string): boolean =>
   );
 
 const isInformationalPrompt = (prompt: string): boolean =>
-  /^(?:what|which|where|who|when|does|do|is|are|can|could|would|how|why|explain|tell me about)\b/i.test(
+  (/^(?:what|which|where|who|when|does|do|is|are|can|could|would|how|why|explain|tell me about)\b/i.test(
     prompt,
-  ) &&
-  !/\b(?:fix|implement|apply|change|delete|destroy|deploy|migrat\w*|remove|run|execute|configure|rotate|patch)\b/i.test(
+  ) ||
+    /^(?:please\s+)?(?:summar(?:ize|y)|recap|tl;?dr|show|list|find|grep)\b/i.test(
+      prompt,
+    )) &&
+  !/\b(?:fix|implement|apply|change|delete|destroy|deploy|migrat\w*|remove|run|execute|configure|rotate|patch|wipe|erase|drop)\b/i.test(
     prompt,
   );
 
@@ -93,7 +96,8 @@ const safetyFloorForPrompt = (prompt: string): RouterTier => {
     return 'high';
   if (isMechanicalTask(prompt)) return 'micro';
   if (
-    /\b(implement\w*|cod(?:e|ing)|fix\w*|updat\w*|edit\w*|writ\w*|add\w*|modif\w*|refactor\w*|patch\w*|chang\w*|replac\w*|remov\w*|debug\w*|bugs?|tests?)\b/.test(
+    !isInformationalPrompt(prompt) &&
+    /\b(?:implement(?:ation|ing)?|cod(?:e|ing)|fix(?:es|ing)?|updat(?:e|ing)|edit(?:s|ing)?|writ(?:e|ing)|add(?:s|ing)?|modif(?:y|ies|ying)|refactor(?:s|ing)?|patch(?:es|ing)?|chang(?:e|es|ing)|replac(?:e|es|ing)|remov(?:e|es|ing)|debug(?:s|ging)?|bug(?:s)?|tests?)\b/.test(
       prompt,
     )
   )

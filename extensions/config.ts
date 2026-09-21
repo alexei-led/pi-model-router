@@ -606,7 +606,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
           : undefined;
         if (rawClassifier.thinking !== undefined && !thinking) {
           warnings.push(
-            `classifierModel has invalid thinking level "${String(rawClassifier.thinking)}". Ignored.`,
+            'classifierModel has an invalid thinking level. Ignored.',
           );
         }
         classifierModel = { model: resolved.canonicalRef, thinking };
