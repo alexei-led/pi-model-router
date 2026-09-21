@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 — 2026-09-21
+
+- Add the optional `micro` tier with `off` thinking by default; all four tiers are configured model/effort choices, not security permissions. Existing three-tier and partial profiles remain supported.
+- Replace keyword routing, task-size heuristics and phase inference with an eligible deterministic baseline. Add optional per-profile `baselineTier`; otherwise prefer medium, high, low, micro after capability filtering. Deprecated `rules` and `phaseBias` still load but are ignored with a value-free warning; remove them from configuration.
+- Honor pins without prompt-derived promotion. Keep a soft generation-cost budget that prefers eligible medium-or-lower tiers for unpinned requests; advisor costs are excluded. Revalidate input and exact effort for every generation/fallback target.
+- Add opt-in Jev System One Choice advice with user-only credentials, explicit profile privacy approval, bounded recent user/assistant/tool text, validated primary candidate IDs and no retry. Failure/uncertainty goes directly to baseline, not a classifier cascade.
+- Cap Jev at 750 ms within the remaining 1500 ms advisory budget. The separate optional Pi classifier path retains its 10-second bound and supports all four tiers. Pins, budget policy, single candidates and tool continuations bypass advisors; caller abort prevents generation.
+- Reuse validated bounded per-turn routes across interleaved tool continuations without private authentication APIs. Pi owns authentication and tool permissions; provider identity is not backend-login attestation.
+- Persist only allowlisted decision metadata and closed reason codes; map obsolete sources to legacy, preserving pins/cost/settings. Keep advisor secrets, request text and raw responses out of router state and UI.
+- Document private chezmoi/1Password rendering, external-data approval, deprecated configuration, fallback limits and verification boundaries. No work profile is enabled automatically.
+
 ## 0.5.2 — 2026-09-20
 
 - Fix context trimming so preserved system instructions count toward the actual token estimate.

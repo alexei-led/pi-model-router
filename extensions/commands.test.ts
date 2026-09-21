@@ -4,6 +4,8 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { registerCommands } from './commands';
+import { normalizeConfig } from './config';
+import { model } from './test/fixtures';
 import type {
   RouterConfig,
   RouterPinByProfile,
@@ -58,7 +60,7 @@ describe('commands.ts', () => {
     modelRegistry: {
       find: vi.fn().mockImplementation((provider: string, modelId: string) => {
         if (provider === 'router' || provider === 'openai') {
-          return { provider, id: modelId };
+          return model(modelId, { provider });
         }
         return null;
       }),
@@ -67,8 +69,7 @@ describe('commands.ts', () => {
   });
 
   const buildDefaultState = (): MutableCommandState => {
-    const config: RouterConfig = {
-      phaseBias: 0.5,
+    const config: RouterConfig = normalizeConfig({
       profiles: {
         balanced: {
           high: { model: 'openai/gpt-4o' },
@@ -78,7 +79,7 @@ describe('commands.ts', () => {
           low: { model: 'openai/gpt-4o-micro' },
         },
       },
-    };
+    }).config;
 
     const lastDecision: RoutingDecision = {
       profile: 'balanced',
@@ -87,7 +88,7 @@ describe('commands.ts', () => {
       targetProvider: 'openai',
       targetModelId: 'gpt-4o-mini',
       targetLabel: 'openai/gpt-4o-mini',
-      reasoning: 'Default reasoning',
+      reasonCode: 'baseline',
       thinking: 'medium',
       timestamp: Date.now(),
     };
@@ -125,6 +126,66 @@ describe('commands.ts', () => {
     registerCommands(pi as unknown as ExtensionAPI, state, actions);
     return { pi, state, actions, ctx, cmd: pi.getRegisteredCommand() };
   };
+
+  it.each(['max', 'minimal'])(
+    'rejects unsupported all-tier %s thinking without mutating state',
+    async (level) => {
+      const { state, actions, ctx, cmd } = setup();
+      state.thinkingByProfile.balanced = { high: 'high' };
+      const before = structuredClone(state.thinkingByProfile);
+      ctx.modelRegistry.find.mockImplementation((provider, id) =>
+        model(id, { provider, thinkingLevelMap: { max: null, minimal: null } }),
+      );
+      await cmd.handler(
+        `thinking ${level}`,
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(state.thinkingByProfile).toEqual(before);
+      expect(actions.persistState).not.toHaveBeenCalled();
+      expect(actions.syncPiThinkingLevel).not.toHaveBeenCalled();
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining('leaves no eligible route'),
+        'warning',
+      );
+    },
+  );
+
+  describe('micro commands', () => {
+    it('completes, pins, fixes, overrides, and clears micro', async () => {
+      const { state, ctx, cmd } = setup();
+      state.currentConfig.profiles.balanced = {
+        ...state.currentConfig.profiles.balanced,
+        micro: { model: 'openai/tiny' },
+      };
+      for (const command of ['pin', 'fix', 'thinking']) {
+        expect(
+          cmd
+            .getArgumentCompletions(`${command} mi`)
+            ?.map((item) => item.value),
+        ).toContain(`${command} micro`);
+      }
+      await cmd.handler('pin micro', ctx as unknown as ExtensionCommandContext);
+      expect(state.pinnedTierByProfile.balanced).toBe('micro');
+      await cmd.handler(
+        'thinking micro off',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(state.thinkingByProfile.balanced?.micro).toBe('off');
+      await cmd.handler(
+        'thinking micro auto',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(state.thinkingByProfile.balanced?.micro).toBeUndefined();
+      await cmd.handler('fix micro', ctx as unknown as ExtensionCommandContext);
+      expect(state.pinnedTierByProfile.balanced).toBe('micro');
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining('is now pinned to micro'),
+        'info',
+      );
+      await cmd.handler('pin auto', ctx as unknown as ExtensionCommandContext);
+      expect(state.pinnedTierByProfile.balanced).toBeUndefined();
+    });
+  });
 
   describe('Registration & Subcommand Completion', () => {
     it('register router command', () => {
@@ -211,10 +272,10 @@ describe('commands.ts', () => {
       const { state, actions, ctx, cmd } = setup();
 
       await cmd.handler(
-        'thinking high xhigh',
+        'thinking high high',
         ctx as unknown as ExtensionCommandContext,
       );
-      expect(state.thinkingByProfile.balanced?.high).toBe('xhigh');
+      expect(state.thinkingByProfile.balanced?.high).toBe('high');
       expect(actions.persistState).toHaveBeenCalled();
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
@@ -223,10 +284,12 @@ describe('commands.ts', () => {
       const { pi, state, actions, ctx, cmd } = setup();
 
       await cmd.handler('disable', ctx as unknown as ExtensionCommandContext);
-      expect(pi.setModel).toHaveBeenCalledWith({
-        provider: 'openai',
-        id: 'gpt-4o',
-      });
+      expect(pi.setModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openai',
+          id: 'gpt-4o',
+        }),
+      );
       expect(state.routerEnabled).toBe(false);
       expect(actions.persistState).toHaveBeenCalled();
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
@@ -433,7 +496,7 @@ describe('commands.ts', () => {
         ctx as unknown as ExtensionCommandContext,
       );
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router pin <high|medium|low|auto>',
+        'Usage: /router pin <high|medium|low|micro|auto>',
         'error',
       );
     });
@@ -590,31 +653,60 @@ describe('commands.ts', () => {
       expect(actions.syncPiThinkingLevel).toHaveBeenCalledWith('medium');
     });
 
-    it('warn about unsupported tiers', async () => {
-      const pi = buildMockPi();
-      const state = buildDefaultState();
-      state.currentConfig.profiles.balanced = {
-        high: {
-          model: 'openai/gpt-4o',
-          resolvedThinkingLevels: ['high', 'medium', 'low'],
-        },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['high', 'medium', 'low'],
-        },
-      };
-      const actions = buildMockActions();
-      const ctx = buildMockCtx();
+    it.each(['thinking', 'image'] as const)(
+      'rejects overrides that remove configured %s coverage atomically',
+      async (capability) => {
+        const { state, actions, ctx, cmd } = setup();
+        state.thinkingByProfile.balanced = { micro: 'off' };
+        ctx.modelRegistry.find.mockImplementation(
+          (provider: string, id: string) =>
+            model(id, {
+              provider,
+              input:
+                capability === 'image' && id === 'gpt-4o'
+                  ? ['text']
+                  : ['text', 'image'],
+              thinkingLevelMap: {
+                low: id === 'gpt-4o' || id === 'gpt-4o-mini' ? null : 'low',
+              },
+            }),
+        );
+        await cmd.handler(
+          'thinking low',
+          ctx as unknown as ExtensionCommandContext,
+        );
+        expect(state.thinkingByProfile.balanced).toEqual({ micro: 'off' });
+        expect(actions.persistState).not.toHaveBeenCalled();
+        expect(actions.syncPiThinkingLevel).not.toHaveBeenCalled();
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining('unchanged'),
+          'warning',
+        );
+      },
+    );
 
-      registerCommands(pi as unknown as ExtensionAPI, state, actions);
-      const cmd = pi.getRegisteredCommand();
-
+    it('warns when an accepted override skips unsupported tiers', async () => {
+      const { state, ctx, cmd } = setup();
+      state.currentConfig = normalizeConfig({
+        profiles: {
+          balanced: {
+            high: { model: 'openai/gpt-4o', thinkingLevels: ['high'] },
+            medium: {
+              model: 'openai/gpt-4o-mini',
+              thinkingLevels: ['low', 'medium'],
+            },
+          },
+        },
+      }).config;
       await cmd.handler(
-        'thinking xhigh',
+        'thinking high',
         ctx as unknown as ExtensionCommandContext,
       );
+      expect(state.thinkingByProfile.balanced?.high).toBe('high');
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        expect.stringContaining("may not support 'xhigh'"),
+        expect.stringContaining(
+          "medium tier may not support 'high' and will be skipped when unsupported",
+        ),
         'warning',
       );
     });
@@ -732,7 +824,7 @@ describe('commands.ts', () => {
 
       await cmd.handler('fix', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router fix <high|medium|low>',
+        'Usage: /router fix <high|medium|low|micro>',
         'error',
       );
     });
@@ -745,7 +837,7 @@ describe('commands.ts', () => {
         ctx as unknown as ExtensionCommandContext,
       );
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router fix <high|medium|low>',
+        'Usage: /router fix <high|medium|low|micro>',
         'error',
       );
     });
@@ -758,7 +850,7 @@ describe('commands.ts', () => {
         ctx as unknown as ExtensionCommandContext,
       );
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router fix <high|medium|low>',
+        'Usage: /router fix <high|medium|low|micro>',
         'error',
       );
     });

@@ -1,8 +1,16 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { normalizeContext } from '@earendil-works/pi-ai';
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+} from '@earendil-works/pi-coding-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import routerExtension from './index';
+import { done, model } from './test/fixtures';
+import type { RouterConfig } from './types';
+import * as ui from './ui';
 
 const stateMocks = vi.hoisted(() => ({
+  advisors: {} as Pick<RouterConfig, 'jev' | 'classifierModel'>,
   loadLastRouterProfile: vi.fn(),
   saveLastRouterProfile: vi.fn(),
 }));
@@ -13,24 +21,29 @@ vi.mock('./state', async (importOriginal) => ({
   saveLastRouterProfile: stateMocks.saveLastRouterProfile,
 }));
 
-vi.mock('./config', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./config')>()),
-  loadRouterConfig: () => ({
-    config: {
-      profiles: {
-        balanced: {
-          high: { model: 'openai/gpt-4o' },
-          medium: { model: 'openai/gpt-4o-mini' },
+vi.mock('./config', async (importOriginal) => {
+  const configModule = await importOriginal<typeof import('./config')>();
+  return {
+    ...configModule,
+    loadRouterConfig: () => {
+      return configModule.normalizeConfig({
+        ...stateMocks.advisors,
+        profiles: {
+          balanced: {
+            jev: { enabled: true },
+            high: { model: 'openai/gpt-4o' },
+            medium: { model: 'openai/gpt-4o-mini' },
+            micro: { model: 'openai/tiny', thinking: 'off' },
+          },
+          alternate: {
+            high: { model: 'anthropic/claude-opus-4' },
+            medium: { model: 'anthropic/claude-sonnet-4' },
+          },
         },
-        alternate: {
-          high: { model: 'anthropic/claude-opus-4' },
-          medium: { model: 'anthropic/claude-sonnet-4' },
-        },
-      },
+      });
     },
-    warnings: [],
-  }),
-}));
+  };
+});
 
 describe('index.ts (orchestrator)', () => {
   type EventHandler = (
@@ -62,6 +75,7 @@ describe('index.ts (orchestrator)', () => {
 
   beforeEach(() => {
     eventListeners = {};
+    stateMocks.advisors = {};
     stateMocks.loadLastRouterProfile.mockReset();
     stateMocks.loadLastRouterProfile.mockReturnValue(undefined);
     stateMocks.saveLastRouterProfile.mockReset();
@@ -72,7 +86,11 @@ describe('index.ts (orchestrator)', () => {
   const buildMockCtx = () => ({
     cwd: '/mock/cwd',
     modelRegistry: {
-      find: vi.fn().mockReturnValue({ provider: 'router', id: 'balanced' }),
+      find: vi
+        .fn()
+        .mockImplementation((provider: string, id: string) =>
+          model(id, { provider }),
+        ),
       getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'key' }),
     },
     model: { provider: 'router', id: 'balanced' },
@@ -86,6 +104,288 @@ describe('index.ts (orchestrator)', () => {
       theme: { fg: (_color: string, text: string) => text },
       notify: vi.fn(),
     },
+  });
+
+  const notifyDiagnostics = async (ctx: ReturnType<typeof buildMockCtx>) => {
+    const command = mockPi.registerCommand.mock.calls.find(
+      ([name]) => name === 'router',
+    )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1] | undefined;
+    if (!command) throw new Error('Missing router command');
+    for (const args of ['status', 'debug show'])
+      await command.handler(args, ctx as unknown as ExtensionCommandContext);
+    expect(ctx.ui.notify).toHaveBeenCalled();
+  };
+
+  it('passes only public status fields across the UI boundary', async () => {
+    stateMocks.advisors = {
+      jev: {
+        enabled: true,
+        apiKey: 'private-key-sentinel',
+        endpoint: 'https://private-endpoint.example/v1/systemone',
+        model: 'jev-1.13.0',
+        timeoutMs: 750,
+        confidenceThreshold: 0.65,
+        maxStateChars: 12000,
+        mode: 'advisory',
+      },
+    };
+    const status = vi.spyOn(ui, 'updateStatus');
+    try {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      for (const handler of handlersFor('session_start'))
+        await handler({}, ctx);
+      expect(status).toHaveBeenCalled();
+      for (const [, projection] of status.mock.calls) {
+        expect(projection).toHaveProperty('maxSessionBudget');
+        expect(projection).not.toHaveProperty('currentConfig');
+        expect(JSON.stringify(projection)).not.toContain(
+          'private-key-sentinel',
+        );
+        expect(JSON.stringify(projection)).not.toContain('private-endpoint');
+      }
+    } finally {
+      status.mockRestore();
+    }
+  });
+
+  it('restores micro pins and thinking overrides without migration', async () => {
+    routerExtension(mockPi);
+    const ctx = buildMockCtx();
+    ctx.sessionManager.getBranch = () => [
+      {
+        type: 'custom',
+        customType: 'router-state',
+        data: {
+          enabled: true,
+          selectedProfile: 'balanced',
+          pinTier: 'micro',
+          thinkingByProfile: { balanced: { micro: 'off' } },
+          timestamp: 1,
+        },
+      },
+    ];
+    for (const handler of handlersFor('session_start')) {
+      await handler({}, ctx);
+    }
+    expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+      pinTier: 'micro',
+      thinkingByProfile: { balanced: { micro: 'off' } },
+    });
+  });
+
+  it.each(['classifier', 'jev'] as const)(
+    'persists only safe %s metadata through real provider and appendEntry callbacks',
+    async (source) => {
+      const privateText = 'private-key remote task text explanation';
+      if (source === 'classifier')
+        stateMocks.advisors = {
+          classifierModel: { model: 'openai/classifier' },
+        };
+      else
+        stateMocks.advisors = {
+          jev: {
+            enabled: true,
+            apiKey: privateText,
+            endpoint: 'https://api.typesafe.ai/v1/systemone',
+            model: 'jev-1.13.0',
+            timeoutMs: 750,
+            confidenceThreshold: 0.65,
+            maxStateChars: 12000,
+            mode: 'advisory',
+          },
+        };
+      const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+        const id = 'high|openai%2Fgpt-4o|medium';
+        return new Response(
+          JSON.stringify({
+            answers: {
+              route: {
+                type: 'choice',
+                choice: id,
+                confidence: 1,
+                probabilities: { [id]: 1, uncertain: 0 },
+                reasoning: privateText,
+              },
+            },
+          }),
+        );
+      });
+      vi.stubGlobal('fetch', fetch);
+      try {
+        routerExtension(mockPi);
+        const ctx = buildMockCtx();
+        ctx.modelRegistry.find.mockImplementation(
+          (provider: string, id: string) => model(id, { provider }),
+        );
+        const delegate = vi.fn(() => done());
+        if (source === 'classifier')
+          delegate.mockReturnValueOnce(
+            done(`Tier: high\nReasoning: ${privateText}`),
+          );
+        Object.assign(ctx.modelRegistry, { streamSimple: delegate });
+        for (const handler of handlersFor('session_start'))
+          await handler({ reason: 'new' }, ctx);
+        const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+        const stream = provider?.streamSimple?.(
+          model('balanced', { provider: 'router' }),
+          normalizeContext({
+            messages: [
+              {
+                role: 'user',
+                content: `design security. ${privateText}`,
+                timestamp: 1,
+              },
+            ],
+          }),
+        );
+        if (!stream) throw new Error('Missing registered router stream');
+        for await (const _event of stream) {
+          /* Drain the actual provider callback. */
+        }
+        expect((await stream.result()).stopReason).toBe('stop');
+        const expectedSource = source === 'jev' ? 'baseline' : source;
+        expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+          lastDecision: { reasonCode: expectedSource },
+          debugHistory: [{ reasonCode: expectedSource }],
+        });
+        await notifyDiagnostics(ctx);
+        const output = JSON.stringify([
+          ctx.ui.notify.mock.calls,
+          mockPi.appendEntry.mock.calls,
+          ctx.ui.setStatus.mock.calls,
+          ctx.ui.setWidget.mock.calls,
+        ]);
+        for (const text of [
+          privateText,
+          'typesafe.ai',
+          'reasoning',
+          'apiKey',
+          'endpoint',
+        ])
+          expect(output).not.toContain(text);
+        expect(delegate).toHaveBeenCalledTimes(source === 'classifier' ? 2 : 1);
+        expect(fetch).toHaveBeenCalledTimes(source === 'jev' ? 1 : 0);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each([
+    undefined,
+    'custom-rule',
+    'micro-mechanical',
+    'heuristic',
+    'safety-floor',
+    'budget-floor-conflict',
+  ])(
+    'sanitizes historical source %s at append, notification and status boundaries',
+    async (reasonCode) => {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      const leaked =
+        'private-key https://remote.invalid task transcript classifier explanation';
+      const oldDecision = {
+        profile: 'balanced',
+        tier: 'high',
+        phase: 'planning',
+        targetProvider: 'openai',
+        targetModelId: 'gpt-4o',
+        targetLabel: 'openai/gpt-4o',
+        thinking: 'high',
+        timestamp: 1,
+        reasonCode,
+        reasoning: leaked,
+        apiKey: leaked,
+        endpoint: leaked,
+        rawResponse: leaked,
+      };
+      const saved = {
+        enabled: true,
+        selectedProfile: 'balanced',
+        timestamp: 1,
+        pinByProfile: { balanced: 'high' },
+        thinkingByProfile: { balanced: { high: 'high' } },
+        accumulatedCost: 1.25,
+        debugEnabled: true,
+        lastDecision: oldDecision,
+        debugHistory: [oldDecision],
+        widgetEnabled: true,
+      };
+      ctx.sessionManager.getBranch = () => [
+        { type: 'custom', customType: 'router-state', data: saved },
+      ];
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'switch' }, ctx);
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        'router-state',
+        expect.objectContaining({
+          pinByProfile: { balanced: 'high' },
+          thinkingByProfile: { balanced: { high: 'high' } },
+          accumulatedCost: 1.25,
+          debugEnabled: true,
+          widgetEnabled: true,
+          lastDecision: expect.objectContaining({ reasonCode: 'legacy' }),
+          debugHistory: [expect.objectContaining({ reasonCode: 'legacy' })],
+        }),
+      );
+      for (const handler of handlersFor('thinking_level_select'))
+        await handler({ level: 'low' }, ctx);
+      await notifyDiagnostics(ctx);
+      const output = JSON.stringify([
+        ctx.ui.notify.mock.calls,
+        mockPi.appendEntry.mock.calls,
+        ctx.ui.setStatus.mock.calls,
+        ctx.ui.setWidget.mock.calls,
+      ]);
+      for (const text of [
+        'private-key',
+        'remote.invalid',
+        'task transcript',
+        'classifier explanation',
+        'reasoning',
+        'rawResponse',
+      ])
+        expect(output).not.toContain(text);
+      expect(saved.lastDecision.reasoning).toBe(leaked);
+    },
+  );
+
+  it('does not restore an unknown reason code into the append or UI paths', async () => {
+    routerExtension(mockPi);
+    const ctx = buildMockCtx();
+    ctx.sessionManager.getBranch = () => [
+      {
+        type: 'custom',
+        customType: 'router-state',
+        data: {
+          enabled: true,
+          selectedProfile: 'balanced',
+          timestamp: 1,
+          lastDecision: {
+            profile: 'balanced',
+            tier: 'high',
+            phase: 'planning',
+            targetProvider: 'openai',
+            targetModelId: 'gpt-4o',
+            targetLabel: 'openai/gpt-4o',
+            thinking: 'high',
+            timestamp: 1,
+            reasonCode: 'private-key',
+            reasoning: 'legacy-looking text',
+          },
+        },
+      },
+    ];
+    for (const handler of handlersFor('session_start'))
+      await handler({ reason: 'switch' }, ctx);
+    expect(JSON.stringify(mockPi.appendEntry.mock.calls)).not.toContain(
+      'private-key',
+    );
+    expect(
+      mockPi.appendEntry.mock.calls.at(-1)?.[1].lastDecision,
+    ).toBeUndefined();
   });
 
   it('keeps restored branch snapshots immutable when thinking changes', async () => {
@@ -284,6 +584,60 @@ describe('index.ts (orchestrator)', () => {
   });
 
   describe('thinking_level_select event', () => {
+    it.each(['max', 'minimal'])(
+      'rejects unsupported %s selection atomically and restores Pi display',
+      async (level) => {
+        routerExtension(mockPi);
+        const ctx = buildMockCtx();
+        ctx.modelRegistry.find.mockImplementation((provider, id) =>
+          model(id, {
+            provider,
+            thinkingLevelMap: { max: null, minimal: null },
+          }),
+        );
+        for (const handler of handlersFor('session_start'))
+          await handler({}, ctx);
+        mockPi.appendEntry.mockClear();
+        for (const handler of handlersFor('thinking_level_select'))
+          handler({ level, previousLevel: 'medium' }, ctx);
+        expect(mockPi.appendEntry).not.toHaveBeenCalled();
+        expect(mockPi.setThinkingLevel).toHaveBeenLastCalledWith('medium');
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining('leaves no eligible route'),
+          'warning',
+        );
+      },
+    );
+
+    it.each(['thinking', 'image'] as const)(
+      'preserves configured %s coverage when selecting thinking',
+      async (capability) => {
+        routerExtension(mockPi);
+        const ctx = buildMockCtx();
+        ctx.modelRegistry.find.mockImplementation((provider, id) =>
+          model(id, {
+            provider,
+            input:
+              capability === 'image' && id === 'gpt-4o'
+                ? ['text']
+                : ['text', 'image'],
+            thinkingLevelMap: { low: null },
+          }),
+        );
+        for (const handler of handlersFor('session_start'))
+          await handler({}, ctx);
+        mockPi.appendEntry.mockClear();
+        for (const handler of handlersFor('thinking_level_select'))
+          handler({ level: 'low', previousLevel: 'medium' }, ctx);
+        expect(mockPi.appendEntry).not.toHaveBeenCalled();
+        expect(mockPi.setThinkingLevel).toHaveBeenLastCalledWith('medium');
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining('unchanged'),
+          'warning',
+        );
+      },
+    );
+
     it('apply thinking level as all-tier override for active profile', async () => {
       routerExtension(mockPi);
 
@@ -305,7 +659,12 @@ describe('index.ts (orchestrator)', () => {
         'router-state',
         expect.objectContaining({
           thinkingByProfile: {
-            balanced: { high: 'high', medium: 'high', low: 'high' },
+            balanced: {
+              high: 'high',
+              medium: 'high',
+              low: 'high',
+              micro: 'high',
+            },
           },
         }),
       );
@@ -334,7 +693,12 @@ describe('index.ts (orchestrator)', () => {
         'router-state',
         expect.objectContaining({
           thinkingByProfile: {
-            balanced: { high: 'high', medium: 'high', low: 'high' },
+            balanced: {
+              high: 'high',
+              medium: 'high',
+              low: 'high',
+              micro: 'high',
+            },
           },
         }),
       );

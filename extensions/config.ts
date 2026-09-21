@@ -7,6 +7,7 @@ import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
 import type {
   ClassifierConfig,
   ConfigLoadResult,
+  JevConfig,
   ModelDefinition,
   ParsedConfigFile,
   RawRouterConfig,
@@ -14,10 +15,11 @@ import type {
   RouterConfig,
   RouterProfile,
   RouterTier,
-  RoutingRule,
 } from './types';
 
-export const ROUTER_TIERS = ['high', 'medium', 'low'] as const;
+import { ROUTER_TIERS } from './types';
+
+export { ROUTER_TIERS } from './types';
 
 // Pi accepts this model capability at runtime, but older peer type releases omit it.
 export const MAX_THINKING_LEVEL: ThinkingLevel = 'max';
@@ -31,7 +33,7 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   'xhigh',
   MAX_THINKING_LEVEL,
 ];
-export const ROUTER_PIN_VALUES = ['auto', 'high', 'medium', 'low'] as const;
+export const ROUTER_PIN_VALUES = ['auto', ...ROUTER_TIERS] as const;
 export type RouterPinValue = (typeof ROUTER_PIN_VALUES)[number];
 export const isRouterPinValue = (value: unknown): value is RouterPinValue =>
   ROUTER_PIN_VALUES.some((candidate) => candidate === value);
@@ -51,7 +53,7 @@ export const isThinkingLevel = (value: unknown): value is ThinkingLevel =>
   typeof value === 'string' && THINKING_LEVELS.some((level) => level === value);
 
 export const isRouterTier = (value: unknown): value is RouterTier =>
-  value === 'high' || value === 'medium' || value === 'low';
+  ROUTER_TIERS.some((tier) => tier === value);
 
 export const parseConfigFile = (path: string): ParsedConfigFile => {
   if (!existsSync(path)) {
@@ -67,12 +69,11 @@ export const parseConfigFile = (path: string): ParsedConfigFile => {
       };
     }
     return { config: parsed, warnings: [] };
-  } catch (error) {
+  } catch {
+    // JSON parse errors can include source snippets containing credentials.
     return {
       config: {},
-      warnings: [
-        `Failed to parse router config at ${path}: ${error instanceof Error ? error.message : String(error)}`,
-      ],
+      warnings: [`Failed to parse router config at ${path}.`],
     };
   }
 };
@@ -121,9 +122,12 @@ export const mergeConfig = (
       ? mergedProfiles[name]
       : {};
     mergedProfiles[name] = {
+      baselineTier: mergeRawValue(existing.baselineTier, profile.baselineTier),
       high: mergeRawValue(existing.high, profile.high),
       medium: mergeRawValue(existing.medium, profile.medium),
       low: mergeRawValue(existing.low, profile.low),
+      micro: mergeRawValue(existing.micro, profile.micro),
+      jev: mergeRawValue(existing.jev, profile.jev),
     };
   }
 
@@ -132,6 +136,7 @@ export const mergeConfig = (
   const mergedModels = { ...baseModels, ...overrideModels };
 
   return {
+    jev: mergeRawValue(base.jev, override.jev),
     debug: override.debug ?? base.debug,
     classifierModel: override.classifierModel ?? base.classifierModel,
     phaseBias: override.phaseBias ?? base.phaseBias,
@@ -147,16 +152,12 @@ export const parseCanonicalModelRef = (
 ): { provider: string; modelId: string } => {
   const slashIndex = value.indexOf('/');
   if (slashIndex === -1) {
-    throw new Error(
-      `Invalid model reference "${value}". Expected "provider/model".`,
-    );
+    throw new Error('Invalid model reference. Expected "provider/model".');
   }
   const provider = value.slice(0, slashIndex).trim();
   const modelId = value.slice(slashIndex + 1).trim();
   if (!provider || !modelId) {
-    throw new Error(
-      `Invalid model reference "${value}". Expected "provider/model".`,
-    );
+    throw new Error('Invalid model reference. Expected "provider/model".');
   }
   return { provider, modelId };
 };
@@ -180,7 +181,7 @@ export const normalizeModelsMap = (
       continue;
     }
 
-    const model = typeof entry.model === 'string' ? entry.model.trim() : '';
+    let model = typeof entry.model === 'string' ? entry.model.trim() : '';
     if (!model) {
       warnings.push(
         `Model definition "${alias}" is missing the "model" field. Skipped.`,
@@ -189,10 +190,11 @@ export const normalizeModelsMap = (
     }
 
     try {
-      parseCanonicalModelRef(model);
-    } catch (error) {
+      const { provider, modelId } = parseCanonicalModelRef(model);
+      model = `${provider}/${modelId}`;
+    } catch {
       warnings.push(
-        `Model definition "${alias}": ${error instanceof Error ? error.message : String(error)}`,
+        `Model definition "${alias}" has an invalid model reference. Skipped.`,
       );
       continue;
     }
@@ -265,23 +267,31 @@ export const normalizeTierConfig = (
   const aliasDefinition = resolved.definition;
   let parsedModel: string;
   try {
-    parseCanonicalModelRef(resolved.canonicalRef);
-    parsedModel = resolved.canonicalRef;
-  } catch (error) {
+    const { provider, modelId } = parseCanonicalModelRef(resolved.canonicalRef);
+    parsedModel = `${provider}/${modelId}`;
+  } catch {
     warnings.push(
-      `Profile "${profileName}" ${tier} tier: ${error instanceof Error ? error.message : String(error)} Tier disabled.`,
+      `Profile "${profileName}" ${tier} tier has an invalid model reference. Tier disabled.`,
     );
     return undefined;
   }
 
-  const thinking = isThinkingLevel(value.thinking) ? value.thinking : 'medium';
+  const tierReasoning =
+    typeof value.reasoning === 'boolean' ? value.reasoning : undefined;
+  const effectiveReasoning = tierReasoning ?? aliasDefinition?.reasoning;
+  const defaultThinking =
+    tier === 'micro' || effectiveReasoning === false ? 'off' : 'medium';
+  const thinking = isThinkingLevel(value.thinking)
+    ? value.thinking
+    : defaultThinking;
   if (value.thinking !== undefined && !isThinkingLevel(value.thinking)) {
     warnings.push(
-      `Profile "${profileName}" ${tier} tier has invalid thinking level. Defaulting to medium.`,
+      `Profile "${profileName}" ${tier} tier has invalid thinking level. Defaulting to ${defaultThinking}.`,
     );
   }
 
   let fallbacks: string[] | undefined;
+  const resolvedFallbacks: ModelDefinition[] = [];
   if (Array.isArray(value.fallbacks)) {
     fallbacks = [];
     for (const f of value.fallbacks) {
@@ -289,11 +299,15 @@ export const normalizeTierConfig = (
         // Resolve aliases in fallbacks too
         const resolvedFallback = resolveModelRef(f, models);
         try {
-          parseCanonicalModelRef(resolvedFallback.canonicalRef);
-          fallbacks.push(resolvedFallback.canonicalRef);
-        } catch (error) {
+          const { provider, modelId } = parseCanonicalModelRef(
+            resolvedFallback.canonicalRef,
+          );
+          const model = `${provider}/${modelId}`;
+          fallbacks.push(model);
+          resolvedFallbacks.push({ ...resolvedFallback.definition, model });
+        } catch {
           warnings.push(
-            `Invalid fallback model "${f}" in profile "${profileName}" ${tier} tier: ${error instanceof Error ? error.message : String(error)}`,
+            `Invalid fallback model in profile "${profileName}" ${tier} tier. Ignored.`,
           );
         }
       }
@@ -317,11 +331,6 @@ export const normalizeTierConfig = (
       : undefined;
   const resolvedMaxTokens =
     tierMaxTokens ?? aliasDefinition?.maxTokens ?? DEFAULT_MAX_TOKENS;
-
-  // Resolve reasoning: tier config > alias > undefined (assumed true)
-  const tierReasoning =
-    typeof value.reasoning === 'boolean' ? value.reasoning : undefined;
-  const effectiveReasoning = tierReasoning ?? aliasDefinition?.reasoning;
 
   // Resolve thinkingLevels: tier config > alias > default
   // Validate tier-level thinkingLevels array
@@ -353,16 +362,120 @@ export const normalizeTierConfig = (
 
   return {
     model: parsedModel,
+    thinkingExplicit: isThinkingLevel(value.thinking),
     thinking,
     fallbacks,
+    resolvedFallbacks,
     contextWindow: tierContextWindow,
     maxTokens: tierMaxTokens,
-    reasoning: tierReasoning,
+    reasoning: effectiveReasoning,
     thinkingLevels: tierThinkingLevels,
     resolvedContextWindow,
     resolvedMaxTokens,
     resolvedThinkingLevels,
   };
+};
+
+export const DEFAULT_JEV_CONFIG = {
+  endpoint: 'https://api.typesafe.ai/v1/systemone',
+  model: 'jev-1.13.0',
+  timeoutMs: 750,
+  confidenceThreshold: 0.65,
+  maxStateChars: 12000,
+  mode: 'advisory',
+} as const;
+
+export const isJevEndpoint = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const normalizeJevConfig = (
+  raw: unknown,
+  warnings: string[],
+): JevConfig | undefined => {
+  if (raw === undefined) return undefined;
+  const invalid = (): undefined => {
+    warnings.push('Ignored invalid Jev configuration.');
+    return undefined;
+  };
+  if (!isObjectRecord(raw)) return invalid();
+  const value: Record<string, unknown> = { ...DEFAULT_JEV_CONFIG, ...raw };
+  if (
+    (value.enabled !== undefined && typeof value.enabled !== 'boolean') ||
+    !isJevEndpoint(value.endpoint) ||
+    typeof value.model !== 'string' ||
+    !/^[a-zA-Z0-9._-]{1,128}$/.test(value.model) ||
+    typeof value.timeoutMs !== 'number' ||
+    !Number.isFinite(value.timeoutMs) ||
+    value.timeoutMs <= 0 ||
+    value.timeoutMs > 1500 ||
+    typeof value.confidenceThreshold !== 'number' ||
+    !Number.isFinite(value.confidenceThreshold) ||
+    value.confidenceThreshold < 0 ||
+    value.confidenceThreshold > 1 ||
+    typeof value.maxStateChars !== 'number' ||
+    !Number.isInteger(value.maxStateChars) ||
+    value.maxStateChars < 1 ||
+    value.maxStateChars > 12000 ||
+    value.mode !== 'advisory' ||
+    (value.apiKey !== undefined &&
+      (typeof value.apiKey !== 'string' || /[\r\n]/.test(value.apiKey)))
+  )
+    return invalid();
+  if (value.timeoutMs > 750)
+    warnings.push(
+      'Jev timeoutMs clamped to the effective 750 ms provider cap.',
+    );
+  const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
+  if (value.enabled === true && !apiKey) {
+    warnings.push('Jev disabled: missing user-config API key.');
+  }
+  return {
+    enabled: value.enabled === true && apiKey.length > 0,
+    apiKey,
+    endpoint: value.endpoint,
+    model: value.model,
+    timeoutMs: Math.min(value.timeoutMs, 750),
+    confidenceThreshold: value.confidenceThreshold,
+    maxStateChars: value.maxStateChars,
+    mode: 'advisory',
+  };
+};
+
+// Remove every project Jev setting before merging with user-owned credentials.
+export const stripProjectJevConfig = (
+  raw: RawRouterConfig,
+  warnings: string[],
+): RawRouterConfig => {
+  const { jev: ignored, ...project } = raw;
+  let found = ignored !== undefined;
+  if (isObjectRecord(project.profiles)) {
+    project.profiles = Object.fromEntries(
+      Object.entries(project.profiles).map(([name, profile]) => {
+        if (!isObjectRecord(profile)) return [name, profile];
+        const { jev, ...tiers } = profile;
+        if (jev !== undefined) found = true;
+        return [name, tiers];
+      }),
+    );
+  }
+  if (found)
+    warnings.push(
+      'Ignored project Jev settings: configure Jev only in user config.',
+    );
+  return project;
 };
 
 export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
@@ -401,52 +514,56 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       hasModels ? normalizedModels : undefined,
     );
 
-    if (!high && !medium && !low) {
+    const micro = normalizeTierConfig(
+      profileRecord.micro,
+      name,
+      'micro',
+      warnings,
+      hasModels ? normalizedModels : undefined,
+    );
+
+    if (!high && !medium && !low && !micro) {
       warnings.push(`Profile "${name}" has no valid tiers. Skipped.`);
       continue;
     }
 
-    normalizedProfiles[name] = { high, medium, low };
+    let baselineTier: RouterTier | undefined;
+    if (profileRecord.baselineTier !== undefined) {
+      const candidate = profileRecord.baselineTier;
+      const normalizedTier = isRouterTier(candidate)
+        ? { high, medium, low, micro }[candidate]
+        : undefined;
+      if (isRouterTier(candidate) && normalizedTier) {
+        baselineTier = candidate;
+      } else {
+        warnings.push(
+          `Profile "${name}" baselineTier must name a configured tier. Ignored.`,
+        );
+      }
+    }
+
+    const jev = isObjectRecord(profileRecord.jev)
+      ? { enabled: profileRecord.jev.enabled === true }
+      : undefined;
+    normalizedProfiles[name] = {
+      ...(baselineTier ? { baselineTier } : {}),
+      high,
+      medium,
+      low,
+      micro,
+      jev,
+    };
   }
 
-  const phaseBias =
-    typeof raw.phaseBias === 'number'
-      ? Math.max(0, Math.min(1, raw.phaseBias))
-      : 0.5;
+  if (raw.phaseBias !== undefined)
+    warnings.push('Deprecated router config field "phaseBias" ignored.');
+  if (raw.rules !== undefined)
+    warnings.push('Deprecated router config field "rules" ignored.');
 
   const maxSessionBudget =
     typeof raw.maxSessionBudget === 'number' && raw.maxSessionBudget > 0
       ? raw.maxSessionBudget
       : undefined;
-
-  const rules: RoutingRule[] = [];
-  if (Array.isArray(raw.rules)) {
-    for (const rule of raw.rules) {
-      if (isObjectRecord(rule)) {
-        const matches = rule.matches;
-        const tier = rule.tier;
-        if (
-          ((typeof matches === 'string' && matches.trim().length > 0) ||
-            (Array.isArray(matches) &&
-              matches.length > 0 &&
-              matches.every(
-                (m) => typeof m === 'string' && m.trim().length > 0,
-              ))) &&
-          isRouterTier(tier)
-        ) {
-          rules.push({
-            matches,
-            tier,
-            reason: typeof rule.reason === 'string' ? rule.reason : undefined,
-          });
-        } else {
-          warnings.push(
-            `Ignored invalid routing rule: ${JSON.stringify(rule)}`,
-          );
-        }
-      }
-    }
-  }
 
   // Resolve classifierModel — accepts string or { model, thinking } object
   let classifierModel: ClassifierConfig | undefined;
@@ -459,10 +576,8 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     try {
       parseCanonicalModelRef(resolved.canonicalRef);
       classifierModel = { model: resolved.canonicalRef };
-    } catch (error) {
-      warnings.push(
-        `Invalid classifierModel: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    } catch {
+      warnings.push('Invalid classifierModel model reference. Ignored.');
     }
   } else if (isObjectRecord(rawClassifier)) {
     const modelRef =
@@ -479,14 +594,12 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
           : undefined;
         if (rawClassifier.thinking !== undefined && !thinking) {
           warnings.push(
-            `classifierModel has invalid thinking level "${String(rawClassifier.thinking)}". Ignored.`,
+            'classifierModel has an invalid thinking level. Ignored.',
           );
         }
         classifierModel = { model: resolved.canonicalRef, thinking };
-      } catch (error) {
-        warnings.push(
-          `Invalid classifierModel: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      } catch {
+        warnings.push('Invalid classifierModel model reference. Ignored.');
       }
     } else {
       warnings.push(
@@ -497,11 +610,10 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
 
   return {
     config: {
+      jev: normalizeJevConfig(raw.jev, warnings),
       debug: typeof raw.debug === 'boolean' ? raw.debug : false,
       classifierModel,
-      phaseBias,
       maxSessionBudget,
-      rules: rules.length > 0 ? rules : undefined,
       profiles: normalizedProfiles,
       models: hasModels ? normalizedModels : undefined,
     },
@@ -517,7 +629,7 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
   const baseConfig: RawRouterConfig = { profiles: {} };
   const merged = mergeConfig(
     mergeConfig(baseConfig, globalResult.config),
-    projectResult.config,
+    stripProjectJevConfig(projectResult.config, projectResult.warnings),
   );
   const normalized = normalizeConfig(merged);
   return {
@@ -637,25 +749,4 @@ export const getUnsupportedTiers = (
     }
   }
   return unsupported;
-};
-
-/**
- * Clamps a requested thinking level to the highest supported level
- * in the provided array of supported levels.
- */
-export const clampThinkingLevel = (
-  requested: ThinkingLevel,
-  supported: ThinkingLevel[] | undefined,
-): ThinkingLevel => {
-  if (requested === 'off' || !supported || supported.length === 0) {
-    return 'off';
-  }
-
-  const reqIdx = THINKING_LEVELS.indexOf(requested);
-  for (let i = reqIdx; i >= 0; i--) {
-    const level = THINKING_LEVELS[i];
-    if (level && supported.includes(level)) return level;
-  }
-
-  return 'off';
 };

@@ -14,11 +14,13 @@ import {
 } from './config';
 import { MAX_DEBUG_HISTORY } from './constants';
 import { registerRouterProvider } from './provider';
+import { preservesRouteCoverage } from './routing';
 import {
   buildPersistedState,
   isRouterPersistedState,
   loadLastRouterProfile,
   saveLastRouterProfile,
+  snapshotDecision,
 } from './state';
 import type {
   RouterConfig,
@@ -151,7 +153,9 @@ const routerExtension = (pi: ExtensionAPI) => {
   };
 
   const recordDebugDecision = (decision: RoutingDecision) => {
-    debugHistory = [...debugHistory, decision].slice(-MAX_DEBUG_HISTORY);
+    debugHistory = [...debugHistory, snapshotDecision(decision)].slice(
+      -MAX_DEBUG_HISTORY,
+    );
   };
 
   const getThinkingOverride = (profileName: string, tier: RouterTier) => {
@@ -208,7 +212,7 @@ const routerExtension = (pi: ExtensionAPI) => {
         lastNonRouterModel,
         accumulatedCost,
         widgetEnabled,
-        currentConfig,
+        maxSessionBudget: currentConfig.maxSessionBudget,
       }),
     reloadConfig: (
       ctx?: ExtensionContext,
@@ -369,13 +373,15 @@ const routerExtension = (pi: ExtensionAPI) => {
       debugEnabled = savedState.debugEnabled ?? debugEnabled;
       widgetEnabled = savedState.widgetEnabled ?? widgetEnabled;
       debugHistory = savedState.debugHistory
-        ? structuredClone(savedState.debugHistory).slice(-MAX_DEBUG_HISTORY)
+        ? savedState.debugHistory
+            .map(snapshotDecision)
+            .slice(-MAX_DEBUG_HISTORY)
         : [];
       if (!hasExplicitStartupModel) {
         lastNonRouterModel =
           savedState.lastNonRouterModel ?? lastNonRouterModel;
         lastDecision = savedState.lastDecision
-          ? structuredClone(savedState.lastDecision)
+          ? snapshotDecision(savedState.lastDecision)
           : undefined;
       }
       accumulatedCost = savedState.accumulatedCost ?? 0;
@@ -516,14 +522,27 @@ const routerExtension = (pi: ExtensionAPI) => {
 
     // User changed pi's thinking level (e.g. via shift+tab).
     // Apply as an all-tier thinking override for the active router profile.
-    let overrides = thinkingByProfile[selectedProfile];
-    if (!overrides) {
-      overrides = {};
-      thinkingByProfile[selectedProfile] = overrides;
-    }
+    const overrides = { ...thinkingByProfile[selectedProfile] };
     for (const t of ROUTER_TIERS) {
       overrides[t] = event.level;
     }
+    const activeProfile = currentConfig.profiles[selectedProfile];
+    if (!activeProfile) return;
+    if (
+      preservesRouteCoverage(
+        activeProfile,
+        (provider, id) => ctx.modelRegistry.find(provider, id),
+        overrides,
+      ) === false
+    ) {
+      actions.syncPiThinkingLevel(event.previousLevel);
+      ctx.ui.notify(
+        `Router thinking unchanged: '${event.level}' leaves no eligible route.`,
+        'warning',
+      );
+      return;
+    }
+    thinkingByProfile[selectedProfile] = overrides;
     persistState();
     actions.updateStatus(ctx);
     if (event.level !== 'off') {
@@ -533,7 +552,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       if (unsupported.length > 0) {
         ctx.ui.notify(
           `Router thinking (all) set to ${event.level}. ` +
-            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${event.level}'.`,
+            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${event.level}' and will be skipped when unsupported.`,
           'warning',
         );
       }

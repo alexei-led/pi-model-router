@@ -1,17 +1,14 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 
-export type RouterTier = 'high' | 'medium' | 'low';
+// Descending routing complexity; all tier iteration and ranking derives here.
+export const ROUTER_TIERS = ['high', 'medium', 'low', 'micro'] as const;
+export type RouterTier = (typeof ROUTER_TIERS)[number];
+export type ClassifierTier = RouterTier;
 export type RouterPin = RouterTier | 'auto';
 export type RouterPhase = 'planning' | 'implementation' | 'lightweight';
 export type RouterPinByProfile = Partial<Record<string, RouterTier>>;
 export type RouterThinkingByTier = Partial<Record<RouterTier, ThinkingLevel>>;
 export type RouterThinkingByProfile = Record<string, RouterThinkingByTier>;
-
-export interface RoutingRule {
-  matches: string | string[];
-  tier: RouterTier;
-  reason?: string | undefined;
-}
 
 export interface ModelDefinition {
   model: string;
@@ -28,8 +25,12 @@ export interface ClassifierConfig {
 
 export interface RoutedTierConfig {
   model: string;
+  /** False for normalization defaults; omitted on legacy in-memory profiles. */
+  thinkingExplicit?: boolean | undefined;
   thinking?: ThinkingLevel | undefined;
   fallbacks?: string[] | undefined;
+  /** Canonical targets and exact alias metadata, in the same order as fallbacks. */
+  resolvedFallbacks?: ModelDefinition[] | undefined;
   contextWindow?: number | undefined;
   maxTokens?: number | undefined;
   reasoning?: boolean | undefined;
@@ -39,18 +40,35 @@ export interface RoutedTierConfig {
   resolvedThinkingLevels?: ThinkingLevel[] | undefined;
 }
 
+export interface JevConfig {
+  enabled: boolean;
+  apiKey: string;
+  endpoint: string;
+  model: string;
+  timeoutMs: number;
+  confidenceThreshold: number;
+  maxStateChars: number;
+  mode: 'advisory';
+}
+
+export interface JevProfileConfig {
+  enabled: boolean;
+}
+
 export interface RouterProfile {
+  baselineTier?: RouterTier | undefined;
+  jev?: JevProfileConfig | undefined;
   high?: RoutedTierConfig | undefined;
   medium?: RoutedTierConfig | undefined;
   low?: RoutedTierConfig | undefined;
+  micro?: RoutedTierConfig | undefined;
 }
 
 export interface RouterConfig {
+  jev?: JevConfig | undefined;
   debug?: boolean | undefined;
   classifierModel?: ClassifierConfig | undefined;
-  phaseBias?: number | undefined;
   maxSessionBudget?: number | undefined;
-  rules?: RoutingRule[] | undefined;
   profiles: Record<string, RouterProfile>;
   models?: Record<string, ModelDefinition> | undefined;
 }
@@ -63,8 +81,56 @@ export interface RouterStatusState {
   lastNonRouterModel: string | undefined;
   accumulatedCost: number;
   widgetEnabled: boolean;
-  currentConfig: RouterConfig;
+  maxSessionBudget: number | undefined;
 }
+
+export interface RoutePair {
+  tier: RouterTier;
+  model: string;
+  thinking: ThinkingLevel;
+}
+
+export interface JevRouteCandidate extends RoutePair {
+  id: string;
+}
+
+export interface JevDependencies {
+  fetch?: typeof fetch;
+  now?: () => number;
+}
+
+export interface JevRequest {
+  taskSummary: string;
+  candidates: readonly JevRouteCandidate[];
+  profile: JevProfileConfig | undefined;
+  /** Absolute monotonic deadline supplied by the routing orchestrator. */
+  routingDeadline: number;
+  signal?: AbortSignal | undefined;
+}
+
+/** Only allowlisted local identity and numeric diagnostics cross the adapter boundary. */
+export interface JevAdvice {
+  candidateId: string;
+  confidence: number;
+  latencyMs: number;
+}
+
+export const ROUTING_REASON_CODES = [
+  'baseline',
+  'pinned',
+  'continuation',
+  'classifier',
+  'jev',
+  'fallback',
+  'budget',
+  'legacy',
+] as const;
+export type RoutingReasonCode = (typeof ROUTING_REASON_CODES)[number];
+export const isRoutingReasonCode = (
+  value: unknown,
+): value is RoutingReasonCode =>
+  ROUTING_REASON_CODES.some((code) => code === value);
+export type RoutingErrorClass = 'advisor-unavailable' | 'deadline';
 
 export interface RoutingDecision {
   profile: string;
@@ -73,13 +139,14 @@ export interface RoutingDecision {
   targetProvider: string;
   targetModelId: string;
   targetLabel: string;
-  reasoning: string;
+  reasonCode: RoutingReasonCode;
+  routingLatencyMs?: number | undefined;
+  errorClass?: RoutingErrorClass | undefined;
   thinking: ThinkingLevel;
   timestamp: number;
   isClassifier?: boolean | undefined;
   isFallback?: boolean | undefined;
   isBudgetForced?: boolean | undefined;
-  isRuleMatched?: boolean | undefined;
 }
 
 export interface RouterLastProfileState {
@@ -117,6 +184,7 @@ export interface RouterPersistedState {
 }
 
 export interface RawRouterConfig {
+  jev?: unknown;
   debug?: unknown;
   classifierModel?: unknown;
   phaseBias?: unknown;

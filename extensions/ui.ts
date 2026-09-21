@@ -5,17 +5,23 @@ import type {
   RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
+import { isRoutingReasonCode } from './types';
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
   if (decision.isFallback) flags.push('fallback');
   if (decision.isBudgetForced) flags.push('budget-limit');
-  if (decision.isRuleMatched) flags.push('rule');
   return flags;
 };
 
+export const formatDecisionSource = (decision: RoutingDecision): string =>
+  isRoutingReasonCode(decision.reasonCode) && decision.reasonCode !== 'legacy'
+    ? decision.reasonCode
+    : '';
+
 export const formatDecision = (decision: RoutingDecision): string => {
-  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}] (${decision.reasoning})`;
+  const source = formatDecisionSource(decision);
+  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${source ? ` (${source})` : ''}`;
 };
 
 export const formatPinSummary = (
@@ -57,7 +63,7 @@ export const updateStatus = (
     lastNonRouterModel,
     accumulatedCost,
     widgetEnabled,
-    currentConfig,
+    maxSessionBudget,
   } = state;
   const activeRouterProfile = routerEnabled ? selectedProfile : undefined;
   const statusProfile = selectedProfile ?? 'none';
@@ -69,7 +75,7 @@ export const updateStatus = (
   if (activeRouterProfile) {
     const matchesProfile =
       lastDecision && lastDecision.profile === activeRouterProfile;
-    const matchesPin = activePin ? lastDecision?.tier === activePin : true;
+    const matchesPin = !activePin || lastDecision?.tier === activePin;
 
     let statusText: string;
     if (lastDecision && matchesProfile && matchesPin) {
@@ -92,9 +98,7 @@ export const updateStatus = (
     `Profile: ${statusProfile}${activeRouterProfile ? ' (active)' : ''}`,
     `Pin: ${activePin ?? 'auto'}`,
     `Cost: $${accumulatedCost.toFixed(4)}` +
-      (currentConfig.maxSessionBudget
-        ? ` / $${currentConfig.maxSessionBudget.toFixed(2)}`
-        : ''),
+      (maxSessionBudget ? ` / $${maxSessionBudget.toFixed(2)}` : ''),
   ];
   if (lastDecision && lastDecision.profile === statusProfile) {
     const flags = getDecisionFlags(lastDecision);
@@ -103,6 +107,14 @@ export const updateStatus = (
     widgetLines.push(
       `Route: ${lastDecision.tier}${flagsStr} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`,
       `Phase: ${lastDecision.phase}`,
+      `Source: ${formatDecisionSource(lastDecision) || 'unknown'}`,
+      ...(Number.isFinite(lastDecision.routingLatencyMs)
+        ? [`Routing: ${Math.round(lastDecision.routingLatencyMs ?? 0)}ms`]
+        : []),
+      ...(lastDecision.errorClass === 'deadline' ||
+      lastDecision.errorClass === 'advisor-unavailable'
+        ? [`Routing error: ${lastDecision.errorClass}`]
+        : []),
     );
   } else if (!routerEnabled && lastNonRouterModel) {
     widgetLines.push(`Fallback: ${lastNonRouterModel}`);

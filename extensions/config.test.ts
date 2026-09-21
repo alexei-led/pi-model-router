@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   collectProfileThinkingLevels,
@@ -8,6 +9,7 @@ import {
   loadRouterConfig,
   mergeConfig,
   normalizeConfig,
+  normalizeJevConfig,
   normalizeModelsMap,
   normalizeTierConfig,
   parseCanonicalModelRef,
@@ -27,7 +29,7 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
 vi.mock('node:fs', () => ({
   existsSync: (path: string) =>
     path.includes('exists') || path.includes('model-router.json'),
-  readFileSync: (path: string) => {
+  readFileSync: vi.fn((path: string) => {
     if (path.includes('invalid-json')) {
       return '{invalid';
     }
@@ -61,7 +63,7 @@ vi.mock('node:fs', () => ({
       });
     }
     return '{}';
-  },
+  }),
 }));
 
 describe('config.ts', () => {
@@ -267,18 +269,53 @@ describe('config.ts', () => {
   });
 
   describe('normalizeConfig', () => {
-    it('normalize rules, profiles, phaseBias, budget, classifierModel', () => {
+    it('preserves omitted thinking provenance and canonical model identities', () => {
+      const { config } = normalizeConfig({
+        models: {
+          backup: { model: ' test / fallback ', thinkingLevels: ['low'] },
+        },
+        profiles: {
+          p: {
+            high: { model: ' test / primary ', thinking: 'medium' },
+            medium: {
+              model: 'test/primary',
+              fallbacks: ['backup', ' test / other '],
+            },
+            micro: { model: 'test/tiny' },
+          },
+        },
+      });
+      expect(config.models?.backup?.model).toBe('test/fallback');
+      expect(config.profiles.p?.high).toMatchObject({
+        model: 'test/primary',
+        thinking: 'medium',
+        thinkingExplicit: true,
+      });
+      expect(config.profiles.p?.medium).toMatchObject({
+        thinking: 'medium',
+        thinkingExplicit: false,
+        fallbacks: ['test/fallback', 'test/other'],
+        resolvedFallbacks: [
+          { model: 'test/fallback', thinkingLevels: ['low'] },
+          { model: 'test/other' },
+        ],
+      });
+      expect(config.profiles.p?.micro).toMatchObject({
+        thinking: 'off',
+        thinkingExplicit: false,
+      });
+    });
+
+    it('normalizes baselineTier and deprecates prompt-derived routing fields', () => {
       const raw = {
         debug: true,
         phaseBias: 0.8,
         maxSessionBudget: 5.5,
         classifierModel: 'gpt4',
-        rules: [
-          { matches: 'test', tier: 'high', reason: 'Rule reason' },
-          { matches: ['foo', 'bar'], tier: 'low' },
-        ],
+        rules: [{ matches: 'private-value', tier: 'high' }],
         profiles: {
           balanced: {
+            baselineTier: 'high',
             high: { model: 'google/gemini-2.5-pro' },
           },
         },
@@ -290,12 +327,15 @@ describe('config.ts', () => {
       const { config, warnings } = normalizeConfig(
         raw as unknown as RouterConfig,
       );
-      expect(warnings).toEqual([]);
+      expect(warnings).toEqual([
+        'Deprecated router config field "phaseBias" ignored.',
+        'Deprecated router config field "rules" ignored.',
+      ]);
+      expect(JSON.stringify(warnings)).not.toContain('private-value');
       expect(config.debug).toBe(true);
-      expect(config.phaseBias).toBe(0.8);
       expect(config.maxSessionBudget).toBe(5.5);
       expect(config.classifierModel?.model).toBe('openai/gpt-4o');
-      expect(config.rules?.length).toBe(2);
+      expect(config.profiles.balanced?.baselineTier).toBe('high');
       expect(config.profiles.balanced?.high?.model).toBe(
         'google/gemini-2.5-pro',
       );
@@ -560,8 +600,10 @@ describe('config.ts', () => {
       );
       expect(config.classifierModel?.model).toBe('openai/gpt-4o');
       expect(config.classifierModel?.thinking).toBeUndefined();
-      expect(warnings.length).toBe(1);
-      expect(warnings[0]).toContain('invalid thinking level');
+      expect(warnings).toEqual([
+        'classifierModel has an invalid thinking level. Ignored.',
+      ]);
+      expect(JSON.stringify(warnings)).not.toContain('super-invalid');
     });
 
     it('warn when classifierModel object is missing model field', () => {
@@ -579,4 +621,330 @@ describe('config.ts', () => {
       expect(warnings[0]).toContain('missing the "model" field');
     });
   });
+});
+
+describe('micro config compatibility', () => {
+  it.each(['micro', 'low', 'medium', 'high'] as const)(
+    'normalizes missing and invalid %s thinking deliberately',
+    (tier) => {
+      for (const thinking of [undefined, 'invalid']) {
+        const { config, warnings } = normalizeConfig({
+          profiles: { p: { [tier]: { model: 'test/model', thinking } } },
+        });
+        expect(config.profiles.p?.[tier]?.thinking).toBe(
+          tier === 'micro' ? 'off' : 'medium',
+        );
+        expect(warnings.length).toBe(thinking ? 1 : 0);
+      }
+    },
+  );
+
+  it('merges micro model aliases, effort, and fallbacks without changing legacy tiers', () => {
+    const base = {
+      models: { tiny: { model: 'test/tiny', reasoning: false } },
+      profiles: {
+        p: {
+          high: { model: 'test/high' },
+          medium: { model: 'test/medium' },
+          low: { model: 'test/low' },
+          micro: { model: 'tiny', fallbacks: ['test/backup'] },
+        },
+      },
+    };
+    const { config, warnings } = normalizeConfig(
+      mergeConfig(base, { profiles: { p: { micro: { thinking: 'off' } } } }),
+    );
+    expect(warnings).toEqual([]);
+    expect(config.profiles.p?.micro).toMatchObject({
+      model: 'test/tiny',
+      thinking: 'off',
+      fallbacks: ['test/backup'],
+      resolvedThinkingLevels: [],
+    });
+    const old = normalizeConfig({
+      profiles: {
+        p: {
+          high: base.profiles.p.high,
+          medium: base.profiles.p.medium,
+          low: base.profiles.p.low,
+        },
+      },
+    }).config.profiles.p;
+    expect(config.profiles.p).toMatchObject({
+      high: old?.high,
+      medium: old?.medium,
+      low: old?.low,
+    });
+    expect(old?.micro).toBeUndefined();
+  });
+
+  it('accepts micro-only profiles and an explicit baseline tier', () => {
+    const { config, warnings } = normalizeConfig({
+      profiles: {
+        p: {
+          baselineTier: 'micro',
+          micro: { model: 'test/tiny', thinking: 'minimal' },
+        },
+      },
+    });
+    expect(warnings).toEqual([]);
+    expect(config.profiles.p?.baselineTier).toBe('micro');
+    expect(config.profiles.p?.micro?.thinking).toBe('minimal');
+    expect(isRouterTier('micro')).toBe(true);
+  });
+
+  it.each([undefined, 'high', 'unknown'])(
+    'ignores a baseline tier that is not a configured valid tier: %s',
+    (baselineTier) => {
+      const { config, warnings } = normalizeConfig({
+        profiles: {
+          p: {
+            ...(baselineTier === undefined ? {} : { baselineTier }),
+            high: { model: 'test/high' },
+          },
+        },
+      });
+      if (baselineTier === undefined || baselineTier === 'high') {
+        expect(config.profiles.p?.baselineTier).toBe(baselineTier);
+        expect(warnings).toEqual([]);
+      } else {
+        expect(config.profiles.p?.baselineTier).toBeUndefined();
+        expect(warnings).toEqual([
+          'Profile "p" baselineTier must name a configured tier. Ignored.',
+        ]);
+      }
+    },
+  );
+});
+
+describe('config.ts Jev user-config provenance', () => {
+  const personal = {
+    high: { model: 'openai/test' },
+    medium: { model: 'openai/test' },
+    jev: { enabled: true },
+  };
+  const user = {
+    jev: { enabled: true, apiKey: 'synthetic-user-key' },
+    profiles: {
+      personal,
+      work: {
+        high: { model: 'openai/test' },
+        medium: { model: 'openai/test' },
+      },
+    },
+  };
+  const loadSources = (global: unknown, project: unknown) => {
+    vi.mocked(readFileSync)
+      .mockReturnValueOnce(JSON.stringify(global))
+      .mockReturnValueOnce(JSON.stringify(project));
+    return loadRouterConfig('/project');
+  };
+
+  it('normalizes approved defaults and keeps work disabled without explicit user opt-in', () => {
+    const { config, warnings } = loadSources(user, {});
+    expect(warnings).toEqual([]);
+    expect(config.jev).toEqual({
+      enabled: true,
+      apiKey: 'synthetic-user-key',
+      endpoint: 'https://api.typesafe.ai/v1/systemone',
+      model: 'jev-1.13.0',
+      timeoutMs: 750,
+      confidenceThreshold: 0.65,
+      maxStateChars: 12000,
+      mode: 'advisory',
+    });
+    expect(config.profiles.personal?.jev?.enabled).toBe(true);
+    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
+  });
+
+  it.each([
+    { enabled: false },
+    { enabled: true },
+    { apiKey: 'synthetic-project-secret' },
+    { endpoint: 'https://attacker.invalid/collect' },
+    { model: 'attacker-model' },
+    {
+      enabled: true,
+      apiKey: 'synthetic-project-secret',
+      endpoint: 'https://attacker.invalid/collect',
+      model: 'attacker-model',
+    },
+  ])('ignores project Jev settings before merging: %j', (jev) => {
+    const { config, warnings } = loadSources(user, {
+      jev,
+      profiles: {
+        personal: { jev: { enabled: false } },
+        work: { jev: { enabled: true } },
+        projectOnly: { ...personal },
+      },
+    });
+    expect(config.jev?.enabled).toBe(true);
+    expect(config.jev?.apiKey).toBe('synthetic-user-key');
+    expect(config.jev?.endpoint).toBe('https://api.typesafe.ai/v1/systemone');
+    expect(config.jev?.model).toBe('jev-1.13.0');
+    expect(config.profiles.personal?.jev?.enabled).toBe(true);
+    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
+    expect(config.profiles.projectOnly?.jev?.enabled).not.toBe(true);
+    expect(warnings).toEqual([
+      'Ignored project Jev settings: configure Jev only in user config.',
+    ]);
+    expect(JSON.stringify(warnings)).not.toContain('synthetic-project-secret');
+    expect(JSON.stringify(warnings)).not.toContain('attacker');
+  });
+
+  it('cannot inherit user credentials through project enablement', () => {
+    const { config } = loadSources(
+      { ...user, jev: { apiKey: 'synthetic-user-key' } },
+      {
+        jev: { enabled: true },
+        profiles: { work: { jev: { enabled: true } } },
+      },
+    );
+    expect(config.jev?.enabled).toBe(false);
+    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
+  });
+
+  it('cannot use a project key or project profile opt-in without user Jev settings', () => {
+    const { config } = loadSources({}, user);
+    expect(config.jev).toBeUndefined();
+    expect(config.profiles.personal?.jev).toBeUndefined();
+  });
+
+  it('uses only enabled from a user profile, never profile credentials or endpoint', () => {
+    const { config } = loadSources(
+      {
+        ...user,
+        profiles: {
+          personal: {
+            ...personal,
+            jev: {
+              enabled: true,
+              apiKey: 'profile-secret',
+              endpoint: 'https://other.invalid',
+            },
+          },
+        },
+      },
+      {},
+    );
+    expect(config.profiles.personal?.jev).toEqual({ enabled: true });
+  });
+
+  it('disables missing or blank keys with a fixed warning', () => {
+    for (const apiKey of [undefined, '']) {
+      const warnings: string[] = [];
+      expect(
+        normalizeJevConfig({ enabled: true, apiKey }, warnings)?.enabled,
+      ).toBe(false);
+      expect(warnings).toEqual(['Jev disabled: missing user-config API key.']);
+    }
+  });
+
+  it.each([
+    null,
+    [],
+    'synthetic-secret',
+    { enabled: 'yes' },
+    { apiKey: 1 },
+    { apiKey: 'bad\nsecret' },
+    { endpoint: 'http://insecure.invalid' },
+    { endpoint: 'https://user:secret@host.invalid' },
+    { endpoint: 'https://host.invalid?token=secret' },
+    { model: '' },
+    { model: {} },
+    { timeoutMs: 0 },
+    { timeoutMs: Number.NaN },
+    { timeoutMs: Number.POSITIVE_INFINITY },
+    { timeoutMs: 1501 },
+    { confidenceThreshold: -1 },
+    { confidenceThreshold: 2 },
+    { confidenceThreshold: Number.NaN },
+    { maxStateChars: 0 },
+    { maxStateChars: 12001 },
+    { maxStateChars: 1.5 },
+    { mode: 'authoritative' },
+  ])('rejects malformed Jev config without echoing fields: %j', (value) => {
+    const warnings: string[] = [];
+    expect(normalizeJevConfig(value, warnings)).toBeUndefined();
+    expect(warnings).toEqual(['Ignored invalid Jev configuration.']);
+  });
+
+  it('never includes JSON parse source or thrown read errors in warnings', () => {
+    const secret = 'synthetic-json-key-never-log';
+    vi.mocked(readFileSync).mockReturnValueOnce(
+      `{"jev":{"apiKey":"${secret}"} invalid`,
+    );
+    const invalid = parseConfigFile('/exists/model-router.json');
+    vi.mocked(readFileSync).mockImplementationOnce(() => {
+      throw new Error(secret);
+    });
+    const error = parseConfigFile('/exists/model-router.json');
+    expect(invalid.warnings).toEqual([
+      'Failed to parse router config at /exists/model-router.json.',
+    ]);
+    expect(error.warnings).toEqual(invalid.warnings);
+    expect(JSON.stringify([invalid, error])).not.toContain(secret);
+  });
+});
+
+describe('review safety diagnostics', () => {
+  it('does not echo malformed model references in warnings', () => {
+    const secret = 'sentinel-model-secret';
+    const { warnings } = normalizeConfig({
+      models: { leaked: { model: secret } },
+      profiles: {
+        p: {
+          medium: {
+            model: 'test/model',
+            fallbacks: [secret],
+          },
+        },
+      },
+      classifierModel: secret,
+    });
+    expect(JSON.stringify(warnings)).not.toContain(secret);
+    expect(warnings.join(' ')).toContain('invalid model reference');
+    expect(warnings.join(' ')).toContain('Invalid fallback model');
+  });
+
+  it('ignores legacy rule contents with one fixed value-free warning', () => {
+    const { config, warnings } = normalizeConfig({
+      profiles: { p: { high: { model: 'test/model' } } },
+      rules: [
+        {
+          matches: 'sentinel-private-task',
+          tier: 'invalid',
+          apiKey: 'sentinel-secret',
+        },
+        'sentinel-secret',
+      ],
+    });
+    expect(warnings).toEqual([
+      'Deprecated router config field "rules" ignored.',
+    ]);
+    expect(JSON.stringify(warnings)).not.toContain('sentinel');
+    expect(config.profiles.p?.high?.model).toBe('test/model');
+  });
+
+  it.each([751, 1000, 1500])(
+    'warns and normalizes the effective Jev timeout for %s ms',
+    (timeoutMs) => {
+      const warnings: string[] = [];
+      expect(normalizeJevConfig({ timeoutMs }, warnings)?.timeoutMs).toBe(750);
+      expect(warnings).toEqual([
+        'Jev timeoutMs clamped to the effective 750 ms provider cap.',
+      ]);
+    },
+  );
+
+  it.each(['micro', 'low', 'medium', 'high'] as const)(
+    'accepts a %s-only profile without prompt-derived floor warnings',
+    (tier) => {
+      const { config, warnings } = normalizeConfig({
+        profiles: { partial: { [tier]: { model: 'test/model' } } },
+      });
+      expect(config.profiles.partial?.[tier]).toBeDefined();
+      expect(warnings).toEqual([]);
+    },
+  );
 });

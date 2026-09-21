@@ -1,536 +1,346 @@
 import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
+import { normalizeConfig } from './config';
+import { extractTextFromContent, hasImageAttachment } from './context';
 import {
-  containsAny,
-  countToolResults,
-  countWords,
-  extractTextFromContent,
-  getLastUserText,
-  getRecentConversationText,
-  hasImageAttachment,
-} from './context';
-import {
-  buildRoutingDecision,
-  decideRouting,
+  availableRoutePairs,
+  BASELINE_TIER_ORDER,
+  decisionForPair,
   phaseForTier,
-  resolveAvailableTier,
+  preservesRouteCoverage,
+  primaryRoutePairs,
+  resolveRoutePair,
+  selectBaselineRoute,
+  validateRoutePair,
 } from './routing';
-import type { RouterProfile, RoutingRule } from './types';
+import { model, required } from './test/fixtures';
+import type { RouterProfile, RouterTier } from './types';
+import { ROUTER_TIERS } from './types';
 
-describe('routing.ts', () => {
-  describe('extractTextFromContent', () => {
-    it('return string directly if content is string', () => {
-      expect(extractTextFromContent('hello world')).toBe('hello world');
-    });
+const context = (content: string): Context => ({
+  messages: [{ role: 'user', content, timestamp: 1 }],
+});
 
-    it('extract text and toolCall parts from message structure', () => {
-      const parts: Message['content'] = [
-        { type: 'text' as const, text: 'some text' },
-        { type: 'thinking' as const, thinking: 'some thought' },
-        {
-          type: 'toolCall' as const,
-          id: 'call_1',
-          name: 'write_file',
-          arguments: { path: 'file.txt' },
-        },
-      ];
-      const result = extractTextFromContent(parts);
-      expect(result).toContain('some text');
-      expect(result).toContain('some thought');
-      expect(result).toContain('write_file {"path":"file.txt"}');
-    });
-  });
+const allTierProfile = (baselineTier?: RouterTier): RouterProfile => ({
+  ...(baselineTier ? { baselineTier } : {}),
+  high: { model: 'test/high' },
+  medium: { model: 'test/medium' },
+  low: { model: 'test/low' },
+  micro: { model: 'test/micro' },
+});
 
-  describe('getLastUserText', () => {
-    it('return empty string if no messages', () => {
-      const context: Context = { messages: [] };
-      expect(getLastUserText(context)).toBe('');
-    });
+const findFixtureModel = (_provider: string, id: string) => model(id);
 
-    it('extract the last user message text', () => {
-      const context: Context = {
-        messages: [
-          { role: 'user', content: 'first user', timestamp: Date.now() },
-          {
-            role: 'assistant',
-            content: 'assistant response',
-            timestamp: Date.now(),
-          } as unknown as Message,
-          { role: 'user', content: 'second user', timestamp: Date.now() },
-          {
-            role: 'assistant',
-            content: 'another assistant',
-            timestamp: Date.now(),
-          } as unknown as Message,
-        ],
-      };
-      expect(getLastUserText(context)).toBe('second user');
-    });
-  });
-
-  describe('getRecentConversationText', () => {
-    it('combine last N messages in lowercase', () => {
-      const context: Context = {
-        messages: [
-          { role: 'user', content: 'First', timestamp: Date.now() },
-          { role: 'user', content: 'Second', timestamp: Date.now() },
-          { role: 'user', content: 'Third', timestamp: Date.now() },
-        ],
-      };
-      const result = getRecentConversationText(context, 2);
-      expect(result).toBe('second\nthird');
-    });
-  });
-
-  describe('countToolResults', () => {
-    it('count messages with role toolResult', () => {
-      const context: Context = {
-        messages: [
-          { role: 'user', content: 'hey', timestamp: Date.now() },
-          {
-            role: 'toolResult',
-            toolCallId: '1',
-            toolName: 't',
-            content: 'result 1',
-            isError: false,
-            timestamp: Date.now(),
-          } as unknown as Message,
-          { role: 'user', content: 'ok', timestamp: Date.now() },
-          {
-            role: 'toolResult',
-            toolCallId: '2',
-            toolName: 't',
-            content: 'result 2',
-            isError: false,
-            timestamp: Date.now(),
-          } as unknown as Message,
-        ],
-      };
-      expect(countToolResults(context)).toBe(2);
-    });
-  });
-
-  describe('countWords', () => {
-    it('count words correctly', () => {
-      expect(countWords('   one two   three\nfour ')).toBe(4);
-      expect(countWords('')).toBe(0);
-    });
-  });
-
-  describe('hasImageAttachment', () => {
-    it('return true if any message contains image part', () => {
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'image' as const },
-            ] as unknown as UserMessage['content'],
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      expect(hasImageAttachment(context)).toBe(true);
-    });
-
-    it('return false if no image part exists', () => {
-      const context: Context = {
-        messages: [
-          { role: 'user', content: 'text message', timestamp: Date.now() },
-        ],
-      };
-      expect(hasImageAttachment(context)).toBe(false);
-    });
-  });
-
-  describe('containsAny', () => {
-    it('check if string contains any keyword', () => {
-      expect(containsAny('hello world', ['earth', 'world'])).toBe(true);
-      expect(containsAny('hello world', ['mars'])).toBe(false);
-    });
-  });
-
-  describe('phaseForTier', () => {
-    it('return correct phase for tier', () => {
-      expect(phaseForTier('high')).toBe('planning');
-      expect(phaseForTier('medium')).toBe('implementation');
-      expect(phaseForTier('low')).toBe('lightweight');
-    });
-  });
-
-  describe('resolveAvailableTier', () => {
-    it('return preferred if available', () => {
-      expect(
-        resolveAvailableTier(
-          { high: { model: 'a' }, medium: { model: 'b' } },
-          'high',
-        ),
-      ).toBe('high');
-    });
-
-    it('fall up if preferred is unavailable', () => {
-      expect(resolveAvailableTier({ high: { model: 'a' } }, 'low')).toBe(
-        'high',
-      );
-    });
-
-    it('fall down if falling up finds nothing', () => {
-      expect(resolveAvailableTier({ low: { model: 'a' } }, 'medium')).toBe(
-        'low',
-      );
-    });
-  });
-
-  describe('buildRoutingDecision', () => {
-    const profile: RouterProfile = {
-      high: { model: 'openai/gpt-4o-pro', thinking: 'high' },
-    };
-
-    it('construct correct decision object', () => {
-      const decision = buildRoutingDecision(
-        'balanced',
-        profile,
-        'high',
-        'planning',
-        'Reasoning string',
-      );
-      expect(decision.profile).toBe('balanced');
-      expect(decision.tier).toBe('high');
-      expect(decision.phase).toBe('planning');
-      expect(decision.targetProvider).toBe('openai');
-      expect(decision.targetModelId).toBe('gpt-4o-pro');
-      expect(decision.targetLabel).toBe('openai/gpt-4o-pro');
-      expect(decision.thinking).toBe('high');
-      expect(decision.reasoning).toBe('Reasoning string');
-    });
-
-    it('throw if tier is not in profile', () => {
-      expect(() =>
-        buildRoutingDecision(
-          'balanced',
-          profile,
-          'medium',
-          'implementation',
-          'Reason',
-        ),
-      ).toThrow();
-    });
-  });
-
-  describe('decideRouting', () => {
-    it('uses an available low tier instead of re-escalating after the budget downgrade', () => {
-      const profile: RouterProfile = {
-        high: { model: 'test/high' },
-        low: { model: 'test/low' },
-      };
-      const context: Context = {
-        messages: [{ role: 'user', content: 'deep design', timestamp: 1 }],
-      };
-      expect(
-        decideRouting(
-          context,
-          'balanced',
-          profile,
-          undefined,
-          undefined,
-          undefined,
-          0.5,
-          undefined,
-          true,
-        ),
-      ).toMatchObject({ tier: 'low', isBudgetForced: true });
-    });
-    const profile: RouterProfile = {
-      high: { model: 'openai/gpt-4o', resolvedContextWindow: 100 },
-      medium: { model: 'openai/gpt-4o-mini', resolvedContextWindow: 100 },
-      low: { model: 'openai/gpt-4o-micro', resolvedContextWindow: 100 },
-    };
-
-    const rules: RoutingRule[] = [
-      { matches: 'force-high', tier: 'high', reason: 'High rule' },
+describe('routing context helpers', () => {
+  it('extracts text and tool-call parts without classifying their meaning', () => {
+    const parts: Message['content'] = [
+      { type: 'text', text: 'some text' },
+      { type: 'thinking', thinking: 'some thought' },
+      {
+        type: 'toolCall',
+        id: 'call_1',
+        name: 'read_file',
+        arguments: { path: 'file.txt' },
+      },
     ];
+    const extracted = extractTextFromContent(parts);
+    expect(extracted).toContain('some text');
+    expect(extracted).toContain('some thought');
+    expect(extracted).toContain('read_file {"path":"file.txt"}');
+  });
 
-    it('respect manual pinned tier', () => {
-      const context: Context = {
-        messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }],
-      };
-      const decision = decideRouting(context, 'p', profile, undefined, 'high');
-      expect(decision.tier).toBe('high');
-      expect(decision.reasoning).toContain('Pinned to high tier');
+  it('detects images while keeping ordinary text separate', () => {
+    const imageContext: Context = {
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'image' }] as unknown as UserMessage['content'],
+          timestamp: 1,
+        },
+      ],
+    };
+    expect(hasImageAttachment(imageContext)).toBe(true);
+    expect(hasImageAttachment(context('text only'))).toBe(false);
+  });
+});
+
+describe('eligible baseline routing', () => {
+  it('uses the fixed medium, high, low, micro order independently of text', () => {
+    const profile = allTierProfile();
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(BASELINE_TIER_ORDER).toEqual(['medium', 'high', 'low', 'micro']);
+    expect(
+      ['pwd', 'design a migration', 'да, сделай', '¿Puedes ayudar?', '!!!'].map(
+        () => selectBaselineRoute('p', profile, pairs).pair.tier,
+      ),
+    ).toEqual(['medium', 'medium', 'medium', 'medium', 'medium']);
+  });
+
+  it.each([
+    ['medium', 'medium'],
+    ['high', 'high'],
+    ['low', 'low'],
+    ['micro', 'micro'],
+  ] as const)(
+    'honors an explicit baselineTier %s',
+    (baselineTier, expected) => {
+      const profile = allTierProfile(baselineTier);
+      const pairs = availableRoutePairs(profile, findFixtureModel, false);
+      expect(selectBaselineRoute('p', profile, pairs).pair.tier).toBe(expected);
+    },
+  );
+
+  it('falls through the fixed order for partial profiles', () => {
+    const profile: RouterProfile = {
+      high: { model: 'test/high' },
+      low: { model: 'test/low' },
+    };
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(selectBaselineRoute('p', profile, pairs).pair.tier).toBe('high');
+  });
+
+  it('pins the configured tier without lifting or lowering it', () => {
+    const profile = allTierProfile('high');
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(selectBaselineRoute('p', profile, pairs, 'low')).toMatchObject({
+      pair: { tier: 'low' },
+      reasonCode: 'pinned',
+      isBudgetForced: false,
     });
+  });
 
-    it('match custom rule first', () => {
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content: 'Please force-high model',
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const decision = decideRouting(
-        context,
+  it('reports a deterministic error for an unavailable pin or profile', () => {
+    const profile: RouterProfile = { high: { model: 'test/high' } };
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(() => selectBaselineRoute('p', profile, pairs, 'micro')).toThrow(
+      'Pinned tier "micro" for profile "p" has no eligible model',
+    );
+    expect(() =>
+      selectBaselineRoute(
         'p',
-        profile,
+        { low: { model: 'test/missing' } },
+        [],
         undefined,
-        undefined,
-        undefined,
-        0.5,
-        rules,
-      );
-      expect(decision.tier).toBe('high');
-      expect(decision.isRuleMatched).toBe(true);
-      expect(decision.reasoning).toBe('High rule');
-    });
+      ),
+    ).toThrow('No eligible route for profile "p"');
+  });
 
-    it('match custom rule case-insensitively', () => {
-      const rulesWithCapitalCase = [
-        { matches: 'Force-High', tier: 'high' as const, reason: 'High rule' },
-      ];
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content: 'Please force-high model',
-            timestamp: Date.now(),
+  it('applies the soft budget policy only to unpinned requests', () => {
+    const profile = allTierProfile();
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(
+      selectBaselineRoute('p', profile, pairs, undefined, true),
+    ).toMatchObject({
+      pair: { tier: 'medium' },
+      reasonCode: 'budget',
+      isBudgetForced: true,
+    });
+    expect(
+      selectBaselineRoute('p', profile, pairs, 'high', true),
+    ).toMatchObject({
+      pair: { tier: 'high' },
+      reasonCode: 'pinned',
+    });
+  });
+
+  it('uses the best eligible lower tier when medium is absent above budget', () => {
+    const profile: RouterProfile = {
+      high: { model: 'test/high' },
+      low: { model: 'test/low' },
+    };
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(
+      selectBaselineRoute('p', profile, pairs, undefined, true),
+    ).toMatchObject({
+      pair: { tier: 'low' },
+      reasonCode: 'budget',
+      isBudgetForced: true,
+    });
+  });
+
+  it('retains an eligible high baseline with a fixed budget diagnostic if no lower route exists', () => {
+    const profile: RouterProfile = { high: { model: 'test/high' } };
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(
+      selectBaselineRoute('p', profile, pairs, undefined, true),
+    ).toMatchObject({
+      pair: { tier: 'high' },
+      reasonCode: 'budget',
+      isBudgetForced: false,
+    });
+  });
+});
+
+describe('route capability validation', () => {
+  it('filters input capabilities and effort before baseline selection', () => {
+    const imageOnly = {
+      high: { model: 'test/image', thinking: 'off' as const },
+    };
+    const imageModel = () =>
+      model('image', { input: ['image'], reasoning: false });
+    expect(availableRoutePairs(imageOnly, imageModel, false)).toEqual([]);
+    expect(availableRoutePairs(imageOnly, imageModel, true)).toEqual([
+      { tier: 'high', model: 'test/image', thinking: 'off' },
+    ]);
+
+    const effort = {
+      medium: { model: 'test/worker', thinking: 'high' as const },
+    };
+    expect(
+      availableRoutePairs(
+        effort,
+        () => model('worker', { thinkingLevelMap: { high: null } }),
+        false,
+      ),
+    ).toEqual([]);
+  });
+
+  it('defaults non-reasoning routes to off and rejects explicit effort', () => {
+    const profile: RouterProfile = {
+      medium: { model: 'test/worker' },
+    };
+    expect(
+      availableRoutePairs(
+        profile,
+        () => model('worker', { reasoning: false }),
+        false,
+      ),
+    ).toEqual([{ tier: 'medium', model: 'test/worker', thinking: 'off' }]);
+    expect(
+      validateRoutePair(
+        { tier: 'medium', model: 'test/worker', thinking: 'medium' },
+        () => model('worker', { reasoning: false }),
+        false,
+      ),
+    ).toBe(false);
+  });
+
+  it('retains each configured tier in thinking coverage checks', () => {
+    const profile = allTierProfile();
+    expect(
+      preservesRouteCoverage(profile, findFixtureModel, { low: 'high' }),
+    ).toBe(true);
+    expect(
+      preservesRouteCoverage(profile, findFixtureModel, { medium: 'medium' }),
+    ).toBe(true);
+  });
+
+  it('accepts a corrective thinking override when the default has no eligible route', () => {
+    const profile: RouterProfile = {
+      medium: { model: 'test/worker', thinking: 'high' },
+    };
+    const findModel = () => model('worker', { reasoning: false });
+    expect(availableRoutePairs(profile, findModel, false)).toEqual([]);
+    expect(preservesRouteCoverage(profile, findModel, { medium: 'off' })).toBe(
+      true,
+    );
+    expect(preservesRouteCoverage(profile, findModel, { medium: 'low' })).toBe(
+      false,
+    );
+  });
+
+  it('preserves existing input coverage when applying thinking overrides', () => {
+    const profile: RouterProfile = {
+      medium: { model: 'test/text' },
+      low: { model: 'test/image', thinking: 'off' },
+    };
+    const findModel = (_provider: string, id: string) =>
+      model(id, {
+        input: id === 'image' ? ['image'] : ['text'],
+        reasoning: id !== 'image',
+      });
+    expect(preservesRouteCoverage(profile, findModel, { low: 'high' })).toBe(
+      false,
+    );
+  });
+
+  it.each(ROUTER_TIERS)(
+    'offers the validated effective effort for a non-reasoning %s primary',
+    (tier) => {
+      const profile = required(
+        normalizeConfig({
+          profiles: { p: { [tier]: { model: 'test/worker' } } },
+        }).config.profiles.p,
+      );
+      const pairs = availableRoutePairs(
+        profile,
+        () => model('worker', { reasoning: false }),
+        false,
+      );
+      expect(primaryRoutePairs(profile, pairs)).toEqual([
+        { tier, model: 'test/worker', thinking: 'off' },
+      ]);
+    },
+  );
+
+  it('offers only primary candidates to advisors', () => {
+    const profile: RouterProfile = {
+      medium: { model: 'test/medium', fallbacks: ['test/backup'] },
+      low: { model: 'test/low' },
+    };
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(primaryRoutePairs(profile, pairs)).toEqual([
+      { tier: 'medium', model: 'test/medium', thinking: 'medium' },
+      { tier: 'low', model: 'test/low', thinking: 'low' },
+    ]);
+  });
+
+  it('parses normalized canonical refs directly and keeps fallback alias metadata', () => {
+    const config = normalizeConfig({
+      models: {
+        primary: { model: 'test/model-a' },
+        'test/model-a': { model: 'other/model-b' },
+        restricted: { model: 'test/fallback', thinkingLevels: ['high'] },
+        backup: { model: 'test/fallback', thinkingLevels: ['medium'] },
+      },
+      profiles: {
+        p: {
+          medium: {
+            model: 'primary',
+            fallbacks: ['restricted', 'backup'],
           },
-        ],
-      };
-      const decision = decideRouting(
-        context,
+        },
+      },
+    }).config;
+    const profile = required(config.profiles.p);
+    const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    expect(pairs).toEqual([
+      { tier: 'medium', model: 'test/model-a', thinking: 'medium' },
+      { tier: 'medium', model: 'test/fallback', thinking: 'medium' },
+    ]);
+    expect(profile.medium?.resolvedFallbacks).toEqual([
+      { model: 'test/fallback', thinkingLevels: ['high'] },
+      { model: 'test/fallback', thinkingLevels: ['medium'] },
+    ]);
+    expect(resolveRoutePair(profile, 'medium').model).toBe('test/model-a');
+  });
+});
+
+describe('routing decisions', () => {
+  it.each(ROUTER_TIERS)('maps %s to a stable phase', (tier) => {
+    expect(phaseForTier(tier)).toBe(
+      tier === 'high'
+        ? 'planning'
+        : tier === 'medium'
+          ? 'implementation'
+          : 'lightweight',
+    );
+  });
+
+  it('constructs continuation and fallback decisions without prompt data', () => {
+    expect(
+      decisionForPair(
         'p',
-        profile,
-        undefined,
-        undefined,
-        undefined,
-        0.5,
-        rulesWithCapitalCase,
-      );
-      expect(decision.tier).toBe('high');
-      expect(decision.isRuleMatched).toBe(true);
-      expect(decision.reasoning).toBe('High rule');
-    });
-
-    it('collect all matching rules and pick the highest tier', () => {
-      const rulesWithMultipleMatches = [
-        { matches: 'summary', tier: 'low' as const, reason: 'Low rule' },
-        { matches: 'refactor', tier: 'high' as const, reason: 'High rule' },
-      ];
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content: 'Please summarize the refactor',
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const decision = decideRouting(
-        context,
+        { tier: 'micro', model: 'test/micro', thinking: 'off' },
+        'continuation',
+      ).reasonCode,
+    ).toBe('continuation');
+    expect(
+      decisionForPair(
         'p',
-        profile,
-        undefined,
-        undefined,
-        undefined,
-        0.5,
-        rulesWithMultipleMatches,
-      );
-      expect(decision.tier).toBe('high');
-      expect(decision.isRuleMatched).toBe(true);
-      expect(decision.reasoning).toBe('High rule');
-    });
-
-    it('route explicit high/low hints', () => {
-      const contextHigh: Context = {
-        messages: [
-          {
-            role: 'user',
-            content: 'think hard step by step',
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const decisionHigh = decideRouting(contextHigh, 'p', profile, undefined);
-      expect(decisionHigh.tier).toBe('high');
-
-      const contextLow: Context = {
-        messages: [
-          { role: 'user', content: 'fast summary', timestamp: Date.now() },
-        ],
-      };
-      const decisionLow = decideRouting(contextLow, 'p', profile, undefined);
-      expect(decisionLow.tier).toBe('low');
-    });
-
-    it('downgrade high to medium if budget is exceeded', () => {
-      const context: Context = {
-        messages: [
-          { role: 'user', content: 'think hard', timestamp: Date.now() },
-        ],
-      };
-      const decision = decideRouting(
-        context,
-        'p',
-        profile,
-        undefined,
-        undefined,
-        undefined,
-        0.5,
-        undefined,
-        true,
-      );
-      expect(decision.tier).toBe('medium');
-      expect(decision.isBudgetForced).toBe(true);
-    });
-
-    it('maintain planning phase bias (stickiness)', () => {
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content: 'how to design this',
-            timestamp: Date.now(),
-          },
-          {
-            role: 'user',
-            content: 'we should design X',
-            timestamp: Date.now(),
-          },
-          { role: 'user', content: 'why X?', timestamp: Date.now() },
-        ],
-      };
-      const previous = buildRoutingDecision(
-        'p',
-        profile,
-        'high',
-        'planning',
-        'Initial plan',
-      );
-      const decision = decideRouting(context, 'p', profile, previous);
-      expect(decision.tier).toBe('high');
-      expect(decision.phase).toBe('planning');
-    });
-
-    it('keep planning phase bias when previous phase was planning, no tools, and word count > lowThreshold', () => {
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content:
-              'what about this particular scenario that we discussed earlier today',
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const previous = buildRoutingDecision(
-        'p',
-        profile,
-        'high',
-        'planning',
-        'Previous planning',
-      );
-      const decision = decideRouting(
-        context,
-        'p',
-        profile,
-        previous,
-        undefined,
-        undefined,
-        0.5,
-      );
-      expect(decision.tier).toBe('high');
-      expect(decision.phase).toBe('planning');
-      expect(decision.reasoning).toContain('planning-phase bias');
-    });
-
-    it('detect implementation from previous implementation phase', () => {
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content: 'ok next step',
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const previous = buildRoutingDecision(
-        'p',
-        profile,
-        'medium',
-        'implementation',
-        'Previous impl',
-      );
-      const decision = decideRouting(context, 'p', profile, previous);
-      expect(decision.tier).toBe('medium');
-      expect(decision.phase).toBe('implementation');
-      expect(decision.reasoning).toContain('implementation');
-    });
-
-    it('detect implementation from toolResultCount > 0', () => {
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content: 'ok next step',
-            timestamp: Date.now(),
-          },
-          {
-            role: 'toolResult',
-            toolCallId: '1',
-            toolName: 'read_file',
-            content: 'file contents',
-            isError: false,
-            timestamp: Date.now(),
-          } as unknown as Message,
-          {
-            role: 'user',
-            content: 'looks good proceed',
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const decision = decideRouting(context, 'p', profile, undefined);
-      expect(decision.tier).toBe('medium');
-      expect(decision.phase).toBe('implementation');
-      expect(decision.reasoning).toContain('implementation');
-    });
-
-    it('detect implementation from recent conversation containing plan:', () => {
-      const context: Context = {
-        messages: [
-          {
-            role: 'assistant',
-            content: 'Plan:\n1. Do X\n2. Do Y',
-            timestamp: Date.now(),
-          } as unknown as Message,
-          {
-            role: 'user',
-            content: 'sounds good lets go',
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const decision = decideRouting(context, 'p', profile, undefined);
-      expect(decision.tier).toBe('medium');
-      expect(decision.phase).toBe('implementation');
-      expect(decision.reasoning).toContain('implementation');
-    });
-
-    it('default to medium tier when no heuristic rules match for moderate-length prompts', () => {
-      const context: Context = {
-        messages: [
-          {
-            role: 'user',
-            content:
-              'i wonder about some random topic that doesnt match any particular keyword category here today now',
-            timestamp: Date.now(),
-          },
-        ],
-      };
-      const decision = decideRouting(context, 'p', profile, undefined);
-      expect(decision.tier).toBe('medium');
-      expect(decision.reasoning).toContain('Defaulted to medium');
-    });
+        { tier: 'low', model: 'test/low', thinking: 'low' },
+        'fallback',
+      ).reasonCode,
+    ).toBe('fallback');
   });
 });

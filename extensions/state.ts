@@ -14,6 +14,7 @@ import type {
   RouterPinByProfile,
   RoutingDecision,
 } from './types';
+import { isRoutingReasonCode } from './types';
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
 
@@ -30,20 +31,33 @@ const isModelRef = (value: unknown) => {
     return false;
   }
 };
+
+// Historical snapshots remain readable, but obsolete prompt-derived sources
+// are sanitized to `legacy` and never become live routing behavior again.
+const OBSOLETE_REASON_CODES = new Set([
+  'custom-rule',
+  'micro-mechanical',
+  'heuristic',
+  'safety-floor',
+  'budget-floor-conflict',
+]);
+const isPersistedReasonCode = (value: unknown): boolean =>
+  isRoutingReasonCode(value) ||
+  (typeof value === 'string' && OBSOLETE_REASON_CODES.has(value));
+
 const isDecision = (value: unknown): value is RoutingDecision =>
   isObjectRecord(value) &&
   isRouterTier(value.tier) &&
   isPhase(value.phase) &&
   isThinkingLevel(value.thinking) &&
   isFiniteNumber(value.timestamp) &&
-  [
-    'profile',
-    'targetProvider',
-    'targetModelId',
-    'targetLabel',
-    'reasoning',
-  ].every((key) => typeof value[key] === 'string') &&
-  ['isClassifier', 'isFallback', 'isBudgetForced', 'isRuleMatched'].every(
+  ['profile', 'targetProvider', 'targetModelId', 'targetLabel'].every(
+    (key) => typeof value[key] === 'string',
+  ) &&
+  (value.reasonCode === undefined
+    ? typeof value.reasoning === 'string'
+    : isPersistedReasonCode(value.reasonCode)) &&
+  ['isClassifier', 'isFallback', 'isBudgetForced'].every(
     (key) => value[key] === undefined || typeof value[key] === 'boolean',
   );
 const isMap = (value: unknown, validate: (entry: unknown) => boolean) =>
@@ -128,6 +142,35 @@ export const isRouterPersistedState = (
   );
 };
 
+// Copy only the decision contract, never incidental runtime properties.
+export const snapshotDecision = (
+  decision: RoutingDecision,
+): RoutingDecision => ({
+  profile: decision.profile,
+  tier: decision.tier,
+  phase: decision.phase,
+  targetProvider: decision.targetProvider,
+  targetModelId: decision.targetModelId,
+  targetLabel: decision.targetLabel,
+  reasonCode: isRoutingReasonCode(decision.reasonCode)
+    ? decision.reasonCode
+    : 'legacy',
+  routingLatencyMs:
+    isFiniteNumber(decision.routingLatencyMs) && decision.routingLatencyMs >= 0
+      ? decision.routingLatencyMs
+      : undefined,
+  errorClass:
+    decision.errorClass === 'advisor-unavailable' ||
+    decision.errorClass === 'deadline'
+      ? decision.errorClass
+      : undefined,
+  thinking: decision.thinking,
+  timestamp: decision.timestamp,
+  isClassifier: decision.isClassifier,
+  isFallback: decision.isFallback,
+  isBudgetForced: decision.isBudgetForced,
+});
+
 export const buildPersistedState = ({
   routerEnabled,
   selectedProfile,
@@ -154,9 +197,9 @@ export const buildPersistedState = ({
     thinkingByProfile: { ...thinkingByProfile },
     debugEnabled,
     widgetEnabled,
-    debugHistory,
+    debugHistory: debugHistory.map(snapshotDecision),
     lastPhase: lastDecision?.phase,
-    lastDecision,
+    lastDecision: lastDecision ? snapshotDecision(lastDecision) : undefined,
     lastNonRouterModel,
     accumulatedCost,
     timestamp: Date.now(),

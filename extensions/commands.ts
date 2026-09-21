@@ -15,6 +15,7 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
+import { preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
   RouterPinByProfile,
@@ -24,6 +25,7 @@ import type {
 } from './types';
 import {
   formatDecision,
+  formatDecisionSource,
   formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
@@ -171,7 +173,6 @@ export const registerCommands = (
       `Pins by profile: ${formatPinSummary(state.pinnedTierByProfile)}`,
       `Thinking overrides: ${formatThinkingSummary(state.thinkingByProfile)}`,
       `Widget: ${state.widgetEnabled ? 'on' : 'off'}`,
-      `Phase bias: ${state.currentConfig.phaseBias}`,
       `Session cost: $${state.accumulatedCost.toFixed(4)}` +
         (state.currentConfig.maxSessionBudget
           ? ` / $${state.currentConfig.maxSessionBudget.toFixed(2)}`
@@ -186,7 +187,9 @@ export const registerCommands = (
         `Last routed tier: ${state.lastDecision.tier}`,
         `Last phase: ${state.lastDecision.phase}`,
         `Last model: ${state.lastDecision.targetProvider}/${state.lastDecision.targetModelId} (${state.lastDecision.thinking})`,
-        `Reason: ${state.lastDecision.reasoning}`,
+        ...(formatDecisionSource(state.lastDecision)
+          ? [`Reason: ${formatDecisionSource(state.lastDecision)}`]
+          : []),
       );
     }
     if (state.lastConfigWarnings && state.lastConfigWarnings.length > 0) {
@@ -236,7 +239,7 @@ export const registerCommands = (
         [
           `Profile: ${currentProfile}`,
           `Pinned tier: ${state.pinnedTierByProfile[currentProfile] ?? 'auto'}`,
-          `Usage: /router pin <high|medium|low|auto>`,
+          `Usage: /router pin <high|medium|low|micro|auto>`,
         ].join('\n'),
         'info',
       );
@@ -245,7 +248,7 @@ export const registerCommands = (
     }
 
     if (args.length > 1) {
-      ctx.ui.notify('Usage: /router pin <high|medium|low|auto>', 'error');
+      ctx.ui.notify('Usage: /router pin <high|medium|low|micro|auto>', 'error');
       return;
     }
 
@@ -271,7 +274,7 @@ export const registerCommands = (
     ctx.ui.notify(
       nextTier
         ? `Router pinned to ${nextTier}`
-        : `Router pin cleared; heuristic routing restored`,
+        : `Router pin cleared; baseline routing restored`,
       'info',
     );
   };
@@ -323,7 +326,7 @@ export const registerCommands = (
         levelValue = requestedLevel;
       } else {
         ctx.ui.notify(
-          `Invalid tier: ${args[0]}. Use high, medium, or low.`,
+          `Invalid tier: ${args[0]}. Use high, medium, low, or micro.`,
           'error',
         );
         return;
@@ -332,7 +335,7 @@ export const registerCommands = (
 
     if (tier !== 'all' && !tier) {
       ctx.ui.notify(
-        `Invalid tier: ${tier}. Use high, medium, or low.`,
+        `Invalid tier: ${tier}. Use high, medium, low, or micro.`,
         'error',
       );
       return;
@@ -351,16 +354,29 @@ export const registerCommands = (
         : isThinkingLevel(levelValue)
           ? levelValue
           : undefined;
-    let overrides = state.thinkingByProfile[currentProfile];
-    if (!overrides) {
-      overrides = {};
-      state.thinkingByProfile[currentProfile] = overrides;
-    }
+    const overrides = { ...state.thinkingByProfile[currentProfile] };
     const tiers = tier === 'all' ? ROUTER_TIERS : [tier];
     for (const targetTier of tiers) {
       if (nextLevel) overrides[targetTier] = nextLevel;
       else delete overrides[targetTier];
     }
+    const activeProfile = state.currentConfig.profiles[currentProfile];
+    if (
+      nextLevel &&
+      activeProfile &&
+      preservesRouteCoverage(
+        activeProfile,
+        (provider, id) => ctx.modelRegistry.find(provider, id),
+        overrides,
+      ) === false
+    ) {
+      ctx.ui.notify(
+        `Router thinking unchanged: '${nextLevel}' leaves no eligible route.`,
+        'warning',
+      );
+      return;
+    }
+    state.thinkingByProfile[currentProfile] = overrides;
     if (Object.keys(overrides).length === 0) {
       delete state.thinkingByProfile[currentProfile];
     }
@@ -380,7 +396,7 @@ export const registerCommands = (
       if (unsupported.length > 0) {
         ctx.ui.notify(
           `Router thinking (${tier}) set to ${nextLevel}. ` +
-            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${nextLevel}'.`,
+            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${nextLevel}' and will be skipped when unsupported.`,
           'warning',
         );
       }
@@ -426,12 +442,12 @@ export const registerCommands = (
 
   const handleFix = async (args: string[], ctx: ExtensionContext) => {
     if (args.length !== 1) {
-      ctx.ui.notify('Usage: /router fix <high|medium|low>', 'error');
+      ctx.ui.notify('Usage: /router fix <high|medium|low|micro>', 'error');
       return;
     }
     const tier = args[0]?.toLowerCase();
     if (!isRouterTier(tier)) {
-      ctx.ui.notify('Usage: /router fix <high|medium|low>', 'error');
+      ctx.ui.notify('Usage: /router fix <high|medium|low|micro>', 'error');
       return;
     }
     if (!state.lastDecision) {
@@ -574,13 +590,13 @@ export const registerCommands = (
         }
         case 'fix': {
           const fixPrefix = subArgs[0] ?? '';
-          const items = ['high', 'medium', 'low']
-            .filter((t) => t.startsWith(fixPrefix.toLowerCase()))
-            .map((t) => ({
-              value: `fix ${t}`,
-              label: t,
-              description: `Correct decision and pin to ${t} tier`,
-            }));
+          const items = ROUTER_TIERS.filter((t) =>
+            t.startsWith(fixPrefix.toLowerCase()),
+          ).map((t) => ({
+            value: `fix ${t}`,
+            label: t,
+            description: `Correct decision and pin to ${t} tier`,
+          }));
           return items.length > 0 ? items : null;
         }
         case 'widget': {
@@ -657,7 +673,7 @@ export const registerCommands = (
               'Router Subcommands:',
               '  status                      Show current status, profile, pin, cost, and last decision.',
               '  profile [name]              Switch to a profile (enables router if off). Lists available if no name.',
-              '  pin <tier|auto>             Force a tier (high|medium|low) or set to auto.',
+              '  pin <tier|auto>             Force a tier (high|medium|low|micro) or set to auto.',
               '  thinking [tier] <level>     Override thinking level (off|minimal|...|max|auto). Not all tier models may support every level.',
               '  disable                     Disable the router and restore the last used non-router model.',
               '  fix <tier>                  Correct the last routing decision and pin that tier for the current profile.',
