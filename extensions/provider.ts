@@ -28,7 +28,7 @@ import {
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
 import {
   extractTextFromContent,
-  getLastUserText,
+  getBoundedRecentContext,
   hasImageAttachment,
 } from './context';
 import { createJevCandidate, runJev } from './jev';
@@ -337,6 +337,7 @@ export const registerRouterProvider = (
             throw new Error(`Unknown router profile: ${model.id}`);
           }
 
+          options?.signal?.throwIfAborted();
           state.selectedProfile = model.id;
           state.routerEnabled = true;
 
@@ -357,7 +358,6 @@ export const registerRouterProvider = (
               thinkingOverrides,
             );
           let pairs = available();
-          const previousDecision = state.lastDecision;
           const lastUserIndex = context.messages.findLastIndex(
             (entry) => entry.role === 'user',
           );
@@ -481,22 +481,31 @@ export const registerRouterProvider = (
           ) {
             rememberAdvisedTurn(turn);
             const started = performance.now();
-            const routingDeadline = started + 1500;
+            const jev = state.currentConfig.jev;
+            const useJev =
+              jev?.enabled &&
+              profile.jev?.enabled &&
+              jev.apiKey.trim().length > 0;
+            const routingDeadline = started + (useJev ? 1500 : 10_000);
             const candidates = primaryRoutePairs(
               profile,
               pairs,
               thinkingOverrides,
             ).map(createJevCandidate);
-            if (candidates.length > 1) {
-              let advised = false;
-              if (state.currentConfig.jev?.enabled && profile.jev?.enabled) {
+            if (candidates.length === 1 && candidates[0]) {
+              decision = decisionForPair(model.id, candidates[0], 'baseline');
+            } else if (candidates.length > 1) {
+              if (useJev && jev) {
                 const advice = await runJev(
                   {
-                    ...state.currentConfig.jev,
-                    timeoutMs: Math.min(750, state.currentConfig.jev.timeoutMs),
+                    ...jev,
+                    timeoutMs: Math.min(750, jev.timeoutMs),
                   },
                   {
-                    taskSummary: getLastUserText(context),
+                    taskSummary: getBoundedRecentContext(
+                      context,
+                      jev.maxStateChars,
+                    ),
                     candidates,
                     profile: profile.jev,
                     routingDeadline,
@@ -520,29 +529,39 @@ export const registerRouterProvider = (
                   )
                 ) {
                   decision = decisionForPair(model.id, candidate, 'jev');
-                  advised = true;
-                } else decision.errorClass = 'advisor-unavailable';
-              }
-              if (
-                !advised &&
-                state.currentConfig.classifierModel &&
-                performance.now() < routingDeadline
-              ) {
+                } else {
+                  const baseline = selectBaselineRoute(
+                    model.id,
+                    profile,
+                    pairs,
+                  );
+                  decision = decisionForPair(
+                    model.id,
+                    baseline.pair,
+                    baseline.reasonCode,
+                  );
+                  decision.errorClass = 'advisor-unavailable';
+                }
+              } else if (state.currentConfig.classifierModel) {
                 const classifier = state.currentConfig.classifierModel;
                 const result = await runClassifier(
                   classifier.model,
                   registry,
                   context,
-                  previousDecision?.profile === model.id
-                    ? previousDecision.phase
-                    : undefined,
+                  undefined,
                   classifier.thinking,
                   options?.signal,
                   routingDeadline,
                 ).catch(() => undefined);
                 options?.signal?.throwIfAborted();
+                pairs = available();
+                const baseline = selectBaselineRoute(model.id, profile, pairs);
+                decision = decisionForPair(
+                  model.id,
+                  baseline.pair,
+                  baseline.reasonCode,
+                );
                 if (result && performance.now() < routingDeadline) {
-                  pairs = available();
                   const pair = pairs.find(
                     (entry) => entry.tier === result.tier,
                   );

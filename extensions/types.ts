@@ -3,7 +3,7 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 // Descending routing complexity; all tier iteration and ranking derives here.
 export const ROUTER_TIERS = ['high', 'medium', 'low', 'micro'] as const;
 export type RouterTier = (typeof ROUTER_TIERS)[number];
-export type ClassifierTier = Exclude<RouterTier, 'micro'>;
+export type ClassifierTier = RouterTier;
 export type RouterPin = RouterTier | 'auto';
 export type RouterPhase = 'planning' | 'implementation' | 'lightweight';
 export type RouterPinByProfile = Partial<Record<string, RouterTier>>;

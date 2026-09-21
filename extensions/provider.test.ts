@@ -685,6 +685,142 @@ describe('Jev provider integration', () => {
     expect(s.delegate).toHaveBeenCalledTimes(3);
   });
 
+  it.each(['micro', 'low', 'medium', 'high'])(
+    'accepts semantic Jev selection of %s',
+    async (tier) => {
+      const s = setup();
+      enableAdvisors(s);
+      required(s.state.currentConfig.profiles.balanced).micro = {
+        model: 'test/small',
+      };
+      const fetch = mockChoice(tier);
+      await consume(s.stream(userContext('да, сделай')));
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(s.delegate).toHaveBeenCalledOnce();
+      expect(s.state.lastDecision).toMatchObject({ tier, reasonCode: 'jev' });
+    },
+  );
+
+  it.each(['да, сделай', 'yes', 'plese fix 日本語'])(
+    'sends bounded role-labelled history for %s',
+    async (text) => {
+      const s = setup();
+      enableAdvisors(s);
+      required(s.state.currentConfig.jev).maxStateChars = 300;
+      const fetch = mockChoice();
+      const context = toolContext(userContext('前の依頼: improve the parser'));
+      context.systemPrompt = 'PRIVATE_SYSTEM';
+      context.messages.push({ role: 'user', content: text, timestamp: 4 });
+      await consume(s.stream(context));
+      const body = JSON.parse(
+        String(fetch.mock.calls[0]?.[1]?.body),
+      ) as ChoiceRequest;
+      expect(body.state.untrustedTaskSummary).toContain(`user:\n${text}`);
+      expect(body.state.untrustedTaskSummary).toContain('user:\n前の依頼');
+      expect(body.state.untrustedTaskSummary).toContain(
+        'tool:\nuntrusted tool text',
+      );
+      expect(body.state.untrustedTaskSummary.length).toBeLessThanOrEqual(300);
+      expect(JSON.stringify(body)).not.toContain('PRIVATE_SYSTEM');
+      expect(JSON.stringify(body)).not.toContain(jevConfig.apiKey);
+    },
+  );
+
+  it.each([
+    'uncertain',
+    'invalid-id',
+    'low-confidence',
+    'http-error',
+    'malformed',
+    'transport-error',
+  ])(
+    'falls straight to baseline after active Jev %s, never to classifier',
+    async (kind) => {
+      const s = setup();
+      enableAdvisors(s);
+      const transport = vi.fn<typeof fetch>(async (_url, init) => {
+        if (kind === 'transport-error') throw new Error('private-test-key');
+        if (kind === 'http-error') return new Response('', { status: 500 });
+        if (kind === 'malformed') return new Response('{}');
+        const response = await choiceResponse(
+          init,
+          kind === 'uncertain' ? kind : 'high',
+        ).json();
+        if (kind === 'invalid-id')
+          response.answers.route.choice = 'foreign-model';
+        if (kind === 'low-confidence') response.answers.route.confidence = 0.1;
+        return new Response(JSON.stringify(response));
+      });
+      vi.stubGlobal('fetch', transport);
+      await consume(s.stream(userContext()));
+      expect(transport).toHaveBeenCalledOnce();
+      expect(s.delegate).toHaveBeenCalledOnce();
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'medium',
+        reasonCode: 'baseline',
+      });
+    },
+  );
+
+  it.each([true, false])(
+    'missing Jev key uses only the configured compatibility path (classifier=%s)',
+    async (classifier) => {
+      const s = setup();
+      enableAdvisors(s);
+      required(s.state.currentConfig.jev).apiKey = '';
+      const fetch = mockChoice();
+      if (classifier) {
+        required(s.state.currentConfig.profiles.balanced).micro = {
+          model: 'test/small',
+        };
+        s.delegate.mockReturnValueOnce(
+          done('Tier: micro\nReasoning: semantic selection'),
+        );
+      } else s.state.currentConfig.classifierModel = undefined;
+      await consume(s.stream(userContext()));
+      expect(fetch).not.toHaveBeenCalled();
+      expect(s.delegate).toHaveBeenCalledTimes(classifier ? 2 : 1);
+      expect(s.state.lastDecision).toMatchObject({
+        tier: classifier ? 'micro' : 'medium',
+        reasonCode: classifier ? 'classifier' : 'baseline',
+      });
+    },
+  );
+
+  it.each(['uncertain', 'unknown', 'micro'])(
+    'uses baseline for unavailable classifier choice %s',
+    async (tier) => {
+      const s = setup();
+      delete s.state.pinnedTierByProfile.balanced;
+      s.state.currentConfig.classifierModel = { model: 'test/small' };
+      s.delegate.mockReturnValueOnce(done(`Tier: ${tier}\nReasoning: ignored`));
+      const fetch = mockChoice();
+      await consume(s.stream(userContext()));
+      expect(fetch).not.toHaveBeenCalled();
+      expect(s.delegate).toHaveBeenCalledTimes(2);
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'medium',
+        reasonCode: 'baseline',
+      });
+    },
+  );
+
+  it('propagates caller abort during classifier-only advice without baseline generation', async () => {
+    const s = setup();
+    delete s.state.pinnedTierByProfile.balanced;
+    s.state.currentConfig.classifierModel = { model: 'test/small' };
+    const controller = new AbortController();
+    s.delegate.mockImplementationOnce(() => {
+      controller.abort();
+      return done('Tier: high\nReasoning: ignored');
+    });
+    const { result } = await consume(
+      s.stream(userContext(), controller.signal),
+    );
+    expect(result.stopReason).toBe('aborted');
+    expect(s.delegate).toHaveBeenCalledOnce();
+  });
+
   it('applies only a local allowlisted pair and delegates once through Pi', async () => {
     const s = setup();
     enableAdvisors(s);
@@ -719,6 +855,7 @@ describe('Jev provider integration', () => {
       if (kind === 'single')
         s.state.currentConfig.profiles.balanced = {
           medium: { model: 'test/primary' },
+          jev: { enabled: true },
         };
       if (kind === 'budget') {
         s.state.currentConfig.maxSessionBudget = 1;
@@ -1035,88 +1172,81 @@ describe('Jev provider integration', () => {
         return choiceResponse(init, 'high');
       }),
     );
-    s.delegate.mockReturnValueOnce(done('Tier: low\nReasoning: not allowed'));
     await consume(s.stream(userContext()));
     expect(s.state.lastDecision?.reasonCode).not.toBe('jev');
-    expect(s.state.lastDecision?.tier).toBe('low');
-  });
-
-  it('uses one 1500ms wall-clock deadline across a timed-out Jev and classifier', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(s.state.currentConfig.jev).timeoutMs = 500;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<typeof fetch>(() => new Promise(() => {})),
-    );
-    let classifierStarted = 0;
-    let classifierEnded = 0;
-    s.delegate.mockImplementationOnce((_model, _context, options) => {
-      classifierStarted = performance.now();
-      options?.signal?.addEventListener('abort', () => {
-        classifierEnded = performance.now();
-      });
-      return {
-        [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
-      } as AssistantMessageEventStream;
-    });
-    const start = performance.now();
-    const result = await consume(s.stream(userContext()));
-    const elapsed = performance.now() - start;
-    expect(result.result.stopReason).toBe('stop');
-    expect(classifierStarted - start).toBeGreaterThanOrEqual(450);
-    expect(classifierEnded - classifierStarted).toBeLessThan(1250);
-    expect(elapsed).toBeGreaterThanOrEqual(1400);
-    expect(elapsed).toBeLessThan(2100);
-    expect(s.delegate).toHaveBeenCalledTimes(2);
-    // AbortSignal's timer can fire fractionally before the performance deadline.
-    expect(['deadline', 'advisor-unavailable']).toContain(
-      s.state.lastDecision?.errorClass,
-    );
-  });
-
-  it('bounds classifier-only routing to 1500ms rather than the standalone 10s default', async () => {
-    const s = setup();
-    delete s.state.pinnedTierByProfile.balanced;
-    s.state.currentConfig.classifierModel = { model: 'test/small' };
-    let classifierSignal: AbortSignal | undefined;
-    s.delegate.mockImplementationOnce((_model, _context, options) => {
-      classifierSignal = options?.signal;
-      return {
-        [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
-      } as AssistantMessageEventStream;
-    });
-    const start = performance.now();
-    const { result } = await consume(s.stream(userContext()));
-    const elapsed = performance.now() - start;
-    expect(elapsed).toBeGreaterThanOrEqual(1400);
-    expect(elapsed).toBeLessThan(2100);
-    expect(classifierSignal?.aborted).toBe(true);
-    expect(result.stopReason).toBe('stop');
-    expect(s.delegate).toHaveBeenCalledTimes(2);
     expect(s.state.lastDecision?.tier).toBe('medium');
-    expect(['deadline', 'advisor-unavailable']).toContain(
-      s.state.lastDecision?.errorClass,
-    );
+    expect(s.delegate).toHaveBeenCalledOnce();
   });
 
-  it('caps Jev at 750ms even when configured longer, leaving only the shared remainder', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(s.state.currentConfig.jev).timeoutMs = 3000;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<typeof fetch>(() => new Promise(() => {})),
-    );
-    s.delegate.mockReturnValueOnce(
-      done('Tier: high\nReasoning: external text'),
-    );
-    const start = performance.now();
-    await consume(s.stream(userContext()));
-    const elapsed = performance.now() - start;
-    expect(elapsed).toBeGreaterThanOrEqual(700);
-    expect(elapsed).toBeLessThan(1200);
-    expect(s.state.lastDecision?.reasonCode).toBe('classifier');
+  it.each([500, 750, 3000])(
+    'bounds Jev to its 750ms cap (configured %i) and falls directly to baseline',
+    async (timeoutMs) => {
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'performance'],
+      });
+      try {
+        const s = setup();
+        enableAdvisors(s);
+        required(s.state.currentConfig.jev).timeoutMs = timeoutMs;
+        const transport = vi.fn<typeof fetch>(() => new Promise(() => {}));
+        vi.stubGlobal('fetch', transport);
+        const pending = consume(s.stream(userContext()));
+        await vi.advanceTimersByTimeAsync(0);
+        const cap = Math.min(timeoutMs, 750);
+        await vi.advanceTimersByTimeAsync(cap - 1);
+        expect(s.delegate).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect((await pending).result.stopReason).toBe('stop');
+        expect(transport).toHaveBeenCalledOnce();
+        expect(transport.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+        expect(s.delegate).toHaveBeenCalledOnce();
+        expect(s.state.lastDecision).toMatchObject({
+          tier: 'medium',
+          reasonCode: 'baseline',
+          errorClass: 'advisor-unavailable',
+          routingLatencyMs: cap,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('retains the independent 10-second classifier-only bound', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    try {
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      });
+      const s = setup();
+      delete s.state.pinnedTierByProfile.balanced;
+      s.state.currentConfig.classifierModel = { model: 'test/small' };
+      let classifierSignal: AbortSignal | undefined;
+      s.delegate.mockImplementationOnce((_model, _context, options) => {
+        classifierSignal = options?.signal;
+        return {
+          [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+        } as AssistantMessageEventStream;
+      });
+      const pending = consume(s.stream(userContext()));
+      await vi.advanceTimersByTimeAsync(9999);
+      expect(s.delegate).toHaveBeenCalledOnce();
+      expect(classifierSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await pending).result.stopReason).toBe('stop');
+      expect(classifierSignal?.aborted).toBe(true);
+      expect(s.delegate).toHaveBeenCalledTimes(2);
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'medium',
+        reasonCode: 'baseline',
+        errorClass: 'deadline',
+        routingLatencyMs: 10000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('cancels the request rather than starting local generation after advisor abort', async () => {
