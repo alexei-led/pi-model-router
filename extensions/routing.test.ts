@@ -832,12 +832,21 @@ describe('four-level local routing', () => {
     'Could you wipe the production database?',
     'Could you erase the deployment artifacts?',
     'Could you drop the production tables?',
-  ])('keeps polite destructive requests at a high floor: %s', (prompt) => {
-    expect(localSafetyFloor(context(prompt))).toBe('high');
-    expect(
-      decideRouting(context(prompt), 'p', profile, undefined, 'low'),
-    ).toMatchObject({ tier: 'high', reasonCode: 'pinned' });
-  });
+    'Can you add authentication to this API?',
+    'Could you write credential rotation for this service?',
+    'Can you refactor the authorization middleware?',
+  ])(
+    'keeps polite implementation and destructive requests at a high floor: %s',
+    (prompt) => {
+      expect(localSafetyFloor(context(prompt))).toBe('high');
+      expect(
+        decideRouting(context(prompt), 'p', profile, undefined),
+      ).toMatchObject({ tier: 'high', reasonCode: 'heuristic' });
+      expect(
+        decideRouting(context(prompt), 'p', profile, undefined, 'low'),
+      ).toMatchObject({ tier: 'high', reasonCode: 'pinned' });
+    },
+  );
 
   it('normalizes route identity and honors explicit thinking overrides', () => {
     expect(

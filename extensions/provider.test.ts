@@ -146,6 +146,33 @@ describe('router provider', () => {
     });
   });
 
+  it('delegates a normalized canonical model without resolving an alias collision again', async () => {
+    const s = setup();
+    required(s.models[0]).provider = 'openai';
+    required(s.models[0]).id = 'model-a';
+    s.state.currentConfig = normalizeConfig({
+      models: {
+        primary: { model: 'openai/model-a' },
+        'openai/model-a': { model: 'anthropic/model-b' },
+      },
+      profiles: { balanced: { medium: { model: 'primary' } } },
+    }).config;
+
+    const { result } = await consume(
+      s.stream(userContext('implement a parser')),
+    );
+    expect(result.stopReason).toBe('stop');
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.delegate.mock.calls[0]?.[0]).toMatchObject({
+      provider: 'openai',
+      id: 'model-a',
+    });
+    expect(s.state.lastDecision).toMatchObject({
+      targetProvider: 'openai',
+      targetModelId: 'model-a',
+    });
+  });
+
   it('reports actual capacities and re-registers when thinking capabilities change', () => {
     const s = setup();
     registerRouterProvider(s.api, s.state, s.actions);
@@ -673,23 +700,27 @@ describe('Jev provider integration', () => {
     },
   );
 
-  it('filters advisor candidates using the high floor for polite destructive requests', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
-      const body = JSON.parse(String(init?.body)) as ChoiceRequest;
-      const ids = Object.keys(body.questions.route.criteria);
-      expect(ids.every((id) => id.startsWith('high|'))).toBe(true);
-      return choiceResponse(init, 'high');
-    });
-    vi.stubGlobal('fetch', fetch);
-    const result = await consume(
-      s.stream(userContext('Could you wipe the production database?')),
-    );
-    expect(result.result.stopReason).toBe('stop');
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision?.tier).toBe('high');
-  });
+  it.each([
+    'Could you wipe the production database?',
+    'Can you add authentication to this API?',
+  ])(
+    'filters advisor candidates using the high floor for polite implementation and destructive requests: %s',
+    async (prompt) => {
+      const s = setup();
+      enableAdvisors(s);
+      const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as ChoiceRequest;
+        const ids = Object.keys(body.questions.route.criteria);
+        expect(ids.every((id) => id.startsWith('high|'))).toBe(true);
+        return choiceResponse(init, 'high');
+      });
+      vi.stubGlobal('fetch', fetch);
+      const result = await consume(s.stream(userContext(prompt)));
+      expect(result.result.stopReason).toBe('stop');
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(s.state.lastDecision?.tier).toBe('high');
+    },
+  );
 
   it('keeps interleaved stream continuations keyed to their originating turn', async () => {
     const s = setup();

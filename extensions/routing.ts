@@ -4,7 +4,7 @@ import {
   getSupportedThinkingLevels,
   type Model,
 } from '@earendil-works/pi-ai';
-import { parseCanonicalModelRef, resolveModelRef } from './config';
+import { parseCanonicalModelRef } from './config';
 import {
   containsAny,
   countToolResults,
@@ -64,6 +64,16 @@ const isImplementationFollowUp = (prompt: string): boolean =>
     prompt,
   );
 
+const hasImplementationIntent = (prompt: string): boolean =>
+  /\b(?:implement(?:ation|ing)?|fix(?:es|ing)?|updat(?:e|ing)|edit(?:s|ing)?|writ(?:e|ing)|add(?:s|ing)?|modif(?:y|ies|ying)|refactor(?:s|ing)?|patch(?:es|ing)?|chang(?:e|es|ing)?|replac(?:e|es|ing)?|remov(?:e|es|ing)?|debug(?:s|ging)?|bug(?:s)?)\b/i.test(
+    prompt,
+  );
+
+const hasImplementationKeywords = (prompt: string): boolean =>
+  /\b(?:implement(?:ation|ing)?|cod(?:e|ing)|fix(?:es|ing)?|updat(?:e|ing)|edit(?:s|ing)?|writ(?:e|ing)|add(?:s|ing)?|modif(?:y|ies|ying)|refactor(?:s|ing)?|patch(?:es|ing)?|chang(?:e|es|ing)|replac(?:e|es|ing)|remov(?:e|es|ing)|debug(?:s|ging)?|bug(?:s)?|tests?)\b/.test(
+    prompt,
+  );
+
 const isInformationalPrompt = (prompt: string): boolean =>
   (/^(?:what|which|where|who|when|does|do|is|are|can|could|would|how|why|explain|tell me about)\b/i.test(
     prompt,
@@ -71,6 +81,7 @@ const isInformationalPrompt = (prompt: string): boolean =>
     /^(?:please\s+)?(?:summar(?:ize|y)|recap|tl;?dr|show|list|find|grep)\b/i.test(
       prompt,
     )) &&
+  !hasImplementationIntent(prompt) &&
   !/\b(?:fix|implement|apply|change|delete|destroy|deploy|migrat\w*|remove|run|execute|configure|rotate|patch|wipe|erase|drop)\b/i.test(
     prompt,
   );
@@ -95,12 +106,7 @@ const safetyFloorForPrompt = (prompt: string): RouterTier => {
   )
     return 'high';
   if (isMechanicalTask(prompt)) return 'micro';
-  if (
-    !isInformationalPrompt(prompt) &&
-    /\b(?:implement(?:ation|ing)?|cod(?:e|ing)|fix(?:es|ing)?|updat(?:e|ing)|edit(?:s|ing)?|writ(?:e|ing)|add(?:s|ing)?|modif(?:y|ies|ying)|refactor(?:s|ing)?|patch(?:es|ing)?|chang(?:e|es|ing)|replac(?:e|es|ing)|remov(?:e|es|ing)|debug(?:s|ging)?|bug(?:s)?|tests?)\b/.test(
-      prompt,
-    )
-  )
+  if (!isInformationalPrompt(prompt) && hasImplementationKeywords(prompt))
     return 'medium';
   return isImplementationFollowUp(prompt) ? 'medium' : 'low';
 };
@@ -476,7 +482,7 @@ export const availableRoutePairs = (
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   imageAttached: boolean,
   thinkingOverrides?: RouterThinkingByTier,
-  models?: Record<string, ModelDefinition>,
+  _models?: Record<string, ModelDefinition>,
 ): RoutePair[] =>
   ROUTER_TIERS.flatMap((tier) => {
     const config = profile[tier];
@@ -485,18 +491,13 @@ export const availableRoutePairs = (
     return [primary.model, ...(config.fallbacks ?? [])]
       .flatMap((ref, index) => {
         try {
-          const resolved = resolveModelRef(ref, models ?? {});
-          const { provider, modelId } = parseCanonicalModelRef(
-            resolved.canonicalRef,
-          );
+          // Tier and fallback references are canonicalized during config
+          // normalization. Parse them directly so a canonical-looking alias
+          // cannot resolve a second time to a different provider.
+          const { provider, modelId } = parseCanonicalModelRef(ref);
           const model = findModel(provider, modelId);
-          const fallback = config.resolvedFallbacks?.[index - 1];
           const ownConfig =
-            index === 0
-              ? config
-              : fallback?.model === resolved.canonicalRef
-                ? fallback
-                : resolved.definition;
+            index === 0 ? config : config.resolvedFallbacks?.[index - 1];
           // A non-reasoning model defaults to off, but explicit unsupported effort is rejected.
           const thinking =
             thinkingOverrides?.[tier] ??
