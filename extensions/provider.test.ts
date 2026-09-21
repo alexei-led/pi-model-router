@@ -62,7 +62,6 @@ const setup = () => {
     thinkingByProfile: {},
     pinnedTierByProfile: { balanced: 'medium' },
     accumulatedCost: 0,
-    authenticationIdentity: 'test-account-generation-1',
   };
   const register = vi.fn<ExtensionAPI['registerProvider']>();
   const api = { registerProvider: register } as unknown as ExtensionAPI;
@@ -662,8 +661,13 @@ describe('Jev provider integration', () => {
     const secondGate = new Promise<void>((resolve) => {
       releaseSecond = resolve;
     });
+    enableAdvisors(s);
+    const fetch = mockChoice('low');
+    fetch.mockImplementationOnce(async (_url, init) =>
+      choiceResponse(init, 'high'),
+    );
     const firstAssistant = toolMessage('test', 'primary');
-    const secondAssistant = toolMessage('test', 'primary');
+    const secondAssistant = toolMessage('test', 'small');
     s.delegate
       .mockImplementationOnce(() => gatedFinishTool(firstGate, firstAssistant))
       .mockImplementationOnce(() =>
@@ -681,8 +685,23 @@ describe('Jev provider integration', () => {
     await consume(
       s.stream(toolContext(userContext('implement first', 1), firstAssistant)),
     );
-    expect(s.state.lastDecision?.reasonCode).toBe('continuation');
-    expect(s.delegate).toHaveBeenCalledTimes(3);
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      targetLabel: 'test/primary',
+      reasonCode: 'continuation',
+    });
+    await consume(
+      s.stream(
+        toolContext(userContext('implement second', 2), secondAssistant),
+      ),
+    );
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'low',
+      targetLabel: 'test/small',
+      reasonCode: 'continuation',
+    });
+    expect(s.delegate).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it.each(['micro', 'low', 'medium', 'high'])(
@@ -885,7 +904,7 @@ describe('Jev provider integration', () => {
   });
 
   it.each(['test', 'google'])(
-    'reuses a validated %s tool route before either advisor',
+    'reuses a validated %s tool route on ordinary Pi hosts without an auth identity API',
     async (provider) => {
       const s = setup();
       enableAdvisors(s);
@@ -905,43 +924,70 @@ describe('Jev provider integration', () => {
     },
   );
 
-  it('does not reuse a continuation when authentication identity is unavailable', async () => {
-    const s = setup();
-    delete s.state.authenticationIdentity;
-    delete s.state.pinnedTierByProfile.balanced;
-    const fetch = mockChoice();
-    s.state.currentConfig.classifierModel = undefined;
-    required(s.state.currentConfig.profiles.balanced).jev = { enabled: true };
-    s.state.currentConfig.jev = { ...jevConfig };
-    s.delegate.mockReturnValueOnce(finishTool());
-    await consume(s.stream(userContext()));
-    await consume(s.stream(toolContext()));
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision?.reasonCode).not.toBe('continuation');
-  });
+  it.each(['jev', 'classifier'] as const)(
+    'clears stale %s diagnostics on a reused continuation',
+    async (source) => {
+      const s = setup();
+      enableAdvisors(s);
+      if (source === 'jev') {
+        const fetch = vi.fn<typeof globalThis.fetch>(
+          () => new Promise(() => {}),
+        );
+        vi.stubGlobal('fetch', fetch);
+      } else {
+        s.state.currentConfig.jev = undefined;
+        s.delegate.mockReturnValueOnce(
+          done('Tier: medium\nReasoning: semantic selection'),
+        );
+      }
+      s.delegate.mockReturnValueOnce(finishTool());
+      await consume(s.stream(userContext()));
+      expect(s.state.lastDecision?.routingLatencyMs).toBeGreaterThanOrEqual(0);
+      if (source === 'jev')
+        expect(s.state.lastDecision?.errorClass).toBe('advisor-unavailable');
+      else expect(s.state.lastDecision?.isClassifier).toBe(true);
+      await consume(s.stream(toolContext()));
+      expect(s.state.lastDecision?.reasonCode).toBe('continuation');
+      expect(s.state.lastDecision?.isClassifier).toBeUndefined();
+      expect(s.state.lastDecision?.routingLatencyMs).toBeUndefined();
+      expect(s.state.lastDecision?.errorClass).toBeUndefined();
+    },
+  );
 
-  it('clears stale advisor diagnostics on a reused continuation', async () => {
+  it('bounds continuation history to the last 16 completed turns', async () => {
     const s = setup();
-    delete s.state.pinnedTierByProfile.balanced;
-    const fetch = vi.fn<typeof globalThis.fetch>(() => new Promise(() => {}));
-    vi.stubGlobal('fetch', fetch);
-    s.state.currentConfig.classifierModel = undefined;
-    required(s.state.currentConfig.profiles.balanced).jev = { enabled: true };
-    s.state.currentConfig.jev = { ...jevConfig };
-    s.delegate.mockReturnValueOnce(finishTool());
-    await consume(s.stream(userContext()));
-    expect(s.state.lastDecision?.errorClass).toBe('advisor-unavailable');
-    await consume(s.stream(toolContext()));
-    expect(s.state.lastDecision?.reasonCode).toBe('continuation');
-    expect(s.state.lastDecision?.routingLatencyMs).toBeUndefined();
-    expect(s.state.lastDecision?.errorClass).toBeUndefined();
+    enableAdvisors(s);
+    const fetch = mockChoice('low');
+    for (let timestamp = 1; timestamp <= 17; timestamp++) {
+      s.delegate.mockReturnValueOnce(finishTool(toolMessage('test', 'small')));
+      await consume(s.stream(userContext('same task', timestamp)));
+    }
+    await consume(
+      s.stream(
+        toolContext(userContext('same task', 2), toolMessage('test', 'small')),
+      ),
+    );
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'low',
+      reasonCode: 'continuation',
+    });
+    await consume(
+      s.stream(
+        toolContext(userContext('same task', 1), toolMessage('test', 'small')),
+      ),
+    );
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'baseline',
+    });
+    expect(fetch).toHaveBeenCalledTimes(17);
   });
 
   it.each([
     'tool-id',
     'user-identity',
     'profile',
-    'account',
+    'provider',
     'branch',
     'branch-rewind',
     'pin',
@@ -965,7 +1011,7 @@ describe('Jev provider integration', () => {
       if (kind === 'user-identity')
         context = toolContext(userContext('implement a parser', 99));
       if (kind === 'profile') required(s.state.lastDecision).profile = 'other';
-      if (kind === 'account') {
+      if (kind === 'provider') {
         required(s.state.currentConfig.profiles.balanced).medium = {
           model: 'work/primary',
         };
@@ -1107,7 +1153,7 @@ describe('Jev provider integration', () => {
       required(s.models[0]).provider = 'google';
       const first = userContext('implement a parser');
       const assistant = toolMessage('google');
-      // The soft budget outranks the high pin on the continuation.
+      // The explicit pin remains authoritative after crossing the soft budget.
       s.state.pinnedTierByProfile.balanced = 'high';
       s.delegate.mockReturnValueOnce(finishTool(assistant));
       await consume(s.stream(first));

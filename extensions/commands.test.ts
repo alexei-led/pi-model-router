@@ -653,7 +653,7 @@ describe('commands.ts', () => {
       expect(actions.syncPiThinkingLevel).toHaveBeenCalledWith('medium');
     });
 
-    it.each(['high-floor', 'image'] as const)(
+    it.each(['thinking', 'image'] as const)(
       'rejects overrides that remove configured %s coverage atomically',
       async (capability) => {
         const { state, actions, ctx, cmd } = setup();

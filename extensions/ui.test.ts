@@ -81,6 +81,21 @@ describe('ui.ts', () => {
     expect(lines).toContain('Source: baseline');
   });
 
+  it.each(['pinned', 'budget'] as const)(
+    'does not display a stale %s route as matching a new pin',
+    (reasonCode) => {
+      const ctx = context();
+      render(ctx, {
+        pinnedTierByProfile: { p: 'high' },
+        lastDecision: { ...decision, reasonCode },
+      });
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        'router',
+        '🚥 router:p [pin:high] -> waiting',
+      );
+    },
+  );
+
   it('shows waiting for a mismatched profile and fallback when disabled', () => {
     const ctx = context();
     render(ctx, {

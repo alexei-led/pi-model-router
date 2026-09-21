@@ -198,8 +198,6 @@ export const registerRouterProvider = (
     accumulatedCost: number;
     /** Override for the registry wait timeout (for testing). */
     readonly registryTimeoutMs?: number;
-    /** Stable non-secret auth generation supplied by the host, when available. */
-    readonly authenticationIdentity?: string;
   },
   actions: {
     persistState: () => void;
@@ -277,7 +275,6 @@ export const registerRouterProvider = (
     decision: RoutingDecision;
     toolCalls: Set<string>;
     config: RouterConfig;
-    authenticationIdentity: string;
   };
   // Streams can complete out of order. Keep a small turn-keyed history rather
   // than letting the latest stream replace another stream's continuation.
@@ -382,9 +379,8 @@ export const registerRouterProvider = (
                   entry.customType !== 'router-state',
               )
               .map((entry) => entry.id) ?? [];
-          // Continuation reuse is safe only when the host supplies a stable,
-          // non-secret identity for the request authentication generation.
-          const authenticationIdentity = state.authenticationIdentity;
+          // Pi resolves authentication per request. This validates provider/model
+          // identity, not the backend account behind that provider.
           const policy = JSON.stringify([
             model.id,
             profile,
@@ -392,7 +388,6 @@ export const registerRouterProvider = (
             thinkingOverrides,
             state.currentConfig.classifierModel,
             isBudgetExceeded,
-            authenticationIdentity,
           ]);
           const toolContinuation =
             context.messages.at(-1)?.role === 'toolResult';
@@ -412,9 +407,6 @@ export const registerRouterProvider = (
             continuationDecision &&
             turn &&
             continuationRecord.turn === turn &&
-            authenticationIdentity !== undefined &&
-            continuationRecord.authenticationIdentity ===
-              authenticationIdentity &&
             continuationRecord.policy === policy &&
             continuationRecord.config === state.currentConfig &&
             continuationDecision?.profile === model.id &&
@@ -447,6 +439,7 @@ export const registerRouterProvider = (
               ...continuationDecision,
               reasonCode: 'continuation',
               // Advisor diagnostics describe the original routing attempt only.
+              isClassifier: undefined,
               routingLatencyMs: undefined,
               errorClass: undefined,
               timestamp: Date.now(),
@@ -789,7 +782,6 @@ export const registerRouterProvider = (
                       branch,
                       decision,
                       config: state.currentConfig,
-                      authenticationIdentity: authenticationIdentity ?? '',
                       toolCalls: new Set(
                         event.message.content.flatMap((entry) =>
                           entry.type === 'toolCall' ? [entry.id] : [],

@@ -75,11 +75,7 @@ export const updateStatus = (
   if (activeRouterProfile) {
     const matchesProfile =
       lastDecision && lastDecision.profile === activeRouterProfile;
-    const matchesPin = activePin
-      ? lastDecision?.tier === activePin ||
-        lastDecision?.reasonCode === 'pinned' ||
-        lastDecision?.reasonCode === 'budget'
-      : true;
+    const matchesPin = !activePin || lastDecision?.tier === activePin;
 
     let statusText: string;
     if (lastDecision && matchesProfile && matchesPin) {

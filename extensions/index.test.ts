@@ -1,5 +1,8 @@
 import { normalizeContext } from '@earendil-works/pi-ai';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+} from '@earendil-works/pi-coding-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import routerExtension from './index';
 import { done, model } from './test/fixtures';
@@ -102,6 +105,16 @@ describe('index.ts (orchestrator)', () => {
       notify: vi.fn(),
     },
   });
+
+  const notifyDiagnostics = async (ctx: ReturnType<typeof buildMockCtx>) => {
+    const command = mockPi.registerCommand.mock.calls.find(
+      ([name]) => name === 'router',
+    )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1] | undefined;
+    if (!command) throw new Error('Missing router command');
+    for (const args of ['status', 'debug show'])
+      await command.handler(args, ctx as unknown as ExtensionCommandContext);
+    expect(ctx.ui.notify).toHaveBeenCalled();
+  };
 
   it('passes only public status fields across the UI boundary', async () => {
     stateMocks.advisors = {
@@ -236,7 +249,9 @@ describe('index.ts (orchestrator)', () => {
           lastDecision: { reasonCode: expectedSource },
           debugHistory: [{ reasonCode: expectedSource }],
         });
+        await notifyDiagnostics(ctx);
         const output = JSON.stringify([
+          ctx.ui.notify.mock.calls,
           mockPi.appendEntry.mock.calls,
           ctx.ui.setStatus.mock.calls,
           ctx.ui.setWidget.mock.calls,
@@ -257,63 +272,85 @@ describe('index.ts (orchestrator)', () => {
     },
   );
 
-  it('sanitizes legacy decisions and debug history at the actual appendEntry boundary', async () => {
-    routerExtension(mockPi);
-    const ctx = buildMockCtx();
-    const leaked =
-      'private-key https://remote.invalid task transcript classifier explanation';
-    const oldDecision = {
-      profile: 'balanced',
-      tier: 'high',
-      phase: 'planning',
-      targetProvider: 'openai',
-      targetModelId: 'gpt-4o',
-      targetLabel: 'openai/gpt-4o',
-      thinking: 'high',
-      timestamp: 1,
-      reasoning: leaked,
-      apiKey: leaked,
-      endpoint: leaked,
-      rawResponse: leaked,
-    };
-    const saved = {
-      enabled: true,
-      selectedProfile: 'balanced',
-      timestamp: 1,
-      lastDecision: oldDecision,
-      debugHistory: [oldDecision],
-      widgetEnabled: true,
-    };
-    ctx.sessionManager.getBranch = () => [
-      { type: 'custom', customType: 'router-state', data: saved },
-    ];
-    for (const handler of handlersFor('session_start'))
-      await handler({ reason: 'switch' }, ctx);
-    expect(mockPi.appendEntry).toHaveBeenCalledWith(
-      'router-state',
-      expect.objectContaining({
-        lastDecision: expect.objectContaining({ reasonCode: 'legacy' }),
-        debugHistory: [expect.objectContaining({ reasonCode: 'legacy' })],
-      }),
-    );
-    for (const handler of handlersFor('thinking_level_select'))
-      await handler({ level: 'low' }, ctx);
-    const output = JSON.stringify([
-      mockPi.appendEntry.mock.calls,
-      ctx.ui.setStatus.mock.calls,
-      ctx.ui.setWidget.mock.calls,
-    ]);
-    for (const text of [
-      'private-key',
-      'remote.invalid',
-      'task transcript',
-      'classifier explanation',
-      'reasoning',
-      'rawResponse',
-    ])
-      expect(output).not.toContain(text);
-    expect(saved.lastDecision.reasoning).toBe(leaked);
-  });
+  it.each([
+    undefined,
+    'custom-rule',
+    'micro-mechanical',
+    'heuristic',
+    'safety-floor',
+    'budget-floor-conflict',
+  ])(
+    'sanitizes historical source %s at append, notification and status boundaries',
+    async (reasonCode) => {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      const leaked =
+        'private-key https://remote.invalid task transcript classifier explanation';
+      const oldDecision = {
+        profile: 'balanced',
+        tier: 'high',
+        phase: 'planning',
+        targetProvider: 'openai',
+        targetModelId: 'gpt-4o',
+        targetLabel: 'openai/gpt-4o',
+        thinking: 'high',
+        timestamp: 1,
+        reasonCode,
+        reasoning: leaked,
+        apiKey: leaked,
+        endpoint: leaked,
+        rawResponse: leaked,
+      };
+      const saved = {
+        enabled: true,
+        selectedProfile: 'balanced',
+        timestamp: 1,
+        pinByProfile: { balanced: 'high' },
+        thinkingByProfile: { balanced: { high: 'high' } },
+        accumulatedCost: 1.25,
+        debugEnabled: true,
+        lastDecision: oldDecision,
+        debugHistory: [oldDecision],
+        widgetEnabled: true,
+      };
+      ctx.sessionManager.getBranch = () => [
+        { type: 'custom', customType: 'router-state', data: saved },
+      ];
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'switch' }, ctx);
+      expect(mockPi.appendEntry).toHaveBeenCalledWith(
+        'router-state',
+        expect.objectContaining({
+          pinByProfile: { balanced: 'high' },
+          thinkingByProfile: { balanced: { high: 'high' } },
+          accumulatedCost: 1.25,
+          debugEnabled: true,
+          widgetEnabled: true,
+          lastDecision: expect.objectContaining({ reasonCode: 'legacy' }),
+          debugHistory: [expect.objectContaining({ reasonCode: 'legacy' })],
+        }),
+      );
+      for (const handler of handlersFor('thinking_level_select'))
+        await handler({ level: 'low' }, ctx);
+      await notifyDiagnostics(ctx);
+      const output = JSON.stringify([
+        ctx.ui.notify.mock.calls,
+        mockPi.appendEntry.mock.calls,
+        ctx.ui.setStatus.mock.calls,
+        ctx.ui.setWidget.mock.calls,
+      ]);
+      for (const text of [
+        'private-key',
+        'remote.invalid',
+        'task transcript',
+        'classifier explanation',
+        'reasoning',
+        'rawResponse',
+      ])
+        expect(output).not.toContain(text);
+      expect(saved.lastDecision.reasoning).toBe(leaked);
+    },
+  );
 
   it('does not restore an unknown reason code into the append or UI paths', async () => {
     routerExtension(mockPi);
@@ -572,7 +609,7 @@ describe('index.ts (orchestrator)', () => {
       },
     );
 
-    it.each(['high-floor', 'image'] as const)(
+    it.each(['thinking', 'image'] as const)(
       'preserves configured %s coverage when selecting thinking',
       async (capability) => {
         routerExtension(mockPi);
