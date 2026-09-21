@@ -70,7 +70,6 @@ describe('commands.ts', () => {
 
   const buildDefaultState = (): MutableCommandState => {
     const config: RouterConfig = normalizeConfig({
-      phaseBias: 0.5,
       profiles: {
         balanced: {
           high: { model: 'openai/gpt-4o' },
@@ -89,7 +88,7 @@ describe('commands.ts', () => {
       targetProvider: 'openai',
       targetModelId: 'gpt-4o-mini',
       targetLabel: 'openai/gpt-4o-mini',
-      reasonCode: 'heuristic',
+      reasonCode: 'baseline',
       thinking: 'medium',
       timestamp: Date.now(),
     };
@@ -668,13 +667,7 @@ describe('commands.ts', () => {
                   ? ['text']
                   : ['text', 'image'],
               thinkingLevelMap: {
-                low: (
-                  capability === 'high-floor'
-                    ? id === 'gpt-4o'
-                    : id !== 'gpt-4o'
-                )
-                  ? null
-                  : 'low',
+                low: id === 'gpt-4o' || id === 'gpt-4o-mini' ? null : 'low',
               },
             }),
         );

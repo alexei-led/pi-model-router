@@ -40,12 +40,6 @@ export const getRecentConversationText = (
     .join('\n')
     .toLowerCase();
 
-export const countToolResults = (context: Context): number =>
-  context.messages.filter((message) => message?.role === 'toolResult').length;
-
-export const countWords = (text: string): number =>
-  text.split(/\s+/).filter(Boolean).length;
-
 export const hasImageAttachment = (context: Context): boolean =>
   context.messages.some(
     (message) =>
@@ -53,6 +47,3 @@ export const hasImageAttachment = (context: Context): boolean =>
       Array.isArray(message.content) &&
       message.content.some((part) => part.type === 'image'),
   );
-
-export const containsAny = (text: string, keywords: string[]): boolean =>
-  keywords.some((keyword) => text.includes(keyword));

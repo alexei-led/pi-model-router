@@ -306,18 +306,16 @@ describe('config.ts', () => {
       });
     });
 
-    it('normalize rules, profiles, phaseBias, budget, classifierModel', () => {
+    it('normalizes baselineTier and deprecates prompt-derived routing fields', () => {
       const raw = {
         debug: true,
         phaseBias: 0.8,
         maxSessionBudget: 5.5,
         classifierModel: 'gpt4',
-        rules: [
-          { matches: 'test', tier: 'high', reason: 'Rule reason' },
-          { matches: ['foo', 'bar'], tier: 'low' },
-        ],
+        rules: [{ matches: 'private-value', tier: 'high' }],
         profiles: {
           balanced: {
+            baselineTier: 'high',
             high: { model: 'google/gemini-2.5-pro' },
           },
         },
@@ -329,12 +327,15 @@ describe('config.ts', () => {
       const { config, warnings } = normalizeConfig(
         raw as unknown as RouterConfig,
       );
-      expect(warnings).toEqual([]);
+      expect(warnings).toEqual([
+        'Deprecated router config field "phaseBias" ignored.',
+        'Deprecated router config field "rules" ignored.',
+      ]);
+      expect(JSON.stringify(warnings)).not.toContain('private-value');
       expect(config.debug).toBe(true);
-      expect(config.phaseBias).toBe(0.8);
       expect(config.maxSessionBudget).toBe(5.5);
       expect(config.classifierModel?.model).toBe('openai/gpt-4o');
-      expect(config.rules?.length).toBe(2);
+      expect(config.profiles.balanced?.baselineTier).toBe('high');
       expect(config.profiles.balanced?.high?.model).toBe(
         'google/gemini-2.5-pro',
       );
@@ -633,9 +634,7 @@ describe('micro config compatibility', () => {
         expect(config.profiles.p?.[tier]?.thinking).toBe(
           tier === 'micro' ? 'off' : 'medium',
         );
-        expect(warnings.length).toBe(
-          (thinking ? 1 : 0) + (tier === 'high' ? 0 : 1),
-        );
+        expect(warnings.length).toBe(thinking ? 1 : 0);
       }
     },
   );
@@ -679,17 +678,43 @@ describe('micro config compatibility', () => {
     expect(old?.micro).toBeUndefined();
   });
 
-  it('accepts micro-only profiles and micro rules, including explicit effort', () => {
+  it('accepts micro-only profiles and an explicit baseline tier', () => {
     const { config, warnings } = normalizeConfig({
-      profiles: { p: { micro: { model: 'test/tiny', thinking: 'minimal' } } },
-      rules: [{ matches: 'pwd', tier: 'micro' }],
+      profiles: {
+        p: {
+          baselineTier: 'micro',
+          micro: { model: 'test/tiny', thinking: 'minimal' },
+        },
+      },
     });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('medium or high safety floors');
+    expect(warnings).toEqual([]);
+    expect(config.profiles.p?.baselineTier).toBe('micro');
     expect(config.profiles.p?.micro?.thinking).toBe('minimal');
-    expect(config.rules?.[0]?.tier).toBe('micro');
     expect(isRouterTier('micro')).toBe(true);
   });
+
+  it.each([undefined, 'high', 'unknown'])(
+    'ignores a baseline tier that is not a configured valid tier: %s',
+    (baselineTier) => {
+      const { config, warnings } = normalizeConfig({
+        profiles: {
+          p: {
+            ...(baselineTier === undefined ? {} : { baselineTier }),
+            high: { model: 'test/high' },
+          },
+        },
+      });
+      if (baselineTier === undefined || baselineTier === 'high') {
+        expect(config.profiles.p?.baselineTier).toBe(baselineTier);
+        expect(warnings).toEqual([]);
+      } else {
+        expect(config.profiles.p?.baselineTier).toBeUndefined();
+        expect(warnings).toEqual([
+          'Profile "p" baselineTier must name a configured tier. Ignored.',
+        ]);
+      }
+    },
+  );
 });
 
 describe('config.ts Jev user-config provenance', () => {
@@ -882,7 +907,7 @@ describe('review safety diagnostics', () => {
     expect(warnings.join(' ')).toContain('Invalid fallback model');
   });
 
-  it('never renders malformed rule contents in warnings', () => {
+  it('ignores legacy rule contents with one fixed value-free warning', () => {
     const { config, warnings } = normalizeConfig({
       profiles: { p: { high: { model: 'test/model' } } },
       rules: [
@@ -892,15 +917,13 @@ describe('review safety diagnostics', () => {
           apiKey: 'sentinel-secret',
         },
         'sentinel-secret',
-        { matches: 'valid', tier: 'low' },
       ],
     });
     expect(warnings).toEqual([
-      'Ignored invalid routing rule at index 0.',
-      'Ignored invalid routing rule at index 1.',
+      'Deprecated router config field "rules" ignored.',
     ]);
     expect(JSON.stringify(warnings)).not.toContain('sentinel');
-    expect(config.rules).toHaveLength(1);
+    expect(config.profiles.p?.high?.model).toBe('test/model');
   });
 
   it.each([751, 1000, 1500])(
@@ -915,23 +938,13 @@ describe('review safety diagnostics', () => {
   );
 
   it.each(['micro', 'low', 'medium', 'high'] as const)(
-    'warns about unsupported safety floors for a %s-only profile',
+    'accepts a %s-only profile without prompt-derived floor warnings',
     (tier) => {
       const { config, warnings } = normalizeConfig({
         profiles: { partial: { [tier]: { model: 'test/model' } } },
       });
       expect(config.profiles.partial?.[tier]).toBeDefined();
-      if (tier === 'high') expect(warnings).toEqual([]);
-      else {
-        expect(warnings).toHaveLength(1);
-        expect(warnings[0]).toContain('Profile "partial"');
-        expect(warnings[0]).toContain(
-          tier === 'medium'
-            ? 'high safety floors'
-            : 'medium or high safety floors',
-        );
-        expect(warnings[0]).toContain('profiles.partial.high');
-      }
+      expect(warnings).toEqual([]);
     },
   );
 });

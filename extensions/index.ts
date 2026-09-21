@@ -533,7 +533,6 @@ const routerExtension = (pi: ExtensionAPI) => {
         activeProfile,
         (provider, id) => ctx.modelRegistry.find(provider, id),
         overrides,
-        currentConfig.models,
       ) === false
     ) {
       actions.syncPiThinkingLevel(event.previousLevel);

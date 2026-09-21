@@ -34,21 +34,18 @@ describe('configuration boundaries', () => {
       ).toEqual(normalizeConfig(base).config.profiles);
     },
   );
-  it.each([[], [''], ['ok', 42], [null], ''])(
-    'rejects invalid rule keywords %j',
-    (matches) => {
-      const input = {
-        ...base,
-        rules: [{ matches, tier: 'high' }],
-      } as unknown as RouterConfig;
-      const result = normalizeConfig(input);
-      expect(result.config.rules).toBeUndefined();
-      expect(result.warnings).toEqual([
-        ...normalizeConfig(base).warnings,
-        'Ignored invalid routing rule at index 0.',
-      ]);
-    },
-  );
+  it('loads legacy keyword config with a fixed value-free deprecation warning', () => {
+    const result = normalizeConfig({
+      ...base,
+      phaseBias: 0.9,
+      rules: [{ matches: 'private-value', tier: 'high' }],
+    });
+    expect(result.warnings).toEqual([
+      'Deprecated router config field "phaseBias" ignored.',
+      'Deprecated router config field "rules" ignored.',
+    ]);
+    expect(JSON.stringify(result.warnings)).not.toContain('private-value');
+  });
   it('does not resolve inherited property names as models or profiles', () => {
     expect(resolveModelRef('toString', {})).toEqual({
       canonicalRef: 'toString',

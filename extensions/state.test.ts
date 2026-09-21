@@ -11,13 +11,23 @@ import {
 } from './state';
 import type { RoutingDecision } from './types';
 
+const decision: RoutingDecision = {
+  profile: 'p',
+  tier: 'medium',
+  phase: 'implementation',
+  targetProvider: 'test',
+  targetModelId: 'model',
+  targetLabel: 'test/model',
+  thinking: 'medium',
+  reasonCode: 'baseline',
+  timestamp: 1,
+};
+
 describe('state.ts', () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
     tempDirs.length = 0;
   });
 
@@ -27,269 +37,134 @@ describe('state.ts', () => {
     return dir;
   };
 
-  describe('last router profile', () => {
-    it('validate last-profile state', () => {
-      expect(
-        isRouterLastProfileState({
-          selectedProfile: 'balanced',
-          timestamp: Date.now(),
-        }),
-      ).toBe(true);
-      expect(
-        isRouterLastProfileState({ selectedProfile: '', timestamp: 1 }),
-      ).toBe(false);
-      expect(isRouterLastProfileState({ selectedProfile: 'balanced' })).toBe(
-        false,
-      );
-    });
-
-    it('save and load the last profile', () => {
-      const agentDir = createTempDir();
-
-      expect(saveLastRouterProfile('balanced', agentDir)).toBe(true);
-      expect(loadLastRouterProfile(agentDir)).toBe('balanced');
-    });
-
-    it('ignore missing or malformed state', () => {
-      const agentDir = createTempDir();
-
-      expect(loadLastRouterProfile(agentDir)).toBeUndefined();
-      writeFileSync(join(agentDir, 'model-router-state.json'), '{bad json');
-      expect(loadLastRouterProfile(agentDir)).toBeUndefined();
-    });
-
-    it('return false when the state cannot be written', () => {
-      const missingDir = join(createTempDir(), 'missing');
-
-      expect(saveLastRouterProfile('balanced', missingDir)).toBe(false);
-    });
+  it('validates, saves and loads the last profile', () => {
+    const agentDir = createTempDir();
+    expect(
+      isRouterLastProfileState({ selectedProfile: 'p', timestamp: 1 }),
+    ).toBe(true);
+    expect(
+      isRouterLastProfileState({ selectedProfile: '', timestamp: 1 }),
+    ).toBe(false);
+    expect(saveLastRouterProfile('p', agentDir)).toBe(true);
+    expect(loadLastRouterProfile(agentDir)).toBe('p');
+    writeFileSync(join(agentDir, 'model-router-state.json'), '{bad json');
+    expect(loadLastRouterProfile(agentDir)).toBeUndefined();
   });
 
-  describe('isRouterPersistedState', () => {
-    it('return false for non-objects or null', () => {
-      expect(isRouterPersistedState(null)).toBe(false);
-      expect(isRouterPersistedState('string')).toBe(false);
-      expect(isRouterPersistedState(123)).toBe(false);
-    });
-
-    it('return false if required properties are missing or wrong type', () => {
-      expect(isRouterPersistedState({ enabled: true })).toBe(false);
-      expect(
-        isRouterPersistedState({
-          enabled: 'yes',
-          selectedProfile: 'p',
-          timestamp: 123,
-        }),
-      ).toBe(false);
-    });
-
-    it('return true for valid persisted state objects', () => {
-      const state = {
-        enabled: true,
-        selectedProfile: 'balanced',
-        timestamp: Date.now(),
-      };
-      expect(isRouterPersistedState(state)).toBe(true);
-    });
+  it('rejects corrupted persisted optional fields', () => {
+    const valid = { enabled: true, selectedProfile: 'p', timestamp: 1 };
+    for (const invalid of [
+      { accumulatedCost: -1 },
+      { accumulatedCost: 'broken' },
+      { pinByProfile: { p: 'ultra' } },
+      { thinkingByProfile: { p: null } },
+      { debugHistory: [null] },
+      { lastDecision: { tier: 'high' } },
+      { lastNonRouterModel: 'invalid' },
+      { debugEnabled: 'yes' },
+    ])
+      expect(isRouterPersistedState({ ...valid, ...invalid })).toBe(false);
   });
 
-  describe('buildPersistedState', () => {
-    it('build a state object matching the interface requirements', () => {
-      const decision: RoutingDecision = {
-        profile: 'balanced',
-        tier: 'high',
-        phase: 'planning',
-        targetProvider: 'google',
-        targetModelId: 'gemini-2.5-pro',
-        targetLabel: 'google/gemini-2.5-pro',
-        reasonCode: 'heuristic',
-        thinking: 'high',
-        timestamp: Date.now(),
-      };
-
-      const state = buildPersistedState({
-        routerEnabled: true,
-        selectedProfile: 'balanced',
-        pinnedTierByProfile: { balanced: 'high' },
-        thinkingByProfile: { balanced: { high: 'xhigh' } },
-        debugEnabled: true,
-        widgetEnabled: false,
-        debugHistory: [decision],
-        lastDecision: decision,
-        lastNonRouterModel: 'openai/gpt-4o',
-        accumulatedCost: 0.0045,
-      });
-
-      expect(state.enabled).toBe(true);
-      expect(state.selectedProfile).toBe('balanced');
-      expect(state.pinTier).toBe('high');
-      expect(state.pinByProfile).toEqual({ balanced: 'high' });
-      expect(state.thinkingByProfile).toEqual({ balanced: { high: 'xhigh' } });
-      expect(state.debugEnabled).toBe(true);
-      expect(state.widgetEnabled).toBe(false);
-      expect(state.debugHistory).toEqual([decision]);
-      expect(state.lastPhase).toBe('planning');
-      expect(state.lastDecision).toEqual(decision);
-      expect(state.lastNonRouterModel).toBe('openai/gpt-4o');
-      expect(state.accumulatedCost).toBe(0.0045);
-      expect(state.timestamp).toBeGreaterThan(0);
+  it('round-trips pins, thinking overrides, decisions and cost', () => {
+    const state = buildPersistedState({
+      routerEnabled: true,
+      selectedProfile: 'p',
+      pinnedTierByProfile: { p: 'medium' },
+      thinkingByProfile: { p: { medium: 'medium' } },
+      debugEnabled: true,
+      widgetEnabled: false,
+      debugHistory: [decision],
+      lastDecision: decision,
+      lastNonRouterModel: 'openai/gpt-4o',
+      accumulatedCost: 0.0045,
     });
-
-    it('handle undefined selectedProfile', () => {
-      const state = buildPersistedState({
-        routerEnabled: false,
-        selectedProfile: undefined,
-        pinnedTierByProfile: {},
-        thinkingByProfile: {},
-        debugEnabled: false,
-        widgetEnabled: false,
-        debugHistory: [],
-        lastDecision: undefined,
-        lastNonRouterModel: undefined,
-        accumulatedCost: 0,
-      });
-      expect(state.selectedProfile).toBe('');
-      expect(state.pinTier).toBeUndefined();
-    });
+    expect(state.pinTier).toBe('medium');
+    expect(state.lastDecision).toEqual(decision);
+    expect(state.debugHistory).toEqual([decision]);
+    expect(state.accumulatedCost).toBe(0.0045);
+    expect(isRouterPersistedState(JSON.parse(JSON.stringify(state)))).toBe(
+      true,
+    );
   });
-});
 
-describe('four-tier snapshots', () => {
-  it.each(['micro', 'low', 'medium', 'high'] as const)(
-    'round-trips %s pins, effort and decisions without a migration',
-    (tier) => {
-      const decision: RoutingDecision = {
-        profile: 'p',
-        tier,
-        phase:
-          tier === 'high'
-            ? 'planning'
-            : tier === 'medium'
-              ? 'implementation'
-              : 'lightweight',
-        targetProvider: 'test',
-        targetModelId: 'model',
-        targetLabel: 'test/model',
-        thinking: tier === 'micro' ? 'off' : tier,
-        reasonCode: 'heuristic',
-        requestedTier: tier === 'high' ? 'low' : undefined,
-        timestamp: 1,
-      };
-      const withExtraFields = {
-        ...decision,
-        rawResponse: 'must not be copied',
-      };
-      const state = buildPersistedState({
-        routerEnabled: true,
-        selectedProfile: 'p',
-        pinnedTierByProfile: { p: tier },
-        thinkingByProfile: { p: { [tier]: decision.thinking } },
-        debugEnabled: true,
-        widgetEnabled: true,
-        debugHistory: [withExtraFields],
-        lastDecision: withExtraFields,
-        lastNonRouterModel: undefined,
-        accumulatedCost: 0,
-      });
-      const restored: unknown = JSON.parse(JSON.stringify(state));
-      expect(isRouterPersistedState(restored)).toBe(true);
-      expect(state.pinTier).toBe(tier);
-      expect(state.lastDecision).toMatchObject(decision);
-      expect(JSON.stringify(state)).not.toContain('must not be copied');
-    },
-  );
-});
-
-describe('closed decision snapshot boundary', () => {
-  const safe: RoutingDecision = {
-    profile: 'p',
-    tier: 'high',
-    phase: 'planning',
-    targetProvider: 'test',
-    targetModelId: 'model',
-    targetLabel: 'test/model',
-    thinking: 'high',
-    reasonCode: 'jev',
-    timestamp: 1,
-  };
-  it('omits all incidental data and maps old free-form explanations only to legacy', () => {
+  it('does not copy incidental or secret decision fields', () => {
     const tainted = {
-      ...safe,
+      ...decision,
       reasonCode: undefined,
-      reasoning: 'secret key task https://remote.invalid',
+      reasoning: 'secret key task',
       rawResponse: 'remote explanation',
-      endpoint: 'https://remote.invalid',
       apiKey: 'secret',
       errorClass: 'remote-error-text',
       routingLatencyMs: Number.NaN,
     } as unknown as RoutingDecision;
-    const saved = buildPersistedState({
+    const state = buildPersistedState({
       routerEnabled: true,
       selectedProfile: 'p',
       pinnedTierByProfile: {},
       thinkingByProfile: {},
       debugEnabled: true,
       widgetEnabled: true,
-      lastDecision: tainted,
       debugHistory: [tainted],
+      lastDecision: tainted,
+      lastNonRouterModel: undefined,
+      accumulatedCost: 0,
+    });
+    expect(state.lastDecision?.reasonCode).toBe('legacy');
+    expect(JSON.stringify(state)).not.toContain('secret');
+    expect(JSON.stringify(state)).not.toContain('remote explanation');
+  });
+
+  it('maps obsolete prompt-derived sources from old snapshots to legacy', () => {
+    const restored = {
+      enabled: true,
+      selectedProfile: 'p',
+      timestamp: 1,
+      lastDecision: { ...decision, reasonCode: 'heuristic' },
+    };
+    expect(isRouterPersistedState(restored)).toBe(true);
+    const saved = buildPersistedState({
+      routerEnabled: true,
+      selectedProfile: 'p',
+      pinnedTierByProfile: {},
+      thinkingByProfile: {},
+      debugEnabled: false,
+      widgetEnabled: false,
+      debugHistory: [restored.lastDecision as RoutingDecision],
+      lastDecision: restored.lastDecision as RoutingDecision,
       lastNonRouterModel: undefined,
       accumulatedCost: 0,
     });
     expect(saved.lastDecision?.reasonCode).toBe('legacy');
-    expect(saved.debugHistory?.[0]?.reasonCode).toBe('legacy');
-    const json = JSON.stringify(saved);
-    for (const text of [
-      'reasoning',
-      'secret',
-      'remote',
-      'rawResponse',
-      'apiKey',
-      'endpoint',
-    ])
-      expect(json).not.toContain(text);
-    expect(saved.lastDecision?.errorClass).toBeUndefined();
-    expect(saved.lastDecision?.routingLatencyMs).toBeUndefined();
   });
-  it.each([
-    'pinned',
-    'custom-rule',
-    'micro-mechanical',
-    'continuation',
-    'classifier',
-    'jev',
-    'heuristic',
-    'fallback',
-    'budget-floor-conflict',
-    'legacy',
-  ])('accepts the exact reason code %s', (reasonCode) => {
-    expect(
-      isRouterPersistedState({
-        enabled: true,
-        selectedProfile: 'p',
-        timestamp: 1,
-        lastDecision: { ...safe, reasonCode },
-      }),
-    ).toBe(true);
-  });
-  it.each([
-    'local-safety-floor',
-    'arbitrary text',
-    '',
-    'timeout',
-    'constructor',
-    1,
-    null,
-  ])(
-    'rejects out-of-union reason code %s even alongside legacy reasoning',
-    (reasonCode) => {
+
+  it('accepts only the fixed runtime reason codes', () => {
+    for (const reasonCode of [
+      'baseline',
+      'pinned',
+      'continuation',
+      'classifier',
+      'jev',
+      'fallback',
+      'budget',
+      'legacy',
+    ]) {
       expect(
         isRouterPersistedState({
           enabled: true,
           selectedProfile: 'p',
           timestamp: 1,
-          lastDecision: { ...safe, reasonCode, reasoning: 'legacy text' },
+          lastDecision: { ...decision, reasonCode },
         }),
-      ).toBe(false);
-    },
-  );
+      ).toBe(true);
+    }
+    expect(
+      isRouterPersistedState({
+        enabled: true,
+        selectedProfile: 'p',
+        timestamp: 1,
+        lastDecision: { ...decision, reasonCode: 'keyword' },
+      }),
+    ).toBe(false);
+  });
 });

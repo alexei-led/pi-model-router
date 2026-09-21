@@ -31,10 +31,23 @@ const isModelRef = (value: unknown) => {
     return false;
   }
 };
+
+// Historical snapshots remain readable, but obsolete prompt-derived sources
+// are sanitized to `legacy` and never become live routing behavior again.
+const OBSOLETE_REASON_CODES = new Set([
+  'custom-rule',
+  'micro-mechanical',
+  'heuristic',
+  'safety-floor',
+  'budget-floor-conflict',
+]);
+const isPersistedReasonCode = (value: unknown): boolean =>
+  isRoutingReasonCode(value) ||
+  (typeof value === 'string' && OBSOLETE_REASON_CODES.has(value));
+
 const isDecision = (value: unknown): value is RoutingDecision =>
   isObjectRecord(value) &&
   isRouterTier(value.tier) &&
-  (value.requestedTier === undefined || isRouterTier(value.requestedTier)) &&
   isPhase(value.phase) &&
   isThinkingLevel(value.thinking) &&
   isFiniteNumber(value.timestamp) &&
@@ -43,8 +56,8 @@ const isDecision = (value: unknown): value is RoutingDecision =>
   ) &&
   (value.reasonCode === undefined
     ? typeof value.reasoning === 'string'
-    : isRoutingReasonCode(value.reasonCode)) &&
-  ['isClassifier', 'isFallback', 'isBudgetForced', 'isRuleMatched'].every(
+    : isPersistedReasonCode(value.reasonCode)) &&
+  ['isClassifier', 'isFallback', 'isBudgetForced'].every(
     (key) => value[key] === undefined || typeof value[key] === 'boolean',
   );
 const isMap = (value: unknown, validate: (entry: unknown) => boolean) =>
@@ -142,7 +155,6 @@ export const snapshotDecision = (
   reasonCode: isRoutingReasonCode(decision.reasonCode)
     ? decision.reasonCode
     : 'legacy',
-  requestedTier: decision.requestedTier,
   routingLatencyMs:
     isFiniteNumber(decision.routingLatencyMs) && decision.routingLatencyMs >= 0
       ? decision.routingLatencyMs
@@ -157,7 +169,6 @@ export const snapshotDecision = (
   isClassifier: decision.isClassifier,
   isFallback: decision.isFallback,
   isBudgetForced: decision.isBudgetForced,
-  isRuleMatched: decision.isRuleMatched,
 });
 
 export const buildPersistedState = ({

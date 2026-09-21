@@ -10,12 +10,6 @@ export type RouterPinByProfile = Partial<Record<string, RouterTier>>;
 export type RouterThinkingByTier = Partial<Record<RouterTier, ThinkingLevel>>;
 export type RouterThinkingByProfile = Record<string, RouterThinkingByTier>;
 
-export interface RoutingRule {
-  matches: string | string[];
-  tier: RouterTier;
-  reason?: string | undefined;
-}
-
 export interface ModelDefinition {
   model: string;
   contextWindow?: number | undefined;
@@ -62,6 +56,7 @@ export interface JevProfileConfig {
 }
 
 export interface RouterProfile {
+  baselineTier?: RouterTier | undefined;
   jev?: JevProfileConfig | undefined;
   high?: RoutedTierConfig | undefined;
   medium?: RoutedTierConfig | undefined;
@@ -73,9 +68,7 @@ export interface RouterConfig {
   jev?: JevConfig | undefined;
   debug?: boolean | undefined;
   classifierModel?: ClassifierConfig | undefined;
-  phaseBias?: number | undefined;
   maxSessionBudget?: number | undefined;
-  rules?: RoutingRule[] | undefined;
   profiles: Record<string, RouterProfile>;
   models?: Record<string, ModelDefinition> | undefined;
 }
@@ -123,16 +116,13 @@ export interface JevAdvice {
 }
 
 export const ROUTING_REASON_CODES = [
+  'baseline',
   'pinned',
-  'custom-rule',
-  'micro-mechanical',
   'continuation',
   'classifier',
   'jev',
-  'heuristic',
   'fallback',
-  'budget-floor-conflict',
-  'safety-floor',
+  'budget',
   'legacy',
 ] as const;
 export type RoutingReasonCode = (typeof ROUTING_REASON_CODES)[number];
@@ -150,8 +140,6 @@ export interface RoutingDecision {
   targetModelId: string;
   targetLabel: string;
   reasonCode: RoutingReasonCode;
-  /** Tier requested by a pin/rule before the local safety floor overrode it. */
-  requestedTier?: RouterTier | undefined;
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
   thinking: ThinkingLevel;
@@ -159,7 +147,6 @@ export interface RoutingDecision {
   isClassifier?: boolean | undefined;
   isFallback?: boolean | undefined;
   isBudgetForced?: boolean | undefined;
-  isRuleMatched?: boolean | undefined;
 }
 
 export interface RouterLastProfileState {

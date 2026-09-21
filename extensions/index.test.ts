@@ -231,9 +231,10 @@ describe('index.ts (orchestrator)', () => {
           /* Drain the actual provider callback. */
         }
         expect((await stream.result()).stopReason).toBe('stop');
+        const expectedSource = source === 'jev' ? 'baseline' : source;
         expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
-          lastDecision: { reasonCode: source },
-          debugHistory: [{ reasonCode: source }],
+          lastDecision: { reasonCode: expectedSource },
+          debugHistory: [{ reasonCode: expectedSource }],
         });
         const output = JSON.stringify([
           mockPi.appendEntry.mock.calls,
@@ -583,15 +584,7 @@ describe('index.ts (orchestrator)', () => {
               capability === 'image' && id === 'gpt-4o'
                 ? ['text']
                 : ['text', 'image'],
-            thinkingLevelMap: {
-              low: (
-                capability === 'high-floor'
-                  ? id === 'gpt-4o'
-                  : id !== 'gpt-4o'
-              )
-                ? null
-                : 'low',
-            },
+            thinkingLevelMap: { low: null },
           }),
         );
         for (const handler of handlersFor('session_start'))

@@ -11,7 +11,6 @@ const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
   if (decision.isFallback) flags.push('fallback');
   if (decision.isBudgetForced) flags.push('budget-limit');
-  if (decision.isRuleMatched) flags.push('rule');
   return flags;
 };
 
@@ -79,8 +78,7 @@ export const updateStatus = (
     const matchesPin = activePin
       ? lastDecision?.tier === activePin ||
         lastDecision?.reasonCode === 'pinned' ||
-        lastDecision?.reasonCode === 'budget-floor-conflict' ||
-        lastDecision?.reasonCode === 'safety-floor'
+        lastDecision?.reasonCode === 'budget'
       : true;
 
     let statusText: string;

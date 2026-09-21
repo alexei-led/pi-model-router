@@ -33,12 +33,10 @@ import {
 } from './context';
 import { createJevCandidate, runJev } from './jev';
 import {
-  allowed,
   availableRoutePairs,
-  decideRouting,
   decisionForPair,
-  localSafetyFloor,
-  resolveAvailableTier,
+  primaryRoutePairs,
+  selectBaselineRoute,
 } from './routing';
 import type {
   RouterConfig,
@@ -347,18 +345,16 @@ export const registerRouterProvider = (
             state.currentConfig.maxSessionBudget !== undefined &&
             state.accumulatedCost >= state.currentConfig.maxSessionBudget;
 
-          const floor = localSafetyFloor(context);
           const imageAttached = hasImageAttachment(context);
           const findModel = (provider: string, id: string) =>
             registry.find(provider, id);
+          const thinkingOverrides = state.thinkingByProfile[model.id];
           const available = () =>
             availableRoutePairs(
               profile,
-              floor,
               findModel,
               imageAttached,
-              state.thinkingByProfile[model.id],
-              state.currentConfig.models,
+              thinkingOverrides,
             );
           let pairs = available();
           const previousDecision = state.lastDecision;
@@ -393,9 +389,7 @@ export const registerRouterProvider = (
             model.id,
             profile,
             pinnedTier,
-            state.thinkingByProfile[model.id],
-            state.currentConfig.rules,
-            state.currentConfig.phaseBias,
+            thinkingOverrides,
             state.currentConfig.classifierModel,
             isBudgetExceeded,
             authenticationIdentity,
@@ -459,63 +453,25 @@ export const registerRouterProvider = (
             };
           } else {
             if (toolContinuation && turn) continuations.delete(turn);
-            decision = decideRouting(
-              context,
+            const baseline = selectBaselineRoute(
               model.id,
               profile,
-              previousDecision,
+              pairs,
               pinnedTier,
-              state.thinkingByProfile[model.id],
-              state.currentConfig.phaseBias,
-              state.currentConfig.rules,
               isBudgetExceeded,
             );
-            const eligibleProfile = { ...profile };
-            for (const tier of ROUTER_TIERS) {
-              if (!pairs.some((pair) => pair.tier === tier))
-                delete eligibleProfile[tier];
-            }
-            const budgetLow =
-              isBudgetExceeded &&
-              decision.isBudgetForced &&
-              !eligibleProfile.medium &&
-              eligibleProfile.low &&
-              allowed('low', floor);
-            const tier = resolveAvailableTier(
-              eligibleProfile,
-              budgetLow ? 'low' : decision.tier,
-              floor,
+            decision = decisionForPair(
               model.id,
+              baseline.pair,
+              baseline.reasonCode,
             );
-            const pair = pairs.find((candidate) => candidate.tier === tier);
-            if (!pair) throw new Error('No eligible route.');
-            if (
-              pair.model !== decision.targetLabel ||
-              pair.thinking !== decision.thinking ||
-              pair.tier !== decision.tier
-            ) {
-              decision = {
-                ...decision,
-                isBudgetForced: decision.isBudgetForced && pair.tier !== 'high',
-                ...decisionForPair(
-                  model.id,
-                  pair,
-                  isBudgetExceeded && pair.tier === 'high'
-                    ? 'budget-floor-conflict'
-                    : decision.reasonCode === 'pinned'
-                      ? 'pinned'
-                      : 'fallback',
-                ),
-              };
-            }
+            decision.isBudgetForced = baseline.isBudgetForced;
           }
 
           // Tool results never invoke advisors, even when their prior route cannot be reused.
           if (
             !toolContinuation &&
             !pinnedTier &&
-            !decision.isRuleMatched &&
-            floor !== 'micro' &&
             !isBudgetExceeded &&
             user &&
             turn &&
@@ -526,98 +482,85 @@ export const registerRouterProvider = (
             rememberAdvisedTurn(turn);
             const started = performance.now();
             const routingDeadline = started + 1500;
-            const candidates = pairs
-              .filter(
-                (pair, i) =>
-                  pairs.findIndex((other) => other.tier === pair.tier) === i &&
-                  pair.model === profile[pair.tier]?.model,
-              )
-              .map(createJevCandidate);
-            let advised = false;
-            if (state.currentConfig.jev?.enabled && profile.jev?.enabled) {
-              const advice = await runJev(
-                {
-                  ...state.currentConfig.jev,
-                  timeoutMs: Math.min(750, state.currentConfig.jev.timeoutMs),
-                },
-                {
-                  taskSummary: getLastUserText(context),
-                  candidates,
-                  profile: profile.jev,
-                  routingDeadline,
-                  signal: options?.signal,
-                },
-              ).catch(() => undefined);
-              options?.signal?.throwIfAborted();
-              // Re-read registry capabilities after the network boundary.
-              pairs = available();
-              const candidate = candidates.find(
-                (entry) => entry.id === advice?.candidateId,
-              );
+            const candidates = primaryRoutePairs(
+              profile,
+              pairs,
+              thinkingOverrides,
+            ).map(createJevCandidate);
+            if (candidates.length > 1) {
+              let advised = false;
+              if (state.currentConfig.jev?.enabled && profile.jev?.enabled) {
+                const advice = await runJev(
+                  {
+                    ...state.currentConfig.jev,
+                    timeoutMs: Math.min(750, state.currentConfig.jev.timeoutMs),
+                  },
+                  {
+                    taskSummary: getLastUserText(context),
+                    candidates,
+                    profile: profile.jev,
+                    routingDeadline,
+                    signal: options?.signal,
+                  },
+                ).catch(() => undefined);
+                options?.signal?.throwIfAborted();
+                // Re-read registry capabilities after the network boundary.
+                pairs = available();
+                const candidate = candidates.find(
+                  (entry) => entry.id === advice?.candidateId,
+                );
+                if (
+                  candidate &&
+                  performance.now() < routingDeadline &&
+                  pairs.some(
+                    (pair) =>
+                      pair.model === candidate.model &&
+                      pair.tier === candidate.tier &&
+                      pair.thinking === candidate.thinking,
+                  )
+                ) {
+                  decision = decisionForPair(model.id, candidate, 'jev');
+                  advised = true;
+                } else decision.errorClass = 'advisor-unavailable';
+              }
               if (
-                candidate &&
-                performance.now() < routingDeadline &&
-                allowed(candidate.tier, floor) &&
-                pairs.some(
-                  (pair) =>
-                    pair.model === candidate.model &&
-                    pair.tier === candidate.tier &&
-                    pair.thinking === candidate.thinking,
-                )
-              ) {
-                decision = decisionForPair(model.id, candidate, 'jev');
-                advised = true;
-              } else decision.errorClass = 'advisor-unavailable';
-            }
-            if (
-              !advised &&
-              state.currentConfig.classifierModel &&
-              performance.now() < routingDeadline
-            ) {
-              const classifier = state.currentConfig.classifierModel;
-              const result = await runClassifier(
-                classifier.model,
-                registry,
-                context,
-                previousDecision?.profile === model.id
-                  ? previousDecision.phase
-                  : undefined,
-                classifier.thinking,
-                options?.signal,
-                routingDeadline,
-              ).catch(() => undefined);
-              options?.signal?.throwIfAborted();
-              if (
-                result &&
-                allowed(result.tier, floor) &&
+                !advised &&
+                state.currentConfig.classifierModel &&
                 performance.now() < routingDeadline
               ) {
-                const eligibleProfile = { ...profile };
-                pairs = available();
-                for (const tier of ROUTER_TIERS) {
-                  if (!pairs.some((pair) => pair.tier === tier))
-                    delete eligibleProfile[tier];
-                }
-                const tier = resolveAvailableTier(
-                  eligibleProfile,
-                  result.tier,
-                  floor,
-                  model.id,
-                );
-                const pair = pairs.find((entry) => entry.tier === tier);
-                if (pair)
-                  decision = {
-                    ...decisionForPair(model.id, pair, 'classifier'),
-                    isClassifier: true,
-                  };
-              } else decision.errorClass = 'advisor-unavailable';
+                const classifier = state.currentConfig.classifierModel;
+                const result = await runClassifier(
+                  classifier.model,
+                  registry,
+                  context,
+                  previousDecision?.profile === model.id
+                    ? previousDecision.phase
+                    : undefined,
+                  classifier.thinking,
+                  options?.signal,
+                  routingDeadline,
+                ).catch(() => undefined);
+                options?.signal?.throwIfAborted();
+                if (result && performance.now() < routingDeadline) {
+                  pairs = available();
+                  const pair = pairs.find(
+                    (entry) => entry.tier === result.tier,
+                  );
+                  if (pair) {
+                    decision = {
+                      ...decisionForPair(model.id, pair, 'classifier'),
+                      isClassifier: true,
+                    };
+                  } else decision.errorClass = 'advisor-unavailable';
+                } else decision.errorClass = 'advisor-unavailable';
+              }
+              decision.routingLatencyMs = Math.max(
+                0,
+                performance.now() - started,
+              );
+              if (performance.now() >= routingDeadline)
+                decision.errorClass = 'deadline';
             }
-            decision.routingLatencyMs = Math.max(
-              0,
-              performance.now() - started,
-            );
-            if (performance.now() >= routingDeadline)
-              decision.errorClass = 'deadline';
           }
 
           // Google thought signatures cannot be replayed against a different thinking model.
@@ -781,7 +724,11 @@ export const registerRouterProvider = (
                 decision.thinking = delegatedReasoning ?? 'off';
                 decision.isFallback =
                   i > 0 || modelRef !== profile[decision.tier]?.model;
-                if (i > 0) decision.reasonCode = 'fallback';
+                if (
+                  decision.isFallback &&
+                  decision.reasonCode !== 'continuation'
+                )
+                  decision.reasonCode = 'fallback';
               };
               for await (const event of delegatedStream) {
                 if (

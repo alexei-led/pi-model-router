@@ -173,7 +173,6 @@ export const registerCommands = (
       `Pins by profile: ${formatPinSummary(state.pinnedTierByProfile)}`,
       `Thinking overrides: ${formatThinkingSummary(state.thinkingByProfile)}`,
       `Widget: ${state.widgetEnabled ? 'on' : 'off'}`,
-      `Phase bias: ${state.currentConfig.phaseBias}`,
       `Session cost: $${state.accumulatedCost.toFixed(4)}` +
         (state.currentConfig.maxSessionBudget
           ? ` / $${state.currentConfig.maxSessionBudget.toFixed(2)}`
@@ -275,7 +274,7 @@ export const registerCommands = (
     ctx.ui.notify(
       nextTier
         ? `Router pinned to ${nextTier}`
-        : `Router pin cleared; heuristic routing restored`,
+        : `Router pin cleared; baseline routing restored`,
       'info',
     );
   };
@@ -369,7 +368,6 @@ export const registerCommands = (
         activeProfile,
         (provider, id) => ctx.modelRegistry.find(provider, id),
         overrides,
-        state.currentConfig.models,
       ) === false
     ) {
       ctx.ui.notify(

@@ -15,7 +15,6 @@ import type {
   RouterConfig,
   RouterProfile,
   RouterTier,
-  RoutingRule,
 } from './types';
 
 import { ROUTER_TIERS } from './types';
@@ -123,6 +122,7 @@ export const mergeConfig = (
       ? mergedProfiles[name]
       : {};
     mergedProfiles[name] = {
+      baselineTier: mergeRawValue(existing.baselineTier, profile.baselineTier),
       high: mergeRawValue(existing.high, profile.high),
       medium: mergeRawValue(existing.medium, profile.medium),
       low: mergeRawValue(existing.low, profile.low),
@@ -527,55 +527,43 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       continue;
     }
 
-    if (!high)
-      warnings.push(
-        `Profile "${name}" cannot satisfy ${medium ? 'high' : 'medium or high'} safety floors. Configure profiles.${name}.high with a compatible model; requests above the configured tiers fail closed.`,
-      );
+    let baselineTier: RouterTier | undefined;
+    if (profileRecord.baselineTier !== undefined) {
+      const candidate = profileRecord.baselineTier;
+      const normalizedTier = isRouterTier(candidate)
+        ? { high, medium, low, micro }[candidate]
+        : undefined;
+      if (isRouterTier(candidate) && normalizedTier) {
+        baselineTier = candidate;
+      } else {
+        warnings.push(
+          `Profile "${name}" baselineTier must name a configured tier. Ignored.`,
+        );
+      }
+    }
 
     const jev = isObjectRecord(profileRecord.jev)
       ? { enabled: profileRecord.jev.enabled === true }
       : undefined;
-    normalizedProfiles[name] = { high, medium, low, micro, jev };
+    normalizedProfiles[name] = {
+      ...(baselineTier ? { baselineTier } : {}),
+      high,
+      medium,
+      low,
+      micro,
+      jev,
+    };
   }
 
-  const phaseBias =
-    typeof raw.phaseBias === 'number'
-      ? Math.max(0, Math.min(1, raw.phaseBias))
-      : 0.5;
+  if (raw.phaseBias !== undefined)
+    warnings.push('Deprecated router config field "phaseBias" ignored.');
+  if (raw.rules !== undefined)
+    warnings.push('Deprecated router config field "rules" ignored.');
 
   const maxSessionBudget =
     typeof raw.maxSessionBudget === 'number' && raw.maxSessionBudget > 0
       ? raw.maxSessionBudget
       : undefined;
-
-  const rules: RoutingRule[] = [];
-  if (Array.isArray(raw.rules)) {
-    for (const [index, rule] of raw.rules.entries()) {
-      if (isObjectRecord(rule)) {
-        const matches = rule.matches;
-        const tier = rule.tier;
-        if (
-          ((typeof matches === 'string' && matches.trim().length > 0) ||
-            (Array.isArray(matches) &&
-              matches.length > 0 &&
-              matches.every(
-                (m) => typeof m === 'string' && m.trim().length > 0,
-              ))) &&
-          isRouterTier(tier)
-        ) {
-          rules.push({
-            matches,
-            tier,
-            reason: typeof rule.reason === 'string' ? rule.reason : undefined,
-          });
-        } else {
-          warnings.push(`Ignored invalid routing rule at index ${index}.`);
-        }
-      } else {
-        warnings.push(`Ignored invalid routing rule at index ${index}.`);
-      }
-    }
-  }
 
   // Resolve classifierModel — accepts string or { model, thinking } object
   let classifierModel: ClassifierConfig | undefined;
@@ -625,9 +613,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       jev: normalizeJevConfig(raw.jev, warnings),
       debug: typeof raw.debug === 'boolean' ? raw.debug : false,
       classifierModel,
-      phaseBias,
       maxSessionBudget,
-      rules: rules.length > 0 ? rules : undefined,
       profiles: normalizedProfiles,
       models: hasModels ? normalizedModels : undefined,
     },
