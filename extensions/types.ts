@@ -124,7 +124,6 @@ export interface JevAdvice {
 
 export const ROUTING_REASON_CODES = [
   'pinned',
-  'pin-safety-floor',
   'custom-rule',
   'micro-mechanical',
   'continuation',

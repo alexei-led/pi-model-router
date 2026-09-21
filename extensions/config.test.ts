@@ -861,6 +861,25 @@ describe('config.ts Jev user-config provenance', () => {
 });
 
 describe('review safety diagnostics', () => {
+  it('does not echo malformed model references in warnings', () => {
+    const secret = 'sentinel-model-secret';
+    const { warnings } = normalizeConfig({
+      models: { leaked: { model: secret } },
+      profiles: {
+        p: {
+          medium: {
+            model: 'test/model',
+            fallbacks: [secret],
+          },
+        },
+      },
+      classifierModel: secret,
+    });
+    expect(JSON.stringify(warnings)).not.toContain(secret);
+    expect(warnings.join(' ')).toContain('invalid model reference');
+    expect(warnings.join(' ')).toContain('Invalid fallback model');
+  });
+
   it('never renders malformed rule contents in warnings', () => {
     const { config, warnings } = normalizeConfig({
       profiles: { p: { high: { model: 'test/model' } } },

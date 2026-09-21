@@ -152,16 +152,12 @@ export const parseCanonicalModelRef = (
 ): { provider: string; modelId: string } => {
   const slashIndex = value.indexOf('/');
   if (slashIndex === -1) {
-    throw new Error(
-      `Invalid model reference "${value}". Expected "provider/model".`,
-    );
+    throw new Error('Invalid model reference. Expected "provider/model".');
   }
   const provider = value.slice(0, slashIndex).trim();
   const modelId = value.slice(slashIndex + 1).trim();
   if (!provider || !modelId) {
-    throw new Error(
-      `Invalid model reference "${value}". Expected "provider/model".`,
-    );
+    throw new Error('Invalid model reference. Expected "provider/model".');
   }
   return { provider, modelId };
 };
@@ -196,9 +192,9 @@ export const normalizeModelsMap = (
     try {
       const { provider, modelId } = parseCanonicalModelRef(model);
       model = `${provider}/${modelId}`;
-    } catch (error) {
+    } catch {
       warnings.push(
-        `Model definition "${alias}": ${error instanceof Error ? error.message : String(error)}`,
+        `Model definition "${alias}" has an invalid model reference. Skipped.`,
       );
       continue;
     }
@@ -273,9 +269,9 @@ export const normalizeTierConfig = (
   try {
     const { provider, modelId } = parseCanonicalModelRef(resolved.canonicalRef);
     parsedModel = `${provider}/${modelId}`;
-  } catch (error) {
+  } catch {
     warnings.push(
-      `Profile "${profileName}" ${tier} tier: ${error instanceof Error ? error.message : String(error)} Tier disabled.`,
+      `Profile "${profileName}" ${tier} tier has an invalid model reference. Tier disabled.`,
     );
     return undefined;
   }
@@ -309,9 +305,9 @@ export const normalizeTierConfig = (
           const model = `${provider}/${modelId}`;
           fallbacks.push(model);
           resolvedFallbacks.push({ ...resolvedFallback.definition, model });
-        } catch (error) {
+        } catch {
           warnings.push(
-            `Invalid fallback model "${f}" in profile "${profileName}" ${tier} tier: ${error instanceof Error ? error.message : String(error)}`,
+            `Invalid fallback model in profile "${profileName}" ${tier} tier. Ignored.`,
           );
         }
       }
@@ -592,10 +588,8 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     try {
       parseCanonicalModelRef(resolved.canonicalRef);
       classifierModel = { model: resolved.canonicalRef };
-    } catch (error) {
-      warnings.push(
-        `Invalid classifierModel: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    } catch {
+      warnings.push('Invalid classifierModel model reference. Ignored.');
     }
   } else if (isObjectRecord(rawClassifier)) {
     const modelRef =
@@ -616,10 +610,8 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
           );
         }
         classifierModel = { model: resolved.canonicalRef, thinking };
-      } catch (error) {
-        warnings.push(
-          `Invalid classifierModel: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      } catch {
+        warnings.push('Invalid classifierModel model reference. Ignored.');
       }
     } else {
       warnings.push(

@@ -508,7 +508,7 @@ describe('four-level provider routing', () => {
     expect(s.delegate).toHaveBeenCalledOnce();
     expect(s.state.lastDecision).toMatchObject({
       tier: 'medium',
-      reasonCode: 'pin-safety-floor',
+      reasonCode: 'pinned',
     });
     s.state.currentConfig.profiles.balanced = { low: { model: 'test/small' } };
     s.delegate.mockClear();

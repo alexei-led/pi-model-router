@@ -57,27 +57,38 @@ export const isMechanicalTask = (prompt: string): boolean => {
 };
 
 const isImplementationFollowUp = (prompt: string): boolean =>
-  /^(?:please\s+)?(?:go ahead|continue|resume|proceed)\b/i.test(prompt) ||
-  /^(?:please\s+)?(?:implement|apply|make|do|finish)(?:\s+(?:it|this|that|these|those|the (?:plan|changes|fix|implementation)))?[.!\s]*$/i.test(
+  /^(?:please\s+)?(?:yes(?:,?\s+please)?|okay|ok|sure|go ahead|continue|resume|proceed)\b/i.test(
+    prompt,
+  ) ||
+  /^(?:please\s+)?(?:implement|apply|make|do|finish)(?:\s+(?:it|this|that|these|those|the (?:plan|changes|fix|patch|implementation)))?[.!\s]*$/i.test(
+    prompt,
+  );
+
+const isInformationalPrompt = (prompt: string): boolean =>
+  /^(?:what|which|where|who|when|does|do|is|are|can|could|would|how|why|explain|tell me about)\b/i.test(
+    prompt,
+  ) &&
+  !/\b(?:fix|implement|apply|change|delete|destroy|deploy|migrat\w*|remove|run|execute|configure|rotate|patch)\b/i.test(
     prompt,
   );
 
 const safetyFloorForPrompt = (prompt: string): RouterTier => {
   if (
-    /\b(security|auth(?:entication|orization)?|credentials?|secrets?|vulnerabilit\w*|encrypt\w*|destructive|delet\w*|destroy\w*|eras\w*|drop(?:s|ped|ping)?|wip(?:e|es|ed|ing)|deploy\w*|production|migrat\w*|concurrency|concurrent|race conditions?|architect\w*|design(?:s|ing|ed)?|rm|sudo|chmod|chown|truncate)\b/.test(
+    !isInformationalPrompt(prompt) &&
+    (/\b(security|auth(?:entication|orization)?|credentials?|secrets?|vulnerabilit\w*|encrypt\w*|destructive|delet\w*|destroy\w*|eras\w*|drop(?:s|ped|ping)?|wip(?:e|es|ed|ing)|deploy\w*|production|migrat\w*|concurrency|concurrent|race conditions?|architect\w*|design(?:s|ing|ed)?|rm|sudo|chmod|chown|truncate)\b/.test(
       prompt,
     ) ||
-    /\bgit\s+(?:reset|clean|push)\b/.test(prompt) ||
-    /\bgit\s+branch\b[^\r\n;&|]*(?:\s--(?:delete|force|move|copy)\b|\s-[a-z]*[cdfm][a-z]*(?=\s|$))/i.test(
-      prompt,
-    ) ||
-    /\b(?:debug|debugging|investigate)\b.*\b(?:system|entire|whole|broad)\b/.test(
-      prompt,
-    ) ||
-    /\b(?:system-wide|entire|whole|broad)\b.*\b(?:debug|debugging|investigation)\b/.test(
-      prompt,
-    ) ||
-    /\bremove\b.*\b(?:directory|database|repository)\b/.test(prompt)
+      /\bgit\s+(?:reset|clean|push)\b/.test(prompt) ||
+      /\bgit\s+branch\b[^\r\n;&|]*(?:\s--(?:delete|force|move|copy)\b|\s-[a-z]*[cdfm][a-z]*(?=\s|$))/i.test(
+        prompt,
+      ) ||
+      /\b(?:debug|debugging|investigate)\b.*\b(?:system|entire|whole|broad)\b/.test(
+        prompt,
+      ) ||
+      /\b(?:system-wide|entire|whole|broad)\b.*\b(?:debug|debugging|investigation)\b/.test(
+        prompt,
+      ) ||
+      /\bremove\b.*\b(?:directory|database|repository)\b/.test(prompt))
   )
     return 'high';
   if (isMechanicalTask(prompt)) return 'micro';
@@ -379,7 +390,7 @@ export const decideRouting = (
   if (!allowed(tier, floor)) {
     tier = floor;
     phase = phaseForTier(tier);
-    if (pinnedTier) reasonCode = 'pin-safety-floor';
+    if (pinnedTier) reasonCode = 'pinned';
   }
 
   let isBudgetForced = false;
@@ -405,10 +416,7 @@ export const decideRouting = (
     profileName,
   );
   if (resolvedTier !== tier) {
-    if (
-      reasonCode !== 'budget-floor-conflict' &&
-      reasonCode !== 'pin-safety-floor'
-    )
+    if (reasonCode !== 'budget-floor-conflict' && reasonCode !== 'pinned')
       reasonCode = 'fallback';
     phase = phaseForTier(resolvedTier);
     tier = resolvedTier;

@@ -163,11 +163,14 @@ attempt and may promote a micro request to a higher tier.
 Local safety wins over pins, rules and the soft budget: ambiguous requests require
 at least `low`, ordinary edits/debugging `medium`, and design, security,
 destructive operations, migrations and concurrency `high`. Missing tiers resolve
-to a configured tier at or above that floor. **A partial profile with no eligible
-tier now fails before generation** rather than silently lowering safety. Budget
-conflicts retain the eligible route and report `budget-floor-conflict`.
-Referential implementation follow-ups (such as “go ahead” or “continue”) inherit
-the preceding task's safety floor. Safety-raised pins report `pin-safety-floor`.
+to a configured tier at or above that floor. **A genuinely elevated request with
+no eligible tier still fails before generation** rather than silently lowering safety;
+ordinary informational questions only mentioning risk keywords retain compatibility
+with partial profiles. Budget conflicts retain the eligible route and report
+`budget-floor-conflict`.
+Referential implementation follow-ups (such as “yes” or “apply the patch”) inherit
+the preceding task's safety floor. Pins remain reported as `pinned`, including when
+the local safety floor raises the effective tier.
 Partial profiles warn at config load when medium or high floors cannot be met;
 generation errors identify the profile and tier to configure.
 

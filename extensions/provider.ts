@@ -296,6 +296,8 @@ export const registerRouterProvider = (
 
       void (async () => {
         let partialMessage: AssistantMessage | undefined;
+        let activeTurn: string | undefined;
+        let generationSucceeded = false;
         try {
           // Wait for the router to be fully initialized (session_start sets currentModelRegistry).
           // This handles the race where subagents (e.g. from pi-dynamic-workflows) invoke
@@ -352,6 +354,7 @@ export const registerRouterProvider = (
                   )
                   .digest('hex')
               : undefined;
+          activeTurn = turn;
           const branch =
             state.lastExtensionContext?.sessionManager
               .getBranch()
@@ -465,8 +468,8 @@ export const registerRouterProvider = (
                   pair,
                   isBudgetExceeded && pair.tier === 'high'
                     ? 'budget-floor-conflict'
-                    : decision.reasonCode === 'pin-safety-floor'
-                      ? 'pin-safety-floor'
+                    : decision.reasonCode === 'pinned'
+                      ? 'pinned'
                       : 'fallback',
                 ),
               };
@@ -572,7 +575,6 @@ export const registerRouterProvider = (
                   decision = {
                     ...decisionForPair(model.id, pair, 'classifier'),
                     isClassifier: true,
-                    errorClass: decision.errorClass,
                   };
               } else decision.errorClass = 'advisor-unavailable';
             }
@@ -812,6 +814,7 @@ export const registerRouterProvider = (
                   'Provider stream ended without a terminal event.',
                 );
               success = true;
+              generationSucceeded = true;
               break;
             } catch (err) {
               if (contentReceived || options?.signal?.aborted) throw err;
@@ -832,6 +835,8 @@ export const registerRouterProvider = (
           actions.recordDebugDecision(decision);
           stream.end();
         } catch (error) {
+          if (!generationSucceeded && activeTurn && advisedTurn === activeTurn)
+            advisedTurn = undefined;
           const reason = options?.signal?.aborted ? 'aborted' : 'error';
           stream.push({
             type: 'error',

@@ -700,7 +700,15 @@ describe('four-level local routing', () => {
     },
   );
 
-  it.each(['go ahead', 'continue', 'resume', 'implement it', 'apply the plan'])(
+  it.each([
+    'go ahead',
+    'continue',
+    'resume',
+    'implement it',
+    'apply the plan',
+    'yes',
+    'apply the patch',
+  ])(
     'inherits the active task floor for %s, including repeated follow-ups',
     (followUp) => {
       const conversation: Context = {
@@ -746,7 +754,7 @@ describe('four-level local routing', () => {
       ),
     ).toMatchObject({
       tier: 'high',
-      reasonCode: 'pin-safety-floor',
+      reasonCode: 'pinned',
     });
     expect(
       decideRouting(
@@ -784,10 +792,20 @@ describe('four-level local routing', () => {
     });
   });
 
-  it('preserves old three-tier profiles and rejects unsafe partial profiles', () => {
+  it('preserves old three-tier profiles and accepts informational keyword mentions', () => {
     expect(
       decideRouting(context('pwd'), 'p', { low: profile.low }, undefined).tier,
     ).toBe('low');
+    for (const prompt of [
+      'What does the auth module do?',
+      'What is the production configuration?',
+      'Can you explain the design document?',
+    ]) {
+      expect(
+        decideRouting(context(prompt), 'p', { low: profile.low }, undefined)
+          .tier,
+      ).toBe('low');
+    }
     expect(() =>
       decideRouting(
         context('design a migration'),
