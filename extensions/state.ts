@@ -34,6 +34,7 @@ const isModelRef = (value: unknown) => {
 const isDecision = (value: unknown): value is RoutingDecision =>
   isObjectRecord(value) &&
   isRouterTier(value.tier) &&
+  (value.requestedTier === undefined || isRouterTier(value.requestedTier)) &&
   isPhase(value.phase) &&
   isThinkingLevel(value.thinking) &&
   isFiniteNumber(value.timestamp) &&
@@ -141,6 +142,7 @@ export const snapshotDecision = (
   reasonCode: isRoutingReasonCode(decision.reasonCode)
     ? decision.reasonCode
     : 'legacy',
+  requestedTier: decision.requestedTier,
   routingLatencyMs:
     isFiniteNumber(decision.routingLatencyMs) && decision.routingLatencyMs >= 0
       ? decision.routingLatencyMs

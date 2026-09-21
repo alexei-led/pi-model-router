@@ -65,12 +65,27 @@ const isImplementationFollowUp = (prompt: string): boolean =>
   );
 
 const hasImplementationIntent = (prompt: string): boolean =>
-  /\b(?:implement(?:ation|ing)?|fix(?:es|ing)?|updat(?:e|ing)|edit(?:s|ing)?|writ(?:e|ing)|add(?:s|ing)?|modif(?:y|ies|ying)|refactor(?:s|ing)?|patch(?:es|ing)?|chang(?:e|es|ing)?|replac(?:e|es|ing)?|remov(?:e|es|ing)?|debug(?:s|ging)?|bug(?:s)?)\b/i.test(
+  /\b(?:implement(?:ation|ing)?|fix(?:es|ing)?|updat(?:e|ing)|edit(?:s|ing)?|writ(?:e|ing)|add(?:s|ing)?|modif(?:y|ies|ying)|refactor(?:s|ing)?|patch(?:es|ing)?|chang(?:e|es|ing)?|replac(?:e|es|ing)?|remov(?:e|es|ing)?|delet(?:e|es|ing)?|debug(?:s|ging)?|bug(?:s)?)\b/i.test(
     prompt,
   );
 
 const hasImplementationKeywords = (prompt: string): boolean =>
-  /\b(?:implement(?:ation|ing)?|cod(?:e|ing)|fix(?:es|ing)?|updat(?:e|ing)|edit(?:s|ing)?|writ(?:e|ing)|add(?:s|ing)?|modif(?:y|ies|ying)|refactor(?:s|ing)?|patch(?:es|ing)?|chang(?:e|es|ing)|replac(?:e|es|ing)|remov(?:e|es|ing)|debug(?:s|ging)?|bug(?:s)?|tests?)\b/.test(
+  /\b(?:implement(?:ation|ing)?|cod(?:e|ing)|fix(?:es|ing)?|updat(?:e|ing)|edit(?:s|ing)?|writ(?:e|ing)|add(?:s|ing)?|modif(?:y|ies|ying)|refactor(?:s|ing)?|patch(?:es|ing)?|chang(?:e|es|ing)|replac(?:e|es|ing)|remov(?:e|es|ing)|delet(?:e|es|ing)|debug(?:s|ging)?|bug(?:s)?|tests?)\b/.test(
+    prompt,
+  );
+
+const isBoundedCodeDeletion = (prompt: string): boolean =>
+  /\b(?:delet\w*|remov\w*)\b[^\r\n]{0,40}\b(?:unused|unneeded|dead)\s+(?:import|variable|parameter|line|type|function)s?\b/i.test(
+    prompt,
+  );
+
+// These intents are not made safe merely by being phrased as a question.
+const hasSafetyReviewIntent = (prompt: string): boolean =>
+  /\b(?:audit\w*|security\s+review|investigat\w*)\b/i.test(prompt) ||
+  /\b(?:how|should|need|help|want)\b[^\r\n]{0,80}\b(?:design|architect\w*)\b/i.test(
+    prompt,
+  ) ||
+  /\b(?:design|architect\w*)\b[^\r\n]{0,80}\b(?:auth(?:entication|orization)?|security|system|architecture|migration|database|api|service|flow)\b/i.test(
     prompt,
   );
 
@@ -82,16 +97,20 @@ const isInformationalPrompt = (prompt: string): boolean =>
       prompt,
     )) &&
   !hasImplementationIntent(prompt) &&
+  !hasSafetyReviewIntent(prompt) &&
   !/\b(?:fix|implement|apply|change|delete|destroy|deploy|migrat\w*|remove|run|execute|configure|rotate|patch|wipe|erase|drop)\b/i.test(
     prompt,
   );
 
 const safetyFloorForPrompt = (prompt: string): RouterTier => {
+  const destructiveDeletion =
+    /\b(?:delet\w*|remov\w*)\b/i.test(prompt) && !isBoundedCodeDeletion(prompt);
   if (
     !isInformationalPrompt(prompt) &&
-    (/\b(security|auth(?:entication|orization)?|credentials?|secrets?|vulnerabilit\w*|encrypt\w*|destructive|delet\w*|destroy\w*|eras\w*|drop(?:s|ped|ping)?|wip(?:e|es|ed|ing)|deploy\w*|production|migrat\w*|concurrency|concurrent|race conditions?|architect\w*|design(?:s|ing|ed)?|rm|sudo|chmod|chown|truncate)\b/.test(
+    (/\b(security|auth(?:entication|orization)?|credentials?|secrets?|vulnerabilit\w*|encrypt\w*|destructive|destroy\w*|eras\w*|drop(?:s|ped|ping)?|wip(?:e|es|ed|ing)|deploy\w*|production|migrat\w*|concurrency|concurrent|race conditions?|architect\w*|design(?:s|ing|ed)?|investigat\w*|audit\w*|rm|sudo|chmod|chown|truncate)\b/.test(
       prompt,
     ) ||
+      destructiveDeletion ||
       /\bgit\s+(?:reset|clean|push)\b/.test(prompt) ||
       /\bgit\s+branch\b[^\r\n;&|]*(?:\s--(?:delete|force|move|copy)\b|\s-[a-z]*[cdfm][a-z]*(?=\s|$))/i.test(
         prompt,
@@ -298,6 +317,7 @@ export const decideRouting = (
   let tier: RouterTier = 'medium';
   let reasonCode: RoutingReasonCode = 'heuristic';
   let isRuleMatched = false;
+  let requestedTier: RouterTier | undefined;
 
   if (pinnedTier) {
     phase = phaseForTier(pinnedTier);
@@ -398,9 +418,10 @@ export const decideRouting = (
   }
 
   if (!allowed(tier, floor)) {
+    requestedTier = tier;
     tier = floor;
     phase = phaseForTier(tier);
-    if (pinnedTier) reasonCode = 'pinned';
+    reasonCode = 'safety-floor';
   }
 
   let isBudgetForced = false;
@@ -426,7 +447,11 @@ export const decideRouting = (
     profileName,
   );
   if (resolvedTier !== tier) {
-    if (reasonCode !== 'budget-floor-conflict' && reasonCode !== 'pinned')
+    if (
+      reasonCode !== 'budget-floor-conflict' &&
+      reasonCode !== 'pinned' &&
+      reasonCode !== 'safety-floor'
+    )
       reasonCode = 'fallback';
     phase = phaseForTier(resolvedTier);
     tier = resolvedTier;
@@ -448,6 +473,7 @@ export const decideRouting = (
   );
   decision.isRuleMatched = isRuleMatched;
   decision.isBudgetForced = isBudgetForced;
+  decision.requestedTier = requestedTier;
   return decision;
 };
 

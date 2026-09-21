@@ -64,6 +64,7 @@ const setup = () => {
     thinkingByProfile: {},
     pinnedTierByProfile: { balanced: 'medium' },
     accumulatedCost: 0,
+    authenticationIdentity: 'test-account-generation-1',
   };
   const register = vi.fn<ExtensionAPI['registerProvider']>();
   const api = { registerProvider: register } as unknown as ExtensionAPI;
@@ -508,7 +509,8 @@ describe('four-level provider routing', () => {
     expect(s.delegate).toHaveBeenCalledOnce();
     expect(s.state.lastDecision).toMatchObject({
       tier: 'medium',
-      reasonCode: 'pinned',
+      reasonCode: 'safety-floor',
+      requestedTier: 'micro',
     });
     s.state.currentConfig.profiles.balanced = { low: { model: 'test/small' } };
     s.delegate.mockClear();
@@ -621,6 +623,9 @@ describe('Jev provider integration', () => {
   });
 
   it.each([
+    ['Can you audit authentication for vulnerabilities?', 'go ahead'],
+    ['How should we design authentication?', 'go ahead'],
+    ['Can you investigate the authorization failure?', 'go ahead'],
     ['review authentication security', 'go ahead'],
     ['design a new storage architecture', 'go ahead'],
     ['review authentication security', 'continue'],
@@ -669,7 +674,7 @@ describe('Jev provider integration', () => {
       expect(transport).toHaveBeenCalledOnce();
       expect(s.delegate).toHaveBeenCalledTimes(2);
       expect(s.state.lastDecision?.tier).toBe('high');
-      expect(s.state.lastDecision?.reasonCode).toBe('heuristic');
+      expect(s.state.lastDecision?.reasonCode).toBe('safety-floor');
     },
   );
 
@@ -815,6 +820,38 @@ describe('Jev provider integration', () => {
       expect(s.delegate.mock.calls[1]?.[0].provider).toBe(provider);
     },
   );
+
+  it('does not reuse a continuation when authentication identity is unavailable', async () => {
+    const s = setup();
+    delete s.state.authenticationIdentity;
+    delete s.state.pinnedTierByProfile.balanced;
+    const fetch = mockChoice();
+    s.state.currentConfig.classifierModel = undefined;
+    required(s.state.currentConfig.profiles.balanced).jev = { enabled: true };
+    s.state.currentConfig.jev = { ...jevConfig };
+    s.delegate.mockReturnValueOnce(finishTool());
+    await consume(s.stream(userContext()));
+    await consume(s.stream(toolContext()));
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision?.reasonCode).not.toBe('continuation');
+  });
+
+  it('clears stale advisor diagnostics on a reused continuation', async () => {
+    const s = setup();
+    delete s.state.pinnedTierByProfile.balanced;
+    const fetch = vi.fn<typeof globalThis.fetch>(() => new Promise(() => {}));
+    vi.stubGlobal('fetch', fetch);
+    s.state.currentConfig.classifierModel = undefined;
+    required(s.state.currentConfig.profiles.balanced).jev = { enabled: true };
+    s.state.currentConfig.jev = { ...jevConfig };
+    s.delegate.mockReturnValueOnce(finishTool());
+    await consume(s.stream(userContext()));
+    expect(s.state.lastDecision?.errorClass).toBe('advisor-unavailable');
+    await consume(s.stream(toolContext()));
+    expect(s.state.lastDecision?.reasonCode).toBe('continuation');
+    expect(s.state.lastDecision?.routingLatencyMs).toBeUndefined();
+    expect(s.state.lastDecision?.errorClass).toBeUndefined();
+  });
 
   it.each([
     'tool-id',

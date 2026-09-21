@@ -754,7 +754,8 @@ describe('four-level local routing', () => {
       ),
     ).toMatchObject({
       tier: 'high',
-      reasonCode: 'pinned',
+      reasonCode: 'safety-floor',
+      requestedTier: 'micro',
     });
     expect(
       decideRouting(
@@ -841,12 +842,51 @@ describe('four-level local routing', () => {
       expect(localSafetyFloor(context(prompt))).toBe('high');
       expect(
         decideRouting(context(prompt), 'p', profile, undefined),
-      ).toMatchObject({ tier: 'high', reasonCode: 'heuristic' });
+      ).toMatchObject({ tier: 'high', reasonCode: 'safety-floor' });
       expect(
         decideRouting(context(prompt), 'p', profile, undefined, 'low'),
-      ).toMatchObject({ tier: 'high', reasonCode: 'pinned' });
+      ).toMatchObject({
+        tier: 'high',
+        reasonCode: 'safety-floor',
+        requestedTier: 'low',
+      });
     },
   );
+
+  it.each([
+    'Can you audit authentication for vulnerabilities?',
+    'How should we design authentication?',
+    'Can you investigate the authorization failure?',
+  ])('raises question-form safety intent to a high floor: %s', (prompt) => {
+    expect(localSafetyFloor(context(prompt))).toBe('high');
+    expect(
+      decideRouting(context(prompt), 'p', profile, undefined),
+    ).toMatchObject({
+      tier: 'high',
+    });
+    expect(
+      decideRouting(context(prompt), 'p', profile, undefined, 'low'),
+    ).toMatchObject({
+      tier: 'high',
+      reasonCode: 'safety-floor',
+      requestedTier: 'low',
+    });
+  });
+
+  it('keeps bounded code deletion at medium while destructive deletion stays high', () => {
+    expect(localSafetyFloor(context('delete the unused import'))).toBe(
+      'medium',
+    );
+    expect(
+      decideRouting(
+        context('delete the unused import'),
+        'medium-only',
+        { medium: profile.medium },
+        undefined,
+      ),
+    ).toMatchObject({ tier: 'medium' });
+    expect(localSafetyFloor(context('delete the old files'))).toBe('high');
+  });
 
   it('normalizes route identity and honors explicit thinking overrides', () => {
     expect(

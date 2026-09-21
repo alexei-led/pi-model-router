@@ -132,6 +132,7 @@ export const ROUTING_REASON_CODES = [
   'heuristic',
   'fallback',
   'budget-floor-conflict',
+  'safety-floor',
   'legacy',
 ] as const;
 export type RoutingReasonCode = (typeof ROUTING_REASON_CODES)[number];
@@ -149,6 +150,8 @@ export interface RoutingDecision {
   targetModelId: string;
   targetLabel: string;
   reasonCode: RoutingReasonCode;
+  /** Tier requested by a pin/rule before the local safety floor overrode it. */
+  requestedTier?: RouterTier | undefined;
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
   thinking: ThinkingLevel;

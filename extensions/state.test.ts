@@ -172,6 +172,7 @@ describe('four-tier snapshots', () => {
         targetLabel: 'test/model',
         thinking: tier === 'micro' ? 'off' : tier,
         reasonCode: 'heuristic',
+        requestedTier: tier === 'high' ? 'low' : undefined,
         timestamp: 1,
       };
       const withExtraFields = {

@@ -424,7 +424,7 @@ describe('four-tier rendering', () => {
 });
 
 describe('local floor status', () => {
-  it.each(['pinned', 'budget-floor-conflict'] as const)(
+  it.each(['pinned', 'budget-floor-conflict', 'safety-floor'] as const)(
     'shows the actual route rather than waiting when the floor rejects a pin: %s',
     (reasonCode) => {
       const ctx = { ui: { setStatus: vi.fn(), setWidget: vi.fn() } };
