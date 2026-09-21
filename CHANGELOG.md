@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-09-21
 
 - Add the optional `micro` tier with `off` thinking by default; all four tiers are configured model/effort choices, not security permissions. Existing three-tier and partial profiles remain supported.
 - Replace keyword routing, task-size heuristics and phase inference with an eligible deterministic baseline. Add optional per-profile `baselineTier`; otherwise prefer medium, high, low, micro after capability filtering. Deprecated `rules` and `phaseBias` still load but are ignored with a value-free warning; remove them from configuration.
