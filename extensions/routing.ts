@@ -4,7 +4,7 @@ import {
   getSupportedThinkingLevels,
   type Model,
 } from '@earendil-works/pi-ai';
-import { parseCanonicalModelRef } from './config';
+import { parseCanonicalModelRef, resolveModelRef } from './config';
 import {
   containsAny,
   countToolResults,
@@ -482,7 +482,7 @@ export const availableRoutePairs = (
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   imageAttached: boolean,
   thinkingOverrides?: RouterThinkingByTier,
-  _models?: Record<string, ModelDefinition>,
+  models?: Record<string, ModelDefinition>,
 ): RoutePair[] =>
   ROUTER_TIERS.flatMap((tier) => {
     const config = profile[tier];
@@ -491,13 +491,18 @@ export const availableRoutePairs = (
     return [primary.model, ...(config.fallbacks ?? [])]
       .flatMap((ref, index) => {
         try {
-          // Tier and fallback references are canonicalized during config
-          // normalization. Parse them directly so a canonical-looking alias
-          // cannot resolve a second time to a different provider.
-          const { provider, modelId } = parseCanonicalModelRef(ref);
+          const resolved = resolveModelRef(ref, models ?? {});
+          const { provider, modelId } = parseCanonicalModelRef(
+            resolved.canonicalRef,
+          );
           const model = findModel(provider, modelId);
+          const fallback = config.resolvedFallbacks?.[index - 1];
           const ownConfig =
-            index === 0 ? config : config.resolvedFallbacks?.[index - 1];
+            index === 0
+              ? config
+              : fallback?.model === resolved.canonicalRef
+                ? fallback
+                : resolved.definition;
           // A non-reasoning model defaults to off, but explicit unsupported effort is rejected.
           const thinking =
             thinkingOverrides?.[tier] ??

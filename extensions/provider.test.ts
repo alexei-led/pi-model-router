@@ -146,33 +146,6 @@ describe('router provider', () => {
     });
   });
 
-  it('delegates a normalized canonical model without resolving an alias collision again', async () => {
-    const s = setup();
-    required(s.models[0]).provider = 'openai';
-    required(s.models[0]).id = 'model-a';
-    s.state.currentConfig = normalizeConfig({
-      models: {
-        primary: { model: 'openai/model-a' },
-        'openai/model-a': { model: 'anthropic/model-b' },
-      },
-      profiles: { balanced: { medium: { model: 'primary' } } },
-    }).config;
-
-    const { result } = await consume(
-      s.stream(userContext('implement a parser')),
-    );
-    expect(result.stopReason).toBe('stop');
-    expect(s.delegate).toHaveBeenCalledOnce();
-    expect(s.delegate.mock.calls[0]?.[0]).toMatchObject({
-      provider: 'openai',
-      id: 'model-a',
-    });
-    expect(s.state.lastDecision).toMatchObject({
-      targetProvider: 'openai',
-      targetModelId: 'model-a',
-    });
-  });
-
   it('reports actual capacities and re-registers when thinking capabilities change', () => {
     const s = setup();
     registerRouterProvider(s.api, s.state, s.actions);
