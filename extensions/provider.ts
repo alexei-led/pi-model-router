@@ -486,7 +486,8 @@ export const registerRouterProvider = (
             advisorConfigured
           ) {
             const started = performance.now();
-            const routingDeadline = started + (useJev ? 1500 : 10_000);
+            const routingDeadline =
+              started + (useJev && jev ? jev.timeoutMs : 10_000);
             const candidates = primaryRoutePairs(profile, pairs).map(
               createJevCandidate,
             );
@@ -497,22 +498,16 @@ export const registerRouterProvider = (
             } else if (useJev && jev) {
               decision.advisor = 'jev';
               rememberAdvisedTurn(turn, 'jev');
-              const advice = await runJev(
-                {
-                  ...jev,
-                  timeoutMs: Math.min(750, jev.timeoutMs),
-                },
-                {
-                  taskSummary: getBoundedRecentContext(
-                    context,
-                    jev.maxStateChars,
-                  ),
-                  candidates,
-                  profile: profile.jev,
-                  routingDeadline,
-                  signal: options?.signal,
-                },
-              ).catch(() => undefined);
+              const advice = await runJev(jev, {
+                taskSummary: getBoundedRecentContext(
+                  context,
+                  jev.maxStateChars,
+                ),
+                candidates,
+                profile: profile.jev,
+                routingDeadline,
+                signal: options?.signal,
+              }).catch(() => undefined);
               options?.signal?.throwIfAborted();
               // Re-read registry capabilities after the network boundary.
               pairs = available();

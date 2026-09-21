@@ -748,7 +748,7 @@ describe('config.ts Jev user-config provenance', () => {
       apiKey: 'synthetic-user-key',
       endpoint: 'https://api.typesafe.ai/v1/systemone',
       model: 'jev-1.13.0',
-      timeoutMs: 750,
+      timeoutMs: 1500,
       confidenceThreshold: 0.65,
       maxStateChars: 12000,
       mode: 'advisory',
@@ -855,7 +855,8 @@ describe('config.ts Jev user-config provenance', () => {
     { timeoutMs: 0 },
     { timeoutMs: Number.NaN },
     { timeoutMs: Number.POSITIVE_INFINITY },
-    { timeoutMs: 1501 },
+    { timeoutMs: -1 },
+    { timeoutMs: 2_147_483_648 },
     { confidenceThreshold: -1 },
     { confidenceThreshold: 2 },
     { confidenceThreshold: Number.NaN },
@@ -926,14 +927,14 @@ describe('review safety diagnostics', () => {
     expect(config.profiles.p?.high?.model).toBe('test/model');
   });
 
-  it.each([751, 1000, 1500])(
-    'warns and normalizes the effective Jev timeout for %s ms',
+  it.each([1, 500, 750, 1500, 2000, 3000, 4000, 5000, 2_147_483_647])(
+    'honors the configured Jev timeout of %s ms',
     (timeoutMs) => {
       const warnings: string[] = [];
-      expect(normalizeJevConfig({ timeoutMs }, warnings)?.timeoutMs).toBe(750);
-      expect(warnings).toEqual([
-        'Jev timeoutMs clamped to the effective 750 ms provider cap.',
-      ]);
+      expect(normalizeJevConfig({ timeoutMs }, warnings)?.timeoutMs).toBe(
+        timeoutMs,
+      );
+      expect(warnings).toEqual([]);
     },
   );
 

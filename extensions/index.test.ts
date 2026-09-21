@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { normalizeContext } from '@earendil-works/pi-ai';
 import type {
   ExtensionAPI,
@@ -64,6 +65,7 @@ describe('index.ts (orchestrator)', () => {
       registerCommand: vi.fn(),
       setModel: vi.fn().mockResolvedValue(true),
       setThinkingLevel: vi.fn(),
+      getThinkingLevel: vi.fn<() => ThinkingLevel>(() => 'medium'),
       appendEntry: vi.fn(),
       on: vi.fn().mockImplementation((event: string, handler: EventHandler) => {
         eventListeners[event] ??= [];
@@ -584,6 +586,119 @@ describe('index.ts (orchestrator)', () => {
   });
 
   describe('thinking_level_select event', () => {
+    it.each([false, true])(
+      'keeps per-tier effort after internal display sync (deferred=%s)',
+      async (deferred) => {
+        stateMocks.advisors = {
+          jev: {
+            enabled: true,
+            apiKey: 'synthetic',
+            endpoint: 'https://router-test.invalid/choice',
+            model: 'jev-1.13.0',
+            timeoutMs: 750,
+            confidenceThreshold: 0.65,
+            maxStateChars: 12000,
+            mode: 'advisory',
+          },
+        };
+        const ctx = buildMockCtx();
+        let display: ThinkingLevel = 'high';
+        const pending: Array<{
+          level: ThinkingLevel;
+          previousLevel: ThinkingLevel;
+        }> = [];
+        mockPi.getThinkingLevel.mockImplementation(() => display);
+        mockPi.setThinkingLevel.mockImplementation((level: ThinkingLevel) => {
+          if (display === level) return;
+          const event = { level, previousLevel: display };
+          display = level;
+          if (deferred) pending.push(event);
+          else
+            for (const handler of handlersFor('thinking_level_select'))
+              handler(event, ctx);
+        });
+        let choice = 'high';
+        const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as {
+            questions: { route: { criteria: Record<string, string> } };
+          };
+          const ids = Object.keys(body.questions.route.criteria);
+          const selected = ids.find((id) => id.startsWith(`${choice}|`));
+          return new Response(
+            JSON.stringify({
+              answers: {
+                route: {
+                  type: 'choice',
+                  choice: selected,
+                  confidence: 1,
+                  probabilities: Object.fromEntries(
+                    ids.map((id) => [id, id === selected ? 1 : 0]),
+                  ),
+                },
+              },
+            }),
+          );
+        });
+        vi.stubGlobal('fetch', fetch);
+        try {
+          routerExtension(mockPi);
+          Object.assign(ctx.modelRegistry, {
+            streamSimple: vi.fn(() => done()),
+          });
+          for (const handler of handlersFor('session_start'))
+            await handler({ reason: 'new' }, ctx);
+          for (const tier of ['high', 'micro', 'micro']) {
+            choice = tier;
+            for (const handler of handlersFor('turn_start'))
+              await handler({}, ctx);
+            const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+            const stream = provider?.streamSimple?.(
+              model('balanced', { provider: 'router' }),
+              normalizeContext({
+                messages: [
+                  {
+                    role: 'user',
+                    content: 'Synthetic task',
+                    timestamp: fetch.mock.calls.length + 1,
+                  },
+                ],
+              }),
+            );
+            if (!stream) throw new Error('Missing router stream');
+            for await (const _event of stream) {
+              /* Drain the provider. */
+            }
+            for (const event of pending.splice(0))
+              for (const handler of handlersFor('thinking_level_select'))
+                await handler(event, ctx);
+            expect(
+              mockPi.appendEntry.mock.calls.at(-1)?.[1].thinkingByProfile,
+            ).toEqual({});
+            expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+              lastDecision: {
+                tier,
+                thinking: tier === 'micro' ? 'off' : 'medium',
+                advisor: 'jev',
+              },
+            });
+          }
+          for (const handler of handlersFor('thinking_level_select'))
+            await handler({ level: 'low', previousLevel: display }, ctx);
+          expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+            thinkingByProfile: {
+              balanced: {
+                high: 'low',
+                medium: 'low',
+                low: 'low',
+                micro: 'low',
+              },
+            },
+          });
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      },
+    );
     it.each(['max', 'minimal'])(
       'rejects unsupported %s selection atomically and restores Pi display',
       async (level) => {

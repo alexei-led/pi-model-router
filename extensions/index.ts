@@ -57,6 +57,10 @@ const routerExtension = (pi: ExtensionAPI) => {
   let isInitialized = false;
   let isInternalModelSwitch = false;
   let isInternalThinkingChange = false;
+  const pendingThinkingChanges: Array<{
+    previousLevel: ThinkingLevel;
+    level: ThinkingLevel;
+  }> = [];
   let ignoreStartupThinkingEvent = false;
 
   const runtimeState = {
@@ -142,13 +146,27 @@ const routerExtension = (pi: ExtensionAPI) => {
   };
 
   const setThinkingLevelInternally = (level: ThinkingLevel) => {
+    let previousLevel: ThinkingLevel;
+    try {
+      previousLevel = pi.getThinkingLevel();
+    } catch {
+      return; // The session runtime may already be torn down.
+    }
+    const change = { previousLevel, level };
+    pendingThinkingChanges.push(change);
     isInternalThinkingChange = true;
     try {
       pi.setThinkingLevel(level);
+      change.level = pi.getThinkingLevel();
     } catch {
       // Extension context may be stale after session teardown.
+      change.level = change.previousLevel;
     } finally {
       isInternalThinkingChange = false;
+      if (change.level === change.previousLevel) {
+        const index = pendingThinkingChanges.indexOf(change);
+        if (index >= 0) pendingThinkingChanges.splice(index, 1);
+      }
     }
   };
 
@@ -513,8 +531,21 @@ const routerExtension = (pi: ExtensionAPI) => {
 
   pi.on('thinking_level_select', (event, ctx) => {
     ensureInitializedFromContext(ctx);
+    if (isInternalThinkingChange) {
+      pendingThinkingChanges.pop();
+      return;
+    }
+    // Pi emits without awaiting extension handlers; earlier handlers can delay this echo.
+    const internalChange = pendingThinkingChanges.findIndex(
+      (change) =>
+        change.previousLevel === event.previousLevel &&
+        change.level === event.level,
+    );
+    if (internalChange >= 0) {
+      pendingThinkingChanges.splice(internalChange, 1);
+      return;
+    }
     if (!isInitialized || !routerEnabled || !selectedProfile) return;
-    if (isInternalThinkingChange) return;
     if (ignoreStartupThinkingEvent) {
       ignoreStartupThinkingEvent = false;
       return;

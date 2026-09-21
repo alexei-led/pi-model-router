@@ -95,7 +95,7 @@ pi -e ./extensions/index.ts
 
 - Generation and classification use Pi's provider registry, including native/custom providers and credential-specific URLs. Only the optional Jev advisor uses separate HTTPS transport.
 - Fallbacks run only before content is emitted; cancellation does not retry. Every target must support the requested input and exact thinking level; explicit unsupported effort is not silently reduced. Omitted thinking defaults to `off` for non-reasoning targets, including fallbacks.
-- Jev gets at most 750 ms (or its shorter configured timeout and remaining time in the 1500 ms advisory budget), with no retry. The separate classifier-only compatibility path retains its 10-second bound and 256-token output limit. Failure or uncertainty means eligible baseline; caller cancellation stops generation.
+- Jev gets a configurable total advisory budget via `jev.timeoutMs`: 1500 ms by default, with no additional routing cap or retry. The separate classifier-only compatibility path retains its 10-second bound and 256-token output limit. Failure or uncertainty means eligible baseline; caller cancellation stops generation.
 - Valid same-turn tool continuations reuse the actual prior route before either advisor. Pins, budget policy and a single eligible primary candidate also bypass advisors. Invalid continuations choose a compatible local route without advice; incompatible Google thought-signature replay fails plainly.
 - Pi owns tool execution permissions and per-request authentication. The router checks configured provider/profile identity, not which backend login is currently behind a provider. No private authentication storage is read.
 - Context trimming preserves system instructions and whole active tool turns. It is a text estimate, not a guarantee that images or a large active turn fit.
@@ -199,7 +199,7 @@ profile opt-ins, are ignored with a warning, before merging user credentials.
     "apiKey": "<rendered by chezmoi/1Password>",
     "endpoint": "https://api.typesafe.ai/v1/systemone",
     "model": "jev-1.13.0",
-    "timeoutMs": 750,
+    "timeoutMs": 1500,
     "confidenceThreshold": 0.65,
     "maxStateChars": 12000,
     "mode": "advisory"
@@ -218,13 +218,21 @@ profile opt-ins, are ignored with a warning, before merging user credentials.
 
 The endpoint, model, timeout, confidence threshold, state limit and mode shown
 above are defaults. Only HTTPS endpoints without embedded credentials, query
-parameters or fragments are accepted. Timeout must be positive and at most
-1500 ms, confidence must be 0–1, and the context limit must be 1–12000 characters.
-Provider routing further caps Jev at 750 ms within the fixed 1500 ms advisory
-budget; increasing `timeoutMs` does not extend those caps. Values above 750 ms
-are normalized to 750 ms with a configuration warning. The separate classifier-only
+parameters or fragments are accepted. `timeoutMs` defaults to 1500 ms and must
+be a positive finite number within Node's timer range (at most 2147483647 ms).
+There is no product-level cap: 4000 or 5000 ms are valid if you prefer waiting
+longer before falling back. It sets the total Jev advisory budget, including
+request and response-body time; there is no separate 750 ms cap. Confidence must
+be 0–1, and the context limit must be 1–12000 characters. The separate classifier-only
 path keeps a 10-second bound. Neither path retries or starts generation after
 caller cancellation.
+
+If Jev frequently falls back because requests time out, try `"timeoutMs": 3000`
+in your user config. Existing explicit values such as 750 remain unchanged;
+remove the field or set it to 1500 to use the new default. Increasing the timeout
+does not lower the confidence threshold or guarantee a different route. After
+upgrading, start a new Pi session; use `/router thinking auto` to clear any
+unwanted effort override in an existing session.
 
 **External data:** Jev receives bounded, role-labelled recent user/assistant/tool
 text, prioritizing the latest user request within `maxStateChars`, plus candidate

@@ -25,7 +25,7 @@ Four tiers (`micro`, `low`, `medium`, `high`) are model/effort choices, not secu
 1. Validate config, live capabilities and caller cancellation. Reuse a validated same-turn tool route, or select a compatible local route without advisors for an invalid continuation.
 2. Honor an explicit pin within its configured tier; reject an ineligible pin. Otherwise, above the soft generation budget, skip advisors and prefer an eligible baseline among medium-or-lower tiers if any. Advisor costs are excluded.
 3. Build eligible primary candidates; one candidate bypasses advisors. Explicit ordered generation fallbacks are not extra Jev candidates.
-4. User-level Jev enablement, active-profile privacy opt-in and a key authorize one bounded recent-context request. Accept only a validated current candidate. Failure/uncertainty goes directly to baseline, never a second advisor. Jev is capped at 750 ms and remaining time in a 1500 ms advisory budget.
+4. User-level Jev enablement, active-profile privacy opt-in and a key authorize one bounded recent-context request. Accept only a validated current candidate. Failure/uncertainty goes directly to baseline, never a second advisor. `jev.timeoutMs` sets Jev's total advisory budget (default 1500 ms, positive and within Node's timer range, with no product-level cap); the request and body reader share the remaining budget.
 5. When Jev is not active, the optional Pi classifier may advise any of the four tiers under its separate 10-second bound. Failure or no advisor means baseline. Caller abort never starts baseline generation.
 6. Revalidate the actual generation/fallback target and delegate through Pi. Retry only explicit fallbacks before visible content, never on cancellation.
 

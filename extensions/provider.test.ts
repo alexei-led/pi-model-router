@@ -606,6 +606,47 @@ const mockChoice = (tier = 'medium') => {
 const userContext = (text = 'implement a parser', timestamp = 1): Context => ({
   messages: [{ role: 'user', content: text, timestamp }],
 });
+const astraSetup = () => {
+  const s = setup();
+  s.models.splice(
+    0,
+    s.models.length,
+    ...['gpt-6-astra', 'gpt-5.6-luna', 'gpt-5.6-sol'].map((id) =>
+      model(id, {
+        provider: 'openai-codex-personal',
+        thinkingLevelMap: {
+          ...(id === 'gpt-6-astra' ? { off: null } : {}),
+          minimal: 'low',
+          xhigh: 'xhigh',
+          max: 'max',
+        },
+      }),
+    ),
+  );
+  s.state.currentConfig = normalizeConfig({
+    jev: jevConfig,
+    models: {
+      frontier: { model: 'openai-codex-personal/gpt-6-astra' },
+      worker: { model: 'openai-codex-personal/gpt-5.6-luna' },
+      fast: { model: 'openai-codex-personal/gpt-5.6-luna' },
+    },
+    profiles: {
+      balanced: {
+        jev: { enabled: true },
+        high: {
+          model: 'frontier',
+          thinking: 'high',
+          fallbacks: ['openai-codex-personal/gpt-5.6-sol'],
+        },
+        medium: { model: 'worker', thinking: 'max' },
+        low: { model: 'fast', thinking: 'max' },
+        micro: { model: 'fast', thinking: 'off' },
+      },
+    },
+  }).config;
+  delete s.state.pinnedTierByProfile.balanced;
+  return s;
+};
 const toolMessage = (provider = 'test', id = 'primary') =>
   message({
     provider,
@@ -651,8 +692,81 @@ const gatedFinishTool = (gate: Promise<void>, assistant = toolMessage()) =>
 
 describe('Jev provider integration', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it.each([false, true])(
+    'offers and accepts high/Astra after alias normalization (image=%s)',
+    async (image) => {
+      const s = astraSetup();
+      const fetch = mockChoice('high');
+      const context = userContext('Synthetic routing task');
+      if (image)
+        context.messages.push({
+          role: 'user',
+          content: [
+            { type: 'image', data: 'synthetic', mimeType: 'image/png' },
+          ],
+          timestamp: 2,
+        });
+
+      const { result } = await consume(s.stream(context));
+
+      expect(result.stopReason).toBe('stop');
+      expect(fetch).toHaveBeenCalledOnce();
+      const body = JSON.parse(
+        String(fetch.mock.calls[0]?.[1]?.body),
+      ) as ChoiceRequest;
+      expect(Object.keys(body.questions.route.criteria)).toEqual([
+        'uncertain',
+        'medium|openai-codex-personal%2Fgpt-5.6-luna|max',
+        'high|openai-codex-personal%2Fgpt-6-astra|high',
+        'low|openai-codex-personal%2Fgpt-5.6-luna|max',
+        'micro|openai-codex-personal%2Fgpt-5.6-luna|off',
+      ]);
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'high',
+        targetLabel: 'openai-codex-personal/gpt-6-astra',
+        thinking: 'high',
+        reasonCode: 'jev',
+        advisor: 'jev',
+      });
+      expect(s.delegate).toHaveBeenCalledOnce();
+      expect(s.delegate.mock.calls[0]?.[0]).toMatchObject({
+        provider: 'openai-codex-personal',
+        id: 'gpt-6-astra',
+      });
+      expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('high');
+    },
+  );
+
+  it('uses medium/Luna baseline when Jev exceeds its cap despite eligible Astra', async () => {
+    vi.useFakeTimers();
+    const s = astraSetup();
+    const fetch = vi.fn<typeof globalThis.fetch>(() => new Promise(() => {}));
+    vi.stubGlobal('fetch', fetch);
+    const pending = consume(s.stream(userContext('Synthetic routing task')));
+
+    await vi.advanceTimersByTimeAsync(749);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(s.delegate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    const { result } = await pending;
+
+    expect(result.stopReason).toBe('stop');
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.delegate.mock.calls[0]?.[0].id).toBe('gpt-5.6-luna');
+    expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('max');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      thinking: 'max',
+      reasonCode: 'baseline',
+      advisor: 'jev-fallback',
+    });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('keeps interleaved stream continuations keyed to their originating turn', async () => {
@@ -1113,9 +1227,9 @@ describe('Jev provider integration', () => {
       const s = setup();
       enableAdvisors(s);
       if (source === 'jev') {
-        const fetch = vi.fn<typeof globalThis.fetch>(
-          () => new Promise(() => {}),
-        );
+        const fetch = vi
+          .fn<typeof globalThis.fetch>()
+          .mockResolvedValue(new Response(null, { status: 503 }));
         vi.stubGlobal('fetch', fetch);
       } else {
         s.state.currentConfig.jev = undefined;
@@ -1412,8 +1526,48 @@ describe('Jev provider integration', () => {
     expect(s.delegate).toHaveBeenCalledOnce();
   });
 
-  it.each([500, 750, 3000])(
-    'bounds Jev to its 750ms cap (configured %i) and falls directly to baseline',
+  it.each([
+    [1500, 900],
+    [3000, 2000],
+    [5000, 4000],
+  ])(
+    'accepts Jev within a %i ms budget after %i ms',
+    async (timeoutMs, delayMs) => {
+      vi.useFakeTimers({
+        toFake: ['setTimeout', 'clearTimeout', 'performance'],
+      });
+      try {
+        const s = setup();
+        enableAdvisors(s);
+        required(s.state.currentConfig.jev).timeoutMs = timeoutMs;
+        const transport = vi.fn<typeof fetch>(
+          (_url, init) =>
+            new Promise((resolve) => {
+              setTimeout(() => resolve(choiceResponse(init, 'high')), delayMs);
+            }),
+        );
+        vi.stubGlobal('fetch', transport);
+        const pending = consume(s.stream(userContext()));
+        await vi.advanceTimersByTimeAsync(delayMs - 1);
+        expect(s.delegate).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect((await pending).result.stopReason).toBe('stop');
+        expect(transport).toHaveBeenCalledOnce();
+        expect(s.delegate).toHaveBeenCalledOnce();
+        expect(s.state.lastDecision).toMatchObject({
+          tier: 'high',
+          reasonCode: 'jev',
+          advisor: 'jev',
+          routingLatencyMs: delayMs,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([500, 750, 1500, 3000, 5000])(
+    'bounds Jev to its configured %i ms budget and falls directly to baseline',
     async (timeoutMs) => {
       vi.useFakeTimers({
         toFake: ['setTimeout', 'clearTimeout', 'performance'],
@@ -1426,7 +1580,7 @@ describe('Jev provider integration', () => {
         vi.stubGlobal('fetch', transport);
         const pending = consume(s.stream(userContext()));
         await vi.advanceTimersByTimeAsync(0);
-        const cap = Math.min(timeoutMs, 750);
+        const cap = timeoutMs;
         await vi.advanceTimersByTimeAsync(cap - 1);
         expect(s.delegate).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(1);
@@ -1437,7 +1591,7 @@ describe('Jev provider integration', () => {
         expect(s.state.lastDecision).toMatchObject({
           tier: 'medium',
           reasonCode: 'baseline',
-          errorClass: 'advisor-unavailable',
+          errorClass: 'deadline',
           routingLatencyMs: cap,
         });
       } finally {

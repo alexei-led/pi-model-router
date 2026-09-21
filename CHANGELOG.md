@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2 - 2026-09-21
+
+- Increase the default Jev timeout from 750 ms to 1500 ms. User-level `jev.timeoutMs` now sets the total advisory budget without the previous hidden 750 ms cap or an arbitrary upper cap. Positive finite values within Node's timer range are accepted, including 4000 and 5000 ms. Existing explicit shorter timeouts remain valid.
+- Fix delayed Pi thinking-display events being mistaken for user changes and overriding every routing tier. Internal display updates now preserve configured per-tier effort; explicit user overrides still apply.
+- Keep privacy opt-in, confidence validation, caller cancellation, and direct baseline fallback unchanged. No additional advisory requests or retries.
+- Add regression coverage for delayed valid Jev responses, configurable deadlines, internal thinking events, and Astra/Luna candidate selection. Align configuration examples and operator documentation.
+
 ## 0.6.1 — 2026-09-21
 
 - Add compact human-readable route provenance to the Pi footer, widget and `/router status`: `🧭 Jev ✓` means Jev selected the route, `🧭 Jev ↪ base` means Jev ran but the local baseline was used, and no marker means Jev was not involved.

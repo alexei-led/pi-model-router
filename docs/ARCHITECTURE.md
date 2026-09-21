@@ -27,8 +27,10 @@ For every request sent to a `router/*` model, the following logic is executed:
 5. **Classifier-only compatibility path (optional)**: When Jev is not active (disabled, not opted in or missing a key), a configured Pi classifier can advise `micro|low|medium|high` semantically. Its isolated bounded recent context excludes the main system prompt/tools and output is limited to 256 tokens. Failure/uncertainty means baseline. Without either advisor, use baseline directly.
 6. **Revalidation and delegation**: Revalidate after advice and before every generation/fallback attempt. Only explicit configured generation fallbacks authorize cross-provider alternatives; no implicit profile/account switch.
 
-`provider.ts` gives Jev an absolute monotonic deadline (`performance.now() + 1500`).
-Jev gets the minimum of its configured timeout, 750 ms and remaining time. The
+`provider.ts` gives Jev an absolute monotonic deadline using `jev.timeoutMs`
+(default 1500 ms, validated against Node's timer range, without a product-level cap).
+The adapter gets the minimum of that configured
+timeout and the remaining budget, including request and response-body time. The
 separate classifier-only path retains a 10-second bound; it does not share a
 fallback deadline with Jev. Neither advisor retries. Caller cancellation stops
 generation rather than starting a local fallback. Bounded per-turn advisor guards
@@ -39,6 +41,8 @@ and every fallback, not tier labels. Local declarations may restrict but cannot
 grant registry capabilities; unsupported effort is rejected, never clamped.
 Profiles without an eligible route fail with an actionable error. Thinking
 overrides preserve route coverage and reject changes atomically if no route remains.
+Internal Pi thinking-display updates track their expected events across delayed
+handler delivery, so they do not become user overrides for every tier.
 
 Legacy `rules` and `phaseBias` remain loadable but have no routing effect and emit
 a fixed value-free deprecation warning. There is no hidden keyword mode, safety

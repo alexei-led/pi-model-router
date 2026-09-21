@@ -376,10 +376,13 @@ export const normalizeTierConfig = (
   };
 };
 
+// Node turns larger setTimeout delays into 1 ms rather than waiting longer.
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export const DEFAULT_JEV_CONFIG = {
   endpoint: 'https://api.typesafe.ai/v1/systemone',
   model: 'jev-1.13.0',
-  timeoutMs: 750,
+  timeoutMs: 1500,
   confidenceThreshold: 0.65,
   maxStateChars: 12000,
   mode: 'advisory',
@@ -420,7 +423,7 @@ export const normalizeJevConfig = (
     typeof value.timeoutMs !== 'number' ||
     !Number.isFinite(value.timeoutMs) ||
     value.timeoutMs <= 0 ||
-    value.timeoutMs > 1500 ||
+    value.timeoutMs > MAX_TIMER_DELAY_MS ||
     typeof value.confidenceThreshold !== 'number' ||
     !Number.isFinite(value.confidenceThreshold) ||
     value.confidenceThreshold < 0 ||
@@ -434,10 +437,6 @@ export const normalizeJevConfig = (
       (typeof value.apiKey !== 'string' || /[\r\n]/.test(value.apiKey)))
   )
     return invalid();
-  if (value.timeoutMs > 750)
-    warnings.push(
-      'Jev timeoutMs clamped to the effective 750 ms provider cap.',
-    );
   const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
   if (value.enabled === true && !apiKey) {
     warnings.push('Jev disabled: missing user-config API key.');
@@ -447,7 +446,7 @@ export const normalizeJevConfig = (
     apiKey,
     endpoint: value.endpoint,
     model: value.model,
-    timeoutMs: Math.min(value.timeoutMs, 750),
+    timeoutMs: value.timeoutMs,
     confidenceThreshold: value.confidenceThreshold,
     maxStateChars: value.maxStateChars,
     mode: 'advisory',

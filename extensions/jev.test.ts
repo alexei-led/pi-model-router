@@ -182,7 +182,7 @@ describe('jev.ts HTTP contract', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it.each([750, 100])(
+  it.each([1500, 100])(
     'bounds a hung fetch to %i ms including a shorter shared deadline',
     async (remaining) => {
       vi.useFakeTimers();
@@ -214,7 +214,7 @@ describe('jev.ts HTTP contract', () => {
           );
         }),
     );
-    const pending = runJev(config, request({ routingDeadline: 1500 }), {
+    const pending = runJev(config, request({ routingDeadline: 3000 }), {
       fetch,
       now: () => 0,
     });
@@ -249,7 +249,7 @@ describe('jev.ts HTTP contract', () => {
       fetch,
       now: () => 0,
     });
-    await vi.advanceTimersByTimeAsync(750);
+    await vi.advanceTimersByTimeAsync(1500);
     await expect(pending).resolves.toBeUndefined();
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
@@ -260,7 +260,7 @@ describe('jev.ts HTTP contract', () => {
     const now = vi
       .fn<() => number>()
       .mockReturnValueOnce(0)
-      .mockReturnValue(750);
+      .mockReturnValue(1500);
     await expect(
       runJev(config, request({ routingDeadline: 1500 }), { fetch, now }),
     ).resolves.toBeUndefined();

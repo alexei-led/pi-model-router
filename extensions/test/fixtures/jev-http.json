@@ -85,7 +85,7 @@
     { "status": 500, "body": "redacted server error" },
     { "status": 529, "body": "redacted overload error" }
   ],
-  "timeout": { "delayMs": 751 },
+  "timeout": { "delayMs": 1501 },
   "malformed": [
     "{invalid",
     "null",
