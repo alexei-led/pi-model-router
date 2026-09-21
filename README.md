@@ -248,6 +248,10 @@ are probabilistic, not a security sandbox; Pi owns tool permissions.
 
 Jev classifies the **latest user request**, using earlier messages only as
 context. Criteria describe the reasoning each tier supports, not just its name.
+The objective is **quality-first**: prefer frontier reasoning when it can materially
+improve correctness, completeness or reduce rework, even if a smaller model could
+probably complete the task. Direct retrieval and mechanical work still favor
+micro/low. This is semantic advice, not a local keyword or complexity heuristic.
 Do not increase the context limit or lower the threshold just to raise confidence.
 Confidence measures decisiveness across choices, **not** the chance that the
 selected generation model will succeed. It is distinct from the selected option's
@@ -260,6 +264,28 @@ when no waiters remain. Each new user turn can choose a different backend and
 thinking level. Tool continuations keep their validated route. The logical
 `router/<profile>` stays selected throughout; this is not conversation-wide pinning.
 
+### Quality-first fallback
+
+If avoiding underpowered answers matters more than extra cost/latency, set
+`"baselineTier": "high"` in an existing profile with a configured high tier:
+
+```json
+{
+  "profiles": {
+    "personal": {
+      "baselineTier": "high"
+    }
+  }
+}
+```
+
+Merge this into the existing profile; it is not a complete standalone profile.
+Uncertain, low-confidence, failed or timed-out advice then prefers the eligible high
+route. Confident micro/low advice still wins. Pins, live capabilities, explicit
+fallback order and the soft budget still apply; high is not a forced minimum.
+Profiles without this setting retain their existing baseline policy. The extension
+never edits user configuration or privacy opt-ins automatically.
+
 ### Routing diagnostics and display
 
 ```json
@@ -270,29 +296,40 @@ thinking level. Tool continuations keep their validated route. The logical
 
 - **`compact` (default):** profile, tier, model/thinking, advisor outcome, confidence
   and latency. Omits the repeated provider prefix to fit split panes.
-  Example: `🧭 Jev high↪base c35%<65% 764ms` means high was advised but its
-  confidence was below the threshold; the displayed generation route is baseline.
-- **`detailed`:** also shows the advised tier, selected probability, threshold and
-  local request-start time. Example:
-  `🧭 Jev ↪ base: low-confidence [high c35% p48%] t65% 764ms @18:34:49`.
+  Examples: `🧭 Jev → high c91% · 807ms`,
+  `🧭 Jev high c35% <65% → baseline · 764ms`,
+  `🧭 Jev: no tier chosen → baseline · 860ms`,
+  `🧭 Jev: timeout → baseline · 5.0s`.
+- **`detailed`:** adds selected probability and local request-start time. Example:
+  `🧭 Jev high c35% <65% → baseline · 764ms · p48% @18:34:49`.
   Use this on wide terminals; long model/profile names can truncate a footer.
 - **Widget / status:** `/router widget on` or `/router status` shows full metrics,
   including the Jev model label, HTTP status, candidate count and context characters.
 - **History:** `/router debug on`, then `/router debug show`. The last 50 decisions
   are saved in branch-safe `router-state` session entries and restored on resume.
   Debug off stops collecting history; the latest decision still persists.
+- **Statistics:** `/router debug stats` reports unique HTTP requests, advised tiers,
+  outcome counts/rates and median latency. Statistics cover only the retained
+  decision window, **not session lifetime**. Locally generated request IDs deduplicate
+  shared requests, cached routes and tool continuations, including after resume.
+  Older decisions without IDs are excluded. `/router debug clear` clears the window.
 
-`c` is confidence, `p` is the selected option's probability, `t` is the acceptance
-threshold. `ms` is local request-to-validated-result time, not pure model inference
+`c` is confidence; `p` is the selected option's probability. `<65%` explains a
+confidence rejection. `ms`/`s` is local request-to-validated-result time, not pure model inference
 time. `@` is the original request's local start time. `reuse` / `tool route` means
 no new Jev request: the displayed metrics belong to the original routing attempt.
-`base` means deterministic local baseline, not necessarily the medium tier.
+`baseline` (or `base` in older traces) means deterministic local baseline, not necessarily the medium tier.
+`no tier chosen` means Jev could not judge the required capability from the supplied
+context. It does not prove that context was missing. Compact mode omits abstention
+scores; widget/debug label them `abstention-confidence` and `abstention-p`, not
+confidence in the generation model. The acceptance threshold is not applied to abstention.
 `local baseline` / `advice bypassed` distinguishes no advisor from a rejected answer.
 
 Failures are distinguished as `low-confidence`, `uncertain`, `invalid-response`,
 `http-error`, `network-error`, `deadline`, `cancelled` or `unavailable`. A quick
 low-confidence rejection is **not a timeout**; increasing timeout will not fix it.
-Only validated choices and numeric diagnostics are retained. State/debug never
+Only validated choices, numeric diagnostics, recognized version labels and locally
+generated request IDs are retained. State/debug never
 retain the Jev key, endpoint, request text, raw response or remote explanations.
 Older explanations are discarded as non-rendered `legacy` metadata; Pi's own
 conversation transcript is separate from router state.
@@ -322,6 +359,7 @@ keeps Jev disabled.
 | `/router disable`           | Disable the router and switch back to the last non-router model.                |
 | `/router widget <on\|off>`  | Toggle the persistent state widget (supports `toggle`).                         |
 | `/router debug <on\|off>`   | Toggle router debug state; use `show` or `clear` for local decision history. |
+| `/router debug stats`       | Deduplicated Jev counts, advised tiers, fallback rates and median latency for retained history. |
 | `/router reload`            | Hot-reload the configuration JSON.                                              |
 | `/router help`              | Show usage help for all subcommands.                                            |
 

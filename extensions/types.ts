@@ -125,6 +125,8 @@ export const JEV_OUTCOMES = [
 ] as const;
 export type JevOutcome = (typeof JEV_OUTCOMES)[number];
 export interface JevDiagnostics {
+  /** Locally generated per HTTP request, shared by reusers; never supplied by Jev. */
+  requestId?: string | undefined;
   outcome: JevOutcome;
   latencyMs: number;
   startedAt?: number | undefined;

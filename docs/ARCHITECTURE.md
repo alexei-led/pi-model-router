@@ -87,7 +87,10 @@ Conversation text, including bounded tool output, is not redacted and may contai
 private data or secrets: profile opt-in is approval to send it externally. Short,
 multilingual and imperfect replies are data for the advisor, not local branches.
 Choice instructions focus on the latest user request and describe distinct reasoning
-requirements for each tier. Historical task difficulty does not define the new turn.
+requirements for each tier. The quality-first objective favors frontier reasoning
+when it can materially improve correctness or reduce rework, not only when cheaper
+routes are incapable. Micro/low remain appropriate for straightforward work.
+Historical task difficulty does not define the new turn.
 
 Candidate IDs encode the tuple `(tier, canonical model reference, thinking)` with
 escaped components, so same-model tiers and separator-containing IDs cannot
@@ -148,7 +151,11 @@ rejected. Continuations clear per-call advisor latency/error/classifier fields b
 retain the original nested Jev metrics, including request-start time, with an explicit
 reuse marker. Debug mode persists the last 50 decisions through the existing
 branch-safe state snapshots; no extra transcript message or external log is needed.
-Nested metrics are copied field-by-field on save/restore. No key, endpoint, task text,
+Nested metrics are copied field-by-field on save/restore. A local UUID is generated
+only when an HTTP request is attempted; it is shared across waiters and route reuse.
+`/router debug stats` deduplicates these IDs within the retained 50-decision window,
+not across session lifetime. Entries without IDs are excluded. Debug-off stops
+collection while preserving existing history and the latest decision. No key, endpoint, task text,
 raw response, rule explanation or remote reasoning enters router state/debug/UI. Pi's own conversation storage is outside this boundary.
 
 The last explicitly selected router profile is also stored in `~/.pi/agent/model-router-state.json`. An explicit startup `--model` selection takes precedence over both cross-session and branch state. Otherwise, a resumed session's branch-specific `router-state` entry wins; a fresh startup or `/new` session uses the cross-session profile when Pi starts on the router provider and that profile is still configured.

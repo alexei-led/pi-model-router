@@ -1188,6 +1188,35 @@ describe('Jev provider integration', () => {
     },
   );
 
+  it.each([
+    ['uncertain', 'high', 'gpt-6-astra', 'jev-fallback'],
+    ['micro', 'micro', 'gpt-5.6-luna', 'jev'],
+    ['low', 'low', 'gpt-5.6-luna', 'jev'],
+  ] as const)(
+    'uses high as baseline without overriding confident %s advice',
+    async (choice, tier, target, advisor) => {
+      const s = astraSetup();
+      required(s.state.currentConfig.profiles.balanced).baselineTier = 'high';
+      const fetch = mockChoice(choice);
+      await consume(s.stream(userContext()));
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(s.delegate.mock.calls[0]?.[0].id).toBe(target);
+      expect(s.state.lastDecision).toMatchObject({ tier, advisor });
+    },
+  );
+
+  it('still honors the budget before a high baseline and skips Jev', async () => {
+    const s = astraSetup();
+    required(s.state.currentConfig.profiles.balanced).baselineTier = 'high';
+    s.state.currentConfig.maxSessionBudget = 0.01;
+    s.state.accumulatedCost = 1;
+    const fetch = mockChoice('high');
+    await consume(s.stream(userContext()));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(s.state.lastDecision?.tier).not.toBe('high');
+    expect(s.state.lastDecision?.isBudgetForced).toBe(true);
+  });
+
   it('reuses the Jev route on a repeated call for the same user turn', async () => {
     const s = setup();
     enableAdvisors(s);

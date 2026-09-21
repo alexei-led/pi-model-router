@@ -151,6 +151,11 @@ const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
     return undefined;
   const result: JevDiagnostics = { outcome, latencyMs: value.latencyMs };
   if (
+    typeof value.requestId === 'string' &&
+    /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value.requestId)
+  )
+    result.requestId = value.requestId;
+  if (
     typeof value.model === 'string' &&
     /^(?:jev-latest|jev-\d+(?:\.\d+){1,3})$/.test(value.model)
   )

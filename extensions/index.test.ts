@@ -151,6 +151,60 @@ describe('index.ts (orchestrator)', () => {
     }
   });
 
+  it('collects only when debug is on and retains 50 decisions', async () => {
+    routerExtension(mockPi);
+    const ctx = buildMockCtx();
+    Object.assign(ctx.modelRegistry, { streamSimple: vi.fn(() => done()) });
+    for (const handler of handlersFor('session_start'))
+      await handler({ reason: 'new' }, ctx);
+    const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+    const command = mockPi.registerCommand.mock.calls.find(
+      ([name]) => name === 'router',
+    )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1];
+    const send = async (timestamp: number) => {
+      const stream = provider?.streamSimple?.(
+        model('balanced', { provider: 'router' }),
+        normalizeContext({
+          messages: [{ role: 'user', content: `task ${timestamp}`, timestamp }],
+        }),
+      );
+      if (!stream) throw new Error('Missing router stream');
+      for await (const _event of stream) {
+        /* Drain generation. */
+      }
+      expect((await stream.result()).stopReason).toBe('stop');
+    };
+    await send(1);
+    expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+      debugHistory: [],
+      lastDecision: expect.any(Object),
+    });
+    await command.handler(
+      'debug on',
+      ctx as unknown as ExtensionCommandContext,
+    );
+    for (let turn = 2; turn <= 53; turn++) await send(turn);
+    const before = mockPi.appendEntry.mock.calls.at(-1)?.[1];
+    expect(before.debugHistory).toHaveLength(50);
+    await command.handler(
+      'debug off',
+      ctx as unknown as ExtensionCommandContext,
+    );
+    await send(54);
+    expect(mockPi.appendEntry.mock.calls.at(-1)?.[1].debugHistory).toEqual(
+      before.debugHistory,
+    );
+    await command.handler(
+      'debug clear',
+      ctx as unknown as ExtensionCommandContext,
+    );
+    expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+      debugEnabled: false,
+      debugHistory: [],
+      lastDecision: expect.any(Object),
+    });
+  });
+
   it('restores micro pins and thinking overrides without migration', async () => {
     routerExtension(mockPi);
     const ctx = buildMockCtx();
@@ -228,6 +282,13 @@ describe('index.ts (orchestrator)', () => {
         Object.assign(ctx.modelRegistry, { streamSimple: delegate });
         for (const handler of handlersFor('session_start'))
           await handler({ reason: 'new' }, ctx);
+        const command = mockPi.registerCommand.mock.calls.find(
+          ([name]) => name === 'router',
+        )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1];
+        await command.handler(
+          'debug on',
+          ctx as unknown as ExtensionCommandContext,
+        );
         const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
         const stream = provider?.streamSimple?.(
           model('balanced', { provider: 'router' }),

@@ -953,6 +953,33 @@ describe('commands.ts', () => {
   });
 
   describe('handleDebug edge cases', () => {
+    it('shows stats without toggling collection or persisting new state', async () => {
+      const pi = buildMockPi();
+      const state = buildDefaultState();
+      state.debugEnabled = false;
+      state.debugHistory.length = 0;
+      const actions = buildMockActions();
+      const ctx = buildMockCtx();
+      registerCommands(pi as unknown as ExtensionAPI, state, actions);
+      const cmd = pi.getRegisteredCommand();
+      expect(cmd.getArgumentCompletions('debug st')).toContainEqual(
+        expect.objectContaining({ value: 'debug stats' }),
+      );
+      await cmd.handler(
+        'debug stats',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining('0 unique HTTP requests'),
+        'info',
+      );
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining('use /router debug on'),
+        'info',
+      );
+      expect(state.debugEnabled).toBe(false);
+      expect(actions.persistState).not.toHaveBeenCalled();
+    });
     it('enable debug explicitly', async () => {
       const pi = buildMockPi();
       const state = buildDefaultState();
@@ -1028,7 +1055,7 @@ describe('commands.ts', () => {
         ctx as unknown as ExtensionCommandContext,
       );
       expect(ctx.ui.notify).toHaveBeenCalledWith(
-        'Usage: /router debug <on|off|show|clear>',
+        'Usage: /router debug <on|off|show|stats|clear>',
         'error',
       );
     });

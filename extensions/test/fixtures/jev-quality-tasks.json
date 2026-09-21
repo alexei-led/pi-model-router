@@ -1,0 +1,123 @@
+[
+  {
+    "id": "01-arithmetic",
+    "tiers": ["micro"],
+    "prompt": "Reply with only the result of 7 + 5. No tools."
+  },
+  {
+    "id": "02-fencing",
+    "tiers": ["high"],
+    "prompt": "Design fencing for a worker that finishes after cancellation and task resume under a new lease. Compare epoch-only vs epoch-plus-lease CAS, including crash recovery and stale writes. Give the key invariant and one falsifying interleaving. No tools; at most 70 words."
+  },
+  {
+    "id": "03-uppercase",
+    "tiers": ["micro"],
+    "prompt": "Independent task: uppercase the literal string router test. Output only the result. No tools."
+  },
+  {
+    "id": "04-package-lookup",
+    "tiers": ["micro", "low"],
+    "prompt": "Read package.json in this repository. Reply only with the package name and test script. Do not edit files."
+  },
+  {
+    "id": "05-followup-lookup",
+    "tiers": ["micro", "low"],
+    "prompt": "Repeat only the package name you just found. No tools."
+  },
+  {
+    "id": "06-local-bug",
+    "tiers": ["low", "medium"],
+    "prompt": "Given const first = xs => xs[1], why does first([10,20]) return 20? Show the one-line fix and one regression assertion. No tools; at most 40 words."
+  },
+  {
+    "id": "07-commit-recovery",
+    "tiers": ["high"],
+    "prompt": "A plan executor marks a task done in JSON then merges its git worktree. A crash can occur between any two steps. Design a recoverable commit protocol without a transaction spanning git and JSON. Explain the authoritative evidence and duplicate retry behavior. No tools; at most 80 words."
+  },
+  {
+    "id": "08-sort",
+    "tiers": ["micro"],
+    "prompt": "Independent task: sort [9,2,5] ascending. Output only the sorted array. No tools."
+  },
+  {
+    "id": "09-readme-lookup",
+    "tiers": ["micro", "low"],
+    "prompt": "Read only the first 120 lines of README.md. Name one documented command and its purpose in one sentence. Do not edit files."
+  },
+  {
+    "id": "10-design-tradeoff",
+    "tiers": ["high"],
+    "prompt": "For concurrent local plan executors, compare atomic JSON rename plus file locking with SQLite WAL. We need crash recovery, branch isolation, and safe cleanup of orphan workers. Identify a failure each design must prevent and recommend a choice. No tools; at most 80 words."
+  },
+  {
+    "id": "11-small-helper",
+    "tiers": ["low", "micro"],
+    "prompt": "Write a TypeScript arrow function that trims a string and returns undefined if it becomes empty. No tools, no explanations, no file changes."
+  },
+  {
+    "id": "12-idempotency",
+    "tiers": ["high"],
+    "prompt": "A controller retries a completion RPC after losing the acknowledgement. The worker may already have committed, while another controller can resume the same task. Specify the idempotency key, fencing condition, and replay response so exactly one valid effect wins. Challenge the design with an interleaving. No tools; at most 80 words."
+  },
+  {
+    "id": "13-followup-crash",
+    "tiers": ["high"],
+    "prompt": "What if it crashes after that effect but before recording the replay response? Repair the protocol and state the storage assumptions. No tools; at most 60 words."
+  },
+  {
+    "id": "14-formatting",
+    "tiers": ["micro"],
+    "prompt": "Independent task: convert a=1, b=2 into a JSON object. Output only JSON. No tools."
+  },
+  {
+    "id": "15-backoff-tests",
+    "tiers": ["medium", "high"],
+    "prompt": "Propose deterministic tests for exponential backoff with jitter, caller cancellation and a total deadline. Cover a request succeeding exactly near the deadline and a hung response body. Distinguish clock, transport and randomness seams. No tools; at most 80 words."
+  },
+  {
+    "id": "16-unclear",
+    "tiers": ["high"],
+    "outcome": "uncertain",
+    "prompt": "Independent task with no relation to previous messages: do the thing we discussed elsewhere. No tools; at most 40 words."
+  },
+  {
+    "id": "17-repo-cancellation",
+    "tiers": ["high"],
+    "prompt": "Read the cancellation/resume logic in src/controller.ts, using at most two read/search tool calls. Identify a concrete race to test, or explain why the inspected guard excludes it. Distinguish observed evidence from uninspected assumptions. Do not edit files; at most 80 words."
+  },
+  {
+    "id": "18-arithmetic",
+    "tiers": ["micro"],
+    "prompt": "Independent task: reply only with 10 + 2. No tools."
+  },
+  {
+    "id": "19-routine-explanation",
+    "tiers": ["low", "micro"],
+    "prompt": "Explain what ENOENT means when readFile tries to open a missing file, and give one normal handling strategy. No tools; two sentences."
+  },
+  {
+    "id": "20-cancel-linearization",
+    "tiers": ["high"],
+    "prompt": "A cancellation API races with a successful commit: cancel reads running, commit writes done, then cancel writes cancelled. Define the linearization points and transition guards so callers can distinguish too-late cancellation from a revoked result. Give an adversarial test. No tools; at most 80 words."
+  },
+  {
+    "id": "21-followup-proof",
+    "tiers": ["high"],
+    "prompt": "Does your proposal still hold with two controller processes and a stale in-memory cache? Give a counterexample or the minimum additional storage guarantee. No tools; at most 60 words."
+  },
+  {
+    "id": "22-json-sort",
+    "tiers": ["micro"],
+    "prompt": "Independent task: output the JSON array [\"beta\",\"alpha\"] in alphabetical order. No tools or explanation."
+  },
+  {
+    "id": "23-config-semantics",
+    "tiers": ["low", "medium"],
+    "prompt": "For layered configuration, explain the difference between absent, null, and false for an optional boolean, and propose a small merge table preserving explicit false. No tools; at most 60 words."
+  },
+  {
+    "id": "24-array-helper",
+    "tiers": ["micro", "low"],
+    "prompt": "Write a TypeScript arrow function returning the last element of a readonly number array, or undefined for empty input. No tools, no file changes, no explanation."
+  }
+]

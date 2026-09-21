@@ -2,8 +2,10 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import type { RouterStatusState, RoutingDecision } from './types';
 import {
+  formatAdvisorDetail,
   formatAdvisorFooter,
   formatDecision,
+  formatJevStats,
   formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
@@ -117,13 +119,13 @@ describe('ui.ts', () => {
       },
     };
     const compact = formatAdvisorFooter(routed);
-    expect(compact).toContain('high↪base c35%<65% 764ms');
+    expect(compact).toContain('high c35% <65% → baseline · 764ms');
     expect(compact).toContain('reuse');
     expect(compact).not.toContain('p48%');
     expect(compact).not.toContain('HTTP');
     expect(compact.length).toBeLessThan(80);
     const detailed = formatAdvisorFooter(routed, 'detailed');
-    expect(detailed).toContain('[high c35% p48%] t65% 764ms @');
+    expect(detailed).toContain('high c35% <65% → baseline · 764ms · p48% @');
     expect(detailed).toContain('tool route');
     const ctx = context();
     render(ctx, { statusLine: 'detailed', lastDecision: routed });
@@ -145,8 +147,86 @@ describe('ui.ts', () => {
         latencyMs: 860,
       },
     });
-    expect(footer).toContain('base: uncertain c73% 860ms');
-    expect(footer).not.toContain('uncertain uncertain');
+    expect(footer).toContain('no tier chosen → baseline · 860ms');
+    expect(footer).not.toContain('uncertain');
+    expect(footer).not.toContain('73%');
+    const detail = formatAdvisorDetail({
+      ...decision,
+      advisor: 'jev-fallback',
+      jev: {
+        outcome: 'uncertain',
+        choice: 'uncertain',
+        confidence: 0.73,
+        latencyMs: 860,
+        threshold: 0.65,
+      },
+    });
+    expect(detail).toContain('could not judge the required capability');
+    expect(detail).toContain('abstention-confidence=73.0%');
+    expect(detail).not.toContain('threshold');
+  });
+
+  it.each([
+    ['deadline', ': timeout → baseline · 5.0s'],
+    ['network-error', ': network error → baseline'],
+    ['invalid-response', ': invalid response → baseline'],
+    ['http-error', ': HTTP 429 → baseline'],
+    ['cancelled', ': cancelled'],
+  ] as const)(
+    'explains %s without exposing raw error data',
+    (outcome, expected) => {
+      expect(
+        formatAdvisorFooter({
+          ...decision,
+          advisor: 'jev-fallback',
+          jev: { outcome, latencyMs: 5000, httpStatus: 429 },
+        }),
+      ).toContain(expected);
+    },
+  );
+
+  it('counts unique requests, not shared calls, cached calls or tool continuations', () => {
+    const first: RoutingDecision = {
+      ...decision,
+      jev: {
+        requestId: '00000000-0000-4000-8000-000000000001',
+        outcome: 'selected',
+        choice: 'high',
+        latencyMs: 100,
+      },
+    };
+    const second: RoutingDecision = {
+      ...decision,
+      jev: {
+        requestId: '00000000-0000-4000-8000-000000000002',
+        outcome: 'deadline',
+        latencyMs: 5000,
+      },
+    };
+    const history: RoutingDecision[] = [
+      first,
+      { ...first, reuse: 'shared' },
+      { ...first, reuse: 'same-turn' },
+      { ...first, reuse: 'continuation' },
+      second,
+      { ...second, reuse: 'continuation' },
+      decision,
+      {
+        ...decision,
+        jev: { outcome: 'selected', choice: 'low', latencyMs: 200 },
+      },
+    ];
+    const stats = formatJevStats(history).join('\n');
+    expect(stats).toContain('2 unique HTTP requests in 8 retained decisions');
+    expect(stats).toContain('selected: 1/2 (50.0%)');
+    expect(stats).toContain('deadline: 1/2 (50.0%)');
+    expect(stats).toContain('high=1');
+    expect(stats).toContain('low=0');
+    expect(stats).toContain('2550ms');
+    expect(stats).toContain('1 decisions without request IDs excluded');
+    expect(stats).not.toContain('00000000');
+    expect(formatJevStats([]).join('\n')).toContain('Median Jev latency: n/a');
+    expect(formatJevStats([]).join('\n')).not.toContain('NaN');
   });
 
   it('formats sorted pins and thinking overrides', () => {

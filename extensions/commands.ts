@@ -27,6 +27,7 @@ import {
   formatAdvisorDetail,
   formatDecision,
   formatDecisionSource,
+  formatJevStats,
   formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
@@ -75,7 +76,10 @@ export const registerCommands = (
       desc: 'Correct the last routing decision and pin that tier',
     },
     { name: 'widget', desc: 'Toggle the router status widget' },
-    { name: 'debug', desc: 'Toggle or clear router debug history' },
+    {
+      name: 'debug',
+      desc: 'Inspect Jev stats or control router debug history',
+    },
     { name: 'reload', desc: 'Reload the model router configuration' },
     { name: 'help', desc: 'Show usage help for subcommands' },
   ];
@@ -185,6 +189,8 @@ export const registerCommands = (
       `Last non-router model: ${formatModelRef(state.lastNonRouterModel)}`,
       `Debug: ${state.debugEnabled ? 'on' : 'off'}`,
       `Debug history: ${state.debugHistory.length} decisions`,
+      `Baseline preference: ${state.selectedProfile ? (state.currentConfig.profiles[state.selectedProfile]?.baselineTier ?? 'automatic') : 'none'} (eligibility and budget still apply)`,
+      ...formatJevStats(state.debugHistory),
     ];
     if (state.lastDecision) {
       const advisorDetail = formatAdvisorDetail(state.lastDecision);
@@ -492,18 +498,35 @@ export const registerCommands = (
 
   const handleDebug = async (args: string[], ctx: ExtensionContext) => {
     if (args.length > 1) {
-      ctx.ui.notify('Usage: /router debug <on|off|show|clear>', 'error');
+      ctx.ui.notify('Usage: /router debug <on|off|show|stats|clear>', 'error');
       return;
     }
     const cmd = args[0]?.toLowerCase();
-    if (cmd && !['on', 'off', 'toggle', 'clear', 'show'].includes(cmd)) {
-      ctx.ui.notify('Usage: /router debug <on|off|toggle|show|clear>', 'error');
+    if (
+      cmd &&
+      !['on', 'off', 'toggle', 'clear', 'show', 'stats'].includes(cmd)
+    ) {
+      ctx.ui.notify(
+        'Usage: /router debug <on|off|toggle|show|stats|clear>',
+        'error',
+      );
       return;
     }
     if (cmd === 'on') state.debugEnabled = true;
     else if (cmd === 'off') state.debugEnabled = false;
     else if (cmd === 'clear') state.debugHistory.length = 0;
-    else if (cmd === 'show') {
+    else if (cmd === 'stats') {
+      ctx.ui.notify(
+        [
+          state.debugEnabled
+            ? 'Debug collection: on'
+            : 'Debug collection: off; use /router debug on to collect new decisions.',
+          ...formatJevStats(state.debugHistory),
+        ].join('\n'),
+        'info',
+      );
+      return;
+    } else if (cmd === 'show') {
       if (state.debugHistory.length === 0) {
         ctx.ui.notify('No recent routing decisions.', 'info');
       } else {
@@ -513,7 +536,10 @@ export const registerCommands = (
               `[${new Date(d.timestamp).toLocaleTimeString()}] ${formatDecision(d)}`,
           )
           .join('\n');
-        ctx.ui.notify(`Recent Routing Decisions:\n${history}`, 'info');
+        ctx.ui.notify(
+          `${formatJevStats(state.debugHistory).join('\n')}\nRecent Routing Decisions:\n${history}`,
+          'info',
+        );
       }
       return;
     } else {
@@ -618,7 +644,7 @@ export const registerCommands = (
         }
         case 'debug': {
           const debugPrefix = subArgs[0] ?? '';
-          const items = ['on', 'off', 'toggle', 'clear', 'show']
+          const items = ['on', 'off', 'toggle', 'clear', 'show', 'stats']
             .filter((v) => v.startsWith(debugPrefix))
             .map((v) => ({
               value: `debug ${v}`,
@@ -684,7 +710,7 @@ export const registerCommands = (
               '  disable                     Disable the router and restore the last used non-router model.',
               '  fix <tier>                  Correct the last routing decision and pin that tier for the current profile.',
               '  widget <on|off|toggle>      Control the persistent status widget visibility.',
-              '  debug <on|off|show|clear>   Control routing debug logging to notifications and history.',
+              '  debug <on|off|show|stats|clear>   Control decision history; stats summarize unique Jev requests.',
               '  reload                      Hot-reload the configuration JSON from .pi/model-router.json.',
               '  help, ?                     Show this help message.',
             ].join('\n'),

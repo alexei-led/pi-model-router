@@ -6,7 +6,12 @@ import type {
   RoutingDecision,
   StatusLineMode,
 } from './types';
-import { isAdvisorOutcome, isRoutingReasonCode } from './types';
+import {
+  isAdvisorOutcome,
+  isRoutingReasonCode,
+  JEV_OUTCOMES,
+  ROUTER_TIERS,
+} from './types';
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
@@ -64,13 +69,22 @@ export const formatAdvisorDetail = (
       parts.push(`resolved=${metrics.resolvedModel}`);
     const time = formatRunTime(metrics.startedAt);
     if (time) parts.push(`started=${time}`);
-    parts.push(metrics.outcome);
-    if (metrics.choice) parts.push(`choice=${metrics.choice}`);
+    parts.push(
+      metrics.outcome === 'uncertain'
+        ? 'No tier chosen: Jev could not judge the required capability from the supplied context; baseline used.'
+        : metrics.outcome,
+    );
+    if (metrics.choice && metrics.choice !== 'uncertain')
+      parts.push(`choice=${metrics.choice}`);
     if (metrics.probability !== undefined)
-      parts.push(`p=${(metrics.probability * 100).toFixed(1)}%`);
+      parts.push(
+        `${metrics.outcome === 'uncertain' ? 'abstention-p' : 'p'}=${(metrics.probability * 100).toFixed(1)}%`,
+      );
     if (metrics.confidence !== undefined)
-      parts.push(`confidence=${(metrics.confidence * 100).toFixed(1)}%`);
-    if (metrics.threshold !== undefined)
+      parts.push(
+        `${metrics.outcome === 'uncertain' ? 'abstention-confidence' : 'confidence'}=${(metrics.confidence * 100).toFixed(1)}%`,
+      );
+    if (metrics.threshold !== undefined && metrics.outcome !== 'uncertain')
       parts.push(`threshold=${(metrics.threshold * 100).toFixed(1)}%`);
     if (metrics.timeoutMs !== undefined)
       parts.push(`budget=${metrics.timeoutMs}ms`);
@@ -96,50 +110,106 @@ export const formatAdvisorFooter = (
   const label = formatAdvisorLabel(decision);
   if (!label) return '';
   const metrics = decision.jev;
-  const detail = metrics
-    ? metrics.outcome === 'selected'
-      ? ''
-      : `: ${metrics.outcome}`
-    : decision.errorClass
-      ? `: ${decision.errorClass}`
+  if (!metrics)
+    return ` · ${label}${decision.errorClass ? `: ${decision.errorClass}` : ''}`;
+  const confidence =
+    metrics.confidence !== undefined
+      ? ` c${Math.round(metrics.confidence * 100)}%`
       : '';
-  const choice = metrics?.choice
-    ? ` [${metrics.choice}${metrics.confidence !== undefined ? ` c${Math.round(metrics.confidence * 100)}%` : ''}${metrics.probability !== undefined ? ` p${Math.round(metrics.probability * 100)}%` : ''}]`
-    : '';
-  const latency = metrics ? ` ${Math.round(metrics.latencyMs)}ms` : '';
-  const time = formatRunTime(metrics?.startedAt);
-  if (mode === 'compact') {
-    const confidence =
-      metrics?.confidence !== undefined
-        ? ` c${Math.round(metrics.confidence * 100)}%`
-        : '';
-    const proposed =
-      decision.advisor === 'jev-fallback' &&
-      metrics?.choice &&
-      metrics.choice !== 'uncertain'
-        ? ` ${metrics.choice}`
-        : '';
-    const reused = decision.reuse ? ' · reuse' : '';
-    if (
-      metrics?.outcome === 'low-confidence' &&
-      metrics.choice &&
-      metrics.confidence !== undefined &&
-      metrics.threshold !== undefined
-    )
-      return ` · 🧭 Jev ${metrics.choice}↪base${confidence}<${Math.round(metrics.threshold * 100)}%${latency}${reused}`;
-    return ` · ${label}${detail}${proposed}${confidence}${latency}${reused}`;
+  let summary: string;
+  switch (metrics.outcome) {
+    case 'selected':
+      summary = `→ ${metrics.choice ?? decision.tier}${confidence}`;
+      break;
+    case 'low-confidence':
+      summary = `${metrics.choice ?? 'choice'}${confidence}${metrics.threshold !== undefined ? ` <${Math.round(metrics.threshold * 100)}%` : ''} → baseline`;
+      break;
+    case 'uncertain':
+      summary = ': no tier chosen → baseline';
+      break;
+    case 'deadline':
+      summary = ': timeout → baseline';
+      break;
+    case 'http-error':
+      summary = `: HTTP ${metrics.httpStatus ?? 'error'} → baseline`;
+      break;
+    case 'network-error':
+      summary = ': network error → baseline';
+      break;
+    case 'invalid-response':
+      summary = ': invalid response → baseline';
+      break;
+    case 'cancelled':
+      summary = ': cancelled';
+      break;
+    case 'unavailable':
+      summary = `: ${metrics.choice ? 'target' : 'advice'} unavailable → baseline`;
+      break;
   }
-  const threshold =
-    metrics?.threshold !== undefined
-      ? ` t${Math.round(metrics.threshold * 100)}%`
+  const latency =
+    metrics.latencyMs >= 1000
+      ? `${(metrics.latencyMs / 1000).toFixed(1)}s`
+      : `${Math.round(metrics.latencyMs)}ms`;
+  const reuse = decision.reuse
+    ? ` · ${mode === 'detailed' && decision.reuse === 'continuation' ? 'tool route' : 'reuse'}`
+    : '';
+  const time = formatRunTime(metrics.startedAt);
+  const extra =
+    mode === 'detailed'
+      ? `${metrics.probability !== undefined ? ` · ${metrics.outcome === 'uncertain' ? 'abstain ' : ''}p${Math.round(metrics.probability * 100)}%` : ''}${time ? ` @${time}` : ''}`
       : '';
-  const reuse =
-    decision.reuse === 'continuation'
-      ? ' · tool route'
-      : decision.reuse
-        ? ' · reused'
-        : '';
-  return ` · ${label}${detail}${choice}${threshold}${latency}${time ? ` @${time}` : ''}${reuse}`;
+  return ` · 🧭 Jev${summary.startsWith(':') ? '' : ' '}${summary} · ${latency}${extra}${reuse}`;
+};
+
+export const formatJevStats = (
+  history: readonly RoutingDecision[],
+): string[] => {
+  const requests = new Map<string, NonNullable<RoutingDecision['jev']>>();
+  let legacy = 0;
+  for (const decision of history) {
+    if (!decision.jev) continue;
+    const metrics = decision.jev;
+    if (!metrics.requestId) {
+      legacy += 1;
+      continue;
+    }
+    if (!requests.has(metrics.requestId))
+      requests.set(metrics.requestId, metrics);
+  }
+  const samples = [...requests.values()];
+  const latencies = samples
+    .map((entry) => entry.latencyMs)
+    .filter((ms) => Number.isFinite(ms) && ms >= 0)
+    .sort((a, b) => a - b);
+  const middle = Math.floor(latencies.length / 2);
+  const median = latencies.length
+    ? ((latencies[middle] ?? 0) +
+        (latencies[Math.floor((latencies.length - 1) / 2)] ?? 0)) /
+      2
+    : undefined;
+  const outcomes = JEV_OUTCOMES.map(
+    (outcome) =>
+      [
+        outcome,
+        samples.filter((entry) => entry.outcome === outcome).length,
+      ] as const,
+  );
+  return [
+    `Jev stats: ${samples.length} unique HTTP requests in ${history.length} retained decisions (not session lifetime).`,
+    `Advised tiers: ${ROUTER_TIERS.map((tier) => `${tier}=${samples.filter((entry) => entry.choice === tier).length}`).join(', ')}.`,
+    ...outcomes
+      .filter(([, count]) => count > 0)
+      .map(
+        ([outcome, count]) =>
+          `${outcome}: ${count}/${samples.length} (${((100 * count) / samples.length).toFixed(1)}%)`,
+      ),
+    `Median Jev latency: ${median === undefined ? 'n/a' : `${Math.round(median)}ms`}. Reused decisions are not new requests.`,
+    ...(legacy
+      ? [
+          `${legacy} decisions without request IDs excluded (legacy or no HTTP request).`,
+        ]
+      : []),
+  ];
 };
 
 export const formatDecision = (decision: RoutingDecision): string => {

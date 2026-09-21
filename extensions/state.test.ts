@@ -105,6 +105,7 @@ describe('state.ts', () => {
       jev: {
         outcome: 'low-confidence',
         model: 'jev-latest',
+        requestId: '00000000-0000-4000-8000-000000000001',
         startedAt: 1234,
         latencyMs: 764,
         choice: 'high',
@@ -123,6 +124,7 @@ describe('state.ts', () => {
     expect(copy).toMatchObject({
       reuse: 'continuation',
       jev: {
+        requestId: '00000000-0000-4000-8000-000000000001',
         startedAt: 1234,
         latencyMs: 764,
         choice: 'high',
@@ -136,6 +138,7 @@ describe('state.ts', () => {
       jev: {
         ...tainted.jev,
         model: 'secret-key',
+        requestId: 'secret-key',
         confidence: 2,
         choice: 'remote-text',
       },
@@ -143,6 +146,7 @@ describe('state.ts', () => {
     } as unknown as RoutingDecision;
     const sanitized = snapshotDecision(invalid);
     expect(sanitized.jev?.model).toBeUndefined();
+    expect(sanitized.jev?.requestId).toBeUndefined();
     expect(sanitized.jev?.confidence).toBeUndefined();
     expect(sanitized.jev?.choice).toBeUndefined();
     expect(sanitized.reuse).toBeUndefined();

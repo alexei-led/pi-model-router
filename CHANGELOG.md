@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.4] - 2026-09-21
+
+- Prefer quality-first Jev advice: use frontier reasoning when it can materially improve correctness or reduce rework, not only when weaker models are incapable. Keep straightforward tasks on micro/low; confidence thresholds and deterministic safeguards are unchanged.
+- Explain footer outcomes directly: selected tier, low confidence → baseline, no tier chosen → baseline, or timeout → baseline. Hide abstention scores in compact mode; label them explicitly in widget/debug output.
+- Add `/router debug stats`: unique HTTP requests, advised tiers, outcome rates and median latency within retained history. Local request IDs prevent shared calls, cached routes and tool continuations from inflating counts.
+- Fix debug history retention (50, not 12) and stop collecting new history when debug is off. Preserve the latest route and existing history; clear/reset and resume remain branch-safe.
+- Document opt-in `baselineTier: "high"` for quality-first fallback. Confident micro/low choices, pins, capabilities and budget policy still apply. Existing profiles are not rewritten automatically.
+- Validate 24 real prompts through Pi/agterm: 10 Astra and 14 Luna generations, including repeated simple → complex → simple transitions, follow-ups, low-confidence fallback and abstention. Publish the task corpus and validation report.
+
 ## [0.6.3] - 2026-09-21
 
 - Share same-turn Jev requests and original deadlines; reuse the actual advised route instead of reverting to baseline. One cancelled waiter no longer cancels its peers.

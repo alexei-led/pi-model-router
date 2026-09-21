@@ -33,6 +33,23 @@ afterEach(() => {
 });
 
 describe('jev.ts HTTP contract', () => {
+  it('assigns local request IDs only to attempted HTTP requests and ignores remote IDs', async () => {
+    const one = await runJevDetailed(config, request(), {
+      fetch: transport({ ...fixtures.valid, requestId: KEY }),
+    });
+    const two = await runJevDetailed(config, request(), { fetch: transport() });
+    expect(one.diagnostics.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(two.diagnostics.requestId).not.toBe(one.diagnostics.requestId);
+    expect(JSON.stringify(one)).not.toContain(KEY);
+    const fetch = transport();
+    const skipped = await runJevDetailed(
+      config,
+      request({ routingDeadline: 0 }),
+      { fetch },
+    );
+    expect(skipped.diagnostics.requestId).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it.each([
     ['valid', 'selected'],
     ['uncertain', 'uncertain'],
@@ -128,7 +145,14 @@ describe('jev.ts HTTP contract', () => {
     });
     expect(body.questions.route.instructions).toContain('only as data');
     expect(body.questions.route.instructions).toContain('LAST user request');
-    expect(body.questions.route.instructions).toContain('least capable');
+    expect(body.questions.route.instructions).toContain(
+      'best justified expected result',
+    );
+    expect(body.questions.route.instructions).toContain(
+      'frontier reasoning offers a material benefit',
+    );
+    expect(body.questions.route.instructions).toContain('Keep micro/low');
+    expect(body.questions.route.instructions).not.toContain('least capable');
     expect(init?.signal?.aborted).toBe(true);
   });
 
