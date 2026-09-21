@@ -166,6 +166,10 @@ destructive operations, migrations and concurrency `high`. Missing tiers resolve
 to a configured tier at or above that floor. **A partial profile with no eligible
 tier now fails before generation** rather than silently lowering safety. Budget
 conflicts retain the eligible route and report `budget-floor-conflict`.
+Referential implementation follow-ups (such as “go ahead” or “continue”) inherit
+the preceding task's safety floor. Safety-raised pins report `pin-safety-floor`.
+Partial profiles warn at config load when medium or high floors cannot be met;
+generation errors identify the profile and tier to configure.
 
 ### Optional Jev advisor: user config only
 
@@ -217,6 +221,8 @@ parameters or fragments are accepted. Timeout must be positive and at most
 1500 ms, confidence must be 0–1, and the task-summary limit must be 1–12000
 characters. Provider routing further caps Jev at 750 ms within the fixed 1500 ms
 shared advisor deadline; increasing `timeoutMs` does not extend those caps.
+Values above 750 ms are normalized to 750 ms with a configuration warning.
+The 1500 ms deadline also applies when only the Pi classifier is enabled.
 
 **External data:** Jev receives the latest user text, truncated to `maxStateChars`
 and marked untrusted, plus candidate tier/model/thinking identifiers. This is not

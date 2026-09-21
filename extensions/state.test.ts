@@ -251,6 +251,7 @@ describe('closed decision snapshot boundary', () => {
   });
   it.each([
     'pinned',
+    'pin-safety-floor',
     'custom-rule',
     'micro-mechanical',
     'continuation',

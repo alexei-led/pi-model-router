@@ -448,6 +448,7 @@ export const registerRouterProvider = (
               eligibleProfile,
               budgetLow ? 'low' : decision.tier,
               floor,
+              model.id,
             );
             const pair = pairs.find((candidate) => candidate.tier === tier);
             if (!pair) throw new Error('No eligible route.');
@@ -464,7 +465,9 @@ export const registerRouterProvider = (
                   pair,
                   isBudgetExceeded && pair.tier === 'high'
                     ? 'budget-floor-conflict'
-                    : 'fallback',
+                    : decision.reasonCode === 'pin-safety-floor'
+                      ? 'pin-safety-floor'
+                      : 'fallback',
                 ),
               };
             }
@@ -562,6 +565,7 @@ export const registerRouterProvider = (
                   eligibleProfile,
                   result.tier,
                   floor,
+                  model.id,
                 );
                 const pair = pairs.find((entry) => entry.tier === tier);
                 if (pair)

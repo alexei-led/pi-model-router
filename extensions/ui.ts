@@ -79,6 +79,7 @@ export const updateStatus = (
     const matchesPin = activePin
       ? lastDecision?.tier === activePin ||
         lastDecision?.reasonCode === 'pinned' ||
+        lastDecision?.reasonCode === 'pin-safety-floor' ||
         lastDecision?.reasonCode === 'budget-floor-conflict'
       : true;
 

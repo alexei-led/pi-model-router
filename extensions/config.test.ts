@@ -631,7 +631,9 @@ describe('micro config compatibility', () => {
         expect(config.profiles.p?.[tier]?.thinking).toBe(
           tier === 'micro' ? 'off' : 'medium',
         );
-        expect(warnings.length).toBe(thinking ? 1 : 0);
+        expect(warnings.length).toBe(
+          (thinking ? 1 : 0) + (tier === 'high' ? 0 : 1),
+        );
       }
     },
   );
@@ -680,7 +682,8 @@ describe('micro config compatibility', () => {
       profiles: { p: { micro: { model: 'test/tiny', thinking: 'minimal' } } },
       rules: [{ matches: 'pwd', tier: 'micro' }],
     });
-    expect(warnings).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('medium or high safety floors');
     expect(config.profiles.p?.micro?.thinking).toBe('minimal');
     expect(config.rules?.[0]?.tier).toBe('micro');
     expect(isRouterTier('micro')).toBe(true);
@@ -688,10 +691,20 @@ describe('micro config compatibility', () => {
 });
 
 describe('config.ts Jev user-config provenance', () => {
-  const personal = { medium: { model: 'openai/test' }, jev: { enabled: true } };
+  const personal = {
+    high: { model: 'openai/test' },
+    medium: { model: 'openai/test' },
+    jev: { enabled: true },
+  };
   const user = {
     jev: { enabled: true, apiKey: 'synthetic-user-key' },
-    profiles: { personal, work: { medium: { model: 'openai/test' } } },
+    profiles: {
+      personal,
+      work: {
+        high: { model: 'openai/test' },
+        medium: { model: 'openai/test' },
+      },
+    },
   };
   const loadSources = (global: unknown, project: unknown) => {
     vi.mocked(readFileSync)
@@ -845,4 +858,59 @@ describe('config.ts Jev user-config provenance', () => {
     expect(error.warnings).toEqual(invalid.warnings);
     expect(JSON.stringify([invalid, error])).not.toContain(secret);
   });
+});
+
+describe('review safety diagnostics', () => {
+  it('never renders malformed rule contents in warnings', () => {
+    const { config, warnings } = normalizeConfig({
+      profiles: { p: { high: { model: 'test/model' } } },
+      rules: [
+        {
+          matches: 'sentinel-private-task',
+          tier: 'invalid',
+          apiKey: 'sentinel-secret',
+        },
+        'sentinel-secret',
+        { matches: 'valid', tier: 'low' },
+      ],
+    });
+    expect(warnings).toEqual([
+      'Ignored invalid routing rule at index 0.',
+      'Ignored invalid routing rule at index 1.',
+    ]);
+    expect(JSON.stringify(warnings)).not.toContain('sentinel');
+    expect(config.rules).toHaveLength(1);
+  });
+
+  it.each([751, 1000, 1500])(
+    'warns and normalizes the effective Jev timeout for %s ms',
+    (timeoutMs) => {
+      const warnings: string[] = [];
+      expect(normalizeJevConfig({ timeoutMs }, warnings)?.timeoutMs).toBe(750);
+      expect(warnings).toEqual([
+        'Jev timeoutMs clamped to the effective 750 ms provider cap.',
+      ]);
+    },
+  );
+
+  it.each(['micro', 'low', 'medium', 'high'] as const)(
+    'warns about unsupported safety floors for a %s-only profile',
+    (tier) => {
+      const { config, warnings } = normalizeConfig({
+        profiles: { partial: { [tier]: { model: 'test/model' } } },
+      });
+      expect(config.profiles.partial?.[tier]).toBeDefined();
+      if (tier === 'high') expect(warnings).toEqual([]);
+      else {
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain('Profile "partial"');
+        expect(warnings[0]).toContain(
+          tier === 'medium'
+            ? 'high safety floors'
+            : 'medium or high safety floors',
+        );
+        expect(warnings[0]).toContain('profiles.partial.high');
+      }
+    },
+  );
 });

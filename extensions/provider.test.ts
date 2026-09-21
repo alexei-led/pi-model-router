@@ -508,13 +508,15 @@ describe('four-level provider routing', () => {
     expect(s.delegate).toHaveBeenCalledOnce();
     expect(s.state.lastDecision).toMatchObject({
       tier: 'medium',
-      reasonCode: 'pinned',
+      reasonCode: 'pin-safety-floor',
     });
     s.state.currentConfig.profiles.balanced = { low: { model: 'test/small' } };
     s.delegate.mockClear();
     const { result } = await consume(s.stream());
     expect(result.stopReason).toBe('error');
-    expect(result.errorMessage).toContain('No eligible route');
+    expect(result.errorMessage).toContain('profile "balanced"');
+    expect(result.errorMessage).toContain('required safety floor "medium"');
+    expect(result.errorMessage).toContain('profiles.balanced.medium');
     expect(s.delegate).not.toHaveBeenCalled();
   });
 });
@@ -612,6 +614,59 @@ describe('Jev provider integration', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+
+  it.each([
+    ['review authentication security', 'go ahead'],
+    ['design a new storage architecture', 'go ahead'],
+    ['review authentication security', 'continue'],
+    ['design a new storage architecture', 'continue'],
+  ])(
+    'keeps %s safety for %s despite low advisor responses',
+    async (task, followUp) => {
+      const s = setup();
+      enableAdvisors(s);
+      const transport = vi.fn<typeof fetch>(async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as ChoiceRequest;
+        const ids = Object.keys(body.questions.route.criteria);
+        expect(ids.every((id) => id.startsWith('high|'))).toBe(true);
+        const low = createJevCandidate({
+          tier: 'low',
+          model: 'test/small',
+          thinking: 'medium',
+        }).id;
+        return new Response(
+          JSON.stringify({
+            answers: {
+              route: {
+                type: 'choice',
+                choice: low,
+                confidence: 0.99,
+                probabilities: { [low]: 1 },
+              },
+            },
+          }),
+        );
+      });
+      vi.stubGlobal('fetch', transport);
+      s.delegate.mockReturnValueOnce(done('Tier: low\nReasoning: cheap'));
+      const { result } = await consume(
+        s.stream({
+          messages: [
+            ...userContext(task).messages,
+            message({
+              content: [{ type: 'text', text: 'Ready to implement.' }],
+            }),
+            ...userContext(followUp, 3).messages,
+          ],
+        }),
+      );
+      expect(result.stopReason).toBe('stop');
+      expect(transport).toHaveBeenCalledOnce();
+      expect(s.delegate).toHaveBeenCalledTimes(2);
+      expect(s.state.lastDecision?.tier).toBe('high');
+      expect(s.state.lastDecision?.reasonCode).toBe('heuristic');
+    },
+  );
 
   it('applies only a local allowlisted pair and delegates once through Pi', async () => {
     const s = setup();
@@ -1024,7 +1079,35 @@ describe('Jev provider integration', () => {
     expect(elapsed).toBeGreaterThanOrEqual(1400);
     expect(elapsed).toBeLessThan(2100);
     expect(s.delegate).toHaveBeenCalledTimes(2);
-    expect(s.state.lastDecision?.errorClass).toBe('deadline');
+    // AbortSignal's timer can fire fractionally before the performance deadline.
+    expect(['deadline', 'advisor-unavailable']).toContain(
+      s.state.lastDecision?.errorClass,
+    );
+  });
+
+  it('bounds classifier-only routing to 1500ms rather than the standalone 10s default', async () => {
+    const s = setup();
+    delete s.state.pinnedTierByProfile.balanced;
+    s.state.currentConfig.classifierModel = { model: 'test/small' };
+    let classifierSignal: AbortSignal | undefined;
+    s.delegate.mockImplementationOnce((_model, _context, options) => {
+      classifierSignal = options?.signal;
+      return {
+        [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      } as AssistantMessageEventStream;
+    });
+    const start = performance.now();
+    const { result } = await consume(s.stream(userContext()));
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(1400);
+    expect(elapsed).toBeLessThan(2100);
+    expect(classifierSignal?.aborted).toBe(true);
+    expect(result.stopReason).toBe('stop');
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.state.lastDecision?.tier).toBe('medium');
+    expect(['deadline', 'advisor-unavailable']).toContain(
+      s.state.lastDecision?.errorClass,
+    );
   });
 
   it('caps Jev at 750ms even when configured longer, leaving only the shared remainder', async () => {

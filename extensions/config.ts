@@ -438,6 +438,10 @@ export const normalizeJevConfig = (
       (typeof value.apiKey !== 'string' || /[\r\n]/.test(value.apiKey)))
   )
     return invalid();
+  if (value.timeoutMs > 750)
+    warnings.push(
+      'Jev timeoutMs clamped to the effective 750 ms provider cap.',
+    );
   const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
   if (value.enabled === true && !apiKey) {
     warnings.push('Jev disabled: missing user-config API key.');
@@ -447,7 +451,7 @@ export const normalizeJevConfig = (
     apiKey,
     endpoint: value.endpoint,
     model: value.model,
-    timeoutMs: value.timeoutMs,
+    timeoutMs: Math.min(value.timeoutMs, 750),
     confidenceThreshold: value.confidenceThreshold,
     maxStateChars: value.maxStateChars,
     mode: 'advisory',
@@ -527,6 +531,11 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       continue;
     }
 
+    if (!high)
+      warnings.push(
+        `Profile "${name}" cannot satisfy ${medium ? 'high' : 'medium or high'} safety floors. Configure profiles.${name}.high with a compatible model; requests above the configured tiers fail closed.`,
+      );
+
     const jev = isObjectRecord(profileRecord.jev)
       ? { enabled: profileRecord.jev.enabled === true }
       : undefined;
@@ -545,7 +554,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
 
   const rules: RoutingRule[] = [];
   if (Array.isArray(raw.rules)) {
-    for (const rule of raw.rules) {
+    for (const [index, rule] of raw.rules.entries()) {
       if (isObjectRecord(rule)) {
         const matches = rule.matches;
         const tier = rule.tier;
@@ -564,10 +573,10 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
             reason: typeof rule.reason === 'string' ? rule.reason : undefined,
           });
         } else {
-          warnings.push(
-            `Ignored invalid routing rule: ${JSON.stringify(rule)}`,
-          );
+          warnings.push(`Ignored invalid routing rule at index ${index}.`);
         }
+      } else {
+        warnings.push(`Ignored invalid routing rule at index ${index}.`);
       }
     }
   }

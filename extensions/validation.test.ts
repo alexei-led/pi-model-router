@@ -43,7 +43,10 @@ describe('configuration boundaries', () => {
       } as unknown as RouterConfig;
       const result = normalizeConfig(input);
       expect(result.config.rules).toBeUndefined();
-      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings).toEqual([
+        ...normalizeConfig(base).warnings,
+        'Ignored invalid routing rule at index 0.',
+      ]);
     },
   );
   it('does not resolve inherited property names as models or profiles', () => {

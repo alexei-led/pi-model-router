@@ -9,6 +9,7 @@ import {
   containsAny,
   countToolResults,
   countWords,
+  extractTextFromContent,
   getLastUserText,
   getRecentConversationText,
 } from './context';
@@ -55,10 +56,15 @@ export const isMechanicalTask = (prompt: string): boolean => {
   );
 };
 
-export const localSafetyFloor = (context: Context): RouterTier => {
-  const prompt = getLastUserText(context).toLowerCase();
+const isImplementationFollowUp = (prompt: string): boolean =>
+  /^(?:please\s+)?(?:go ahead|continue|resume|proceed)\b/i.test(prompt) ||
+  /^(?:please\s+)?(?:implement|apply|make|do|finish)(?:\s+(?:it|this|that|these|those|the (?:plan|changes|fix|implementation)))?[.!\s]*$/i.test(
+    prompt,
+  );
+
+const safetyFloorForPrompt = (prompt: string): RouterTier => {
   if (
-    /\b(security|auth(?:entication|orization)?|credentials?|secrets?|vulnerabilit\w*|encrypt\w*|destructive|delet\w*|destroy\w*|eras\w*|drop\w*|wip\w*|deploy\w*|production|migrat\w*|concurrency|concurrent|race conditions?|architect\w*|design(?:s|ing|ed)?|rm|sudo|chmod|chown|truncate)\b/.test(
+    /\b(security|auth(?:entication|orization)?|credentials?|secrets?|vulnerabilit\w*|encrypt\w*|destructive|delet\w*|destroy\w*|eras\w*|drop(?:s|ped|ping)?|wip(?:e|es|ed|ing)|deploy\w*|production|migrat\w*|concurrency|concurrent|race conditions?|architect\w*|design(?:s|ing|ed)?|rm|sudo|chmod|chown|truncate)\b/.test(
       prompt,
     ) ||
     /\bgit\s+(?:reset|clean|push)\b/.test(prompt) ||
@@ -81,13 +87,29 @@ export const localSafetyFloor = (context: Context): RouterTier => {
     )
   )
     return 'medium';
-  return 'low';
+  return isImplementationFollowUp(prompt) ? 'medium' : 'low';
+};
+
+export const localSafetyFloor = (context: Context): RouterTier => {
+  let floor: RouterTier = 'micro';
+  // Resolve referential implementation turns against the nearest substantive
+  // user task on this branch, not a saved decision or untrusted assistant/tool text.
+  for (let i = context.messages.length - 1; i >= 0; i -= 1) {
+    const message = context.messages[i];
+    if (message?.role !== 'user') continue;
+    const prompt = extractTextFromContent(message.content).trim().toLowerCase();
+    const taskFloor = safetyFloorForPrompt(prompt);
+    if (!allowed(floor, taskFloor)) floor = taskFloor;
+    if (!isImplementationFollowUp(prompt)) return floor;
+  }
+  return floor === 'micro' ? 'low' : floor;
 };
 
 export const resolveAvailableTier = (
   profile: RouterProfile,
   preferred: RouterTier,
   floor: RouterTier = 'micro',
+  profileName = 'active',
 ): RouterTier => {
   const eligible = (tier: RouterTier) => profile[tier] && allowed(tier, floor);
   if (eligible(preferred)) return preferred;
@@ -100,7 +122,7 @@ export const resolveAvailableTier = (
     if (eligible(tier)) return tier;
   }
   throw new Error(
-    'No eligible route: configure a tier at or above the local safety floor.',
+    `No eligible route for profile "${profileName}": required safety floor "${floor}". Configure profiles.${profileName}.${floor} or a higher tier with an available, compatible model.`,
   );
 };
 
@@ -357,7 +379,7 @@ export const decideRouting = (
   if (!allowed(tier, floor)) {
     tier = floor;
     phase = phaseForTier(tier);
-    // Preserve the local source when safety raises its selected tier.
+    if (pinnedTier) reasonCode = 'pin-safety-floor';
   }
 
   let isBudgetForced = false;
@@ -380,9 +402,14 @@ export const decideRouting = (
     profile,
     budgetLow ? 'low' : tier,
     floor,
+    profileName,
   );
   if (resolvedTier !== tier) {
-    if (reasonCode !== 'budget-floor-conflict') reasonCode = 'fallback';
+    if (
+      reasonCode !== 'budget-floor-conflict' &&
+      reasonCode !== 'pin-safety-floor'
+    )
+      reasonCode = 'fallback';
     phase = phaseForTier(resolvedTier);
     tier = resolvedTier;
   }

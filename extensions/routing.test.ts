@@ -664,6 +664,12 @@ describe('four-level local routing', () => {
     ['editing a file', 'medium'],
     ['remove the directory', 'high'],
     ['add logging', 'medium'],
+    ['add a dropdown', 'medium'],
+    ['WIP commit', 'low'],
+    ['drop the database', 'high'],
+    ['dropped tables', 'high'],
+    ['wipe the disk', 'high'],
+    ['wiping the disk', 'high'],
     ['briefly debug the entire system', 'high'],
     ['fix the concurrency bug', 'high'],
     ['deploy to production', 'high'],
@@ -694,6 +700,34 @@ describe('four-level local routing', () => {
     },
   );
 
+  it.each(['go ahead', 'continue', 'resume', 'implement it', 'apply the plan'])(
+    'inherits the active task floor for %s, including repeated follow-ups',
+    (followUp) => {
+      const conversation: Context = {
+        messages: [
+          ...context('design a secure authentication flow').messages,
+          ...context('go ahead').messages,
+          ...context(followUp).messages,
+        ],
+      };
+      expect(localSafetyFloor(conversation)).toBe('high');
+      expect(localSafetyFloor(context(followUp))).toBe('medium');
+      expect(
+        localSafetyFloor({
+          messages: [
+            ...conversation.messages,
+            ...context('add a dropdown').messages,
+          ],
+        }),
+      ).toBe('medium');
+      expect(
+        localSafetyFloor({
+          messages: [...conversation.messages, ...context('pwd').messages],
+        }),
+      ).toBe('micro');
+    },
+  );
+
   it('risk signals override an otherwise exact mechanical match', () => {
     const prompt =
       'Replace the exact comment "// security" with "// disabled" in auth.ts';
@@ -712,7 +746,7 @@ describe('four-level local routing', () => {
       ),
     ).toMatchObject({
       tier: 'high',
-      reasonCode: 'pinned',
+      reasonCode: 'pin-safety-floor',
     });
     expect(
       decideRouting(
