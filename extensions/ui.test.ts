@@ -2,6 +2,7 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import type { RouterStatusState, RoutingDecision } from './types';
 import {
+  formatAdvisorFooter,
   formatDecision,
   formatModelRef,
   formatPinSummary,
@@ -93,9 +94,59 @@ describe('ui.ts', () => {
       } as unknown as RoutingDecision,
     });
     const lines = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1] ?? [];
-    expect(lines).toContain('🧭 Jev ↪ base · 750ms');
+    expect(lines).toContain('🧭 Jev ↪ base · deadline · 750ms');
     expect(lines).not.toContain('Routing: 750ms');
     expect(lines).not.toContain('Routing error: deadline');
+  });
+
+  it('keeps compact feedback useful and reserves extra metrics for detailed mode', () => {
+    const routed: RoutingDecision = {
+      ...decision,
+      advisor: 'jev-fallback',
+      reuse: 'continuation',
+      jev: {
+        outcome: 'low-confidence',
+        latencyMs: 764,
+        startedAt: 1234,
+        choice: 'high',
+        confidence: 0.35,
+        probability: 0.48,
+        threshold: 0.65,
+        timeoutMs: 5000,
+        contextChars: 113,
+      },
+    };
+    const compact = formatAdvisorFooter(routed);
+    expect(compact).toContain('high↪base c35%<65% 764ms');
+    expect(compact).toContain('reuse');
+    expect(compact).not.toContain('p48%');
+    expect(compact).not.toContain('HTTP');
+    expect(compact.length).toBeLessThan(80);
+    const detailed = formatAdvisorFooter(routed, 'detailed');
+    expect(detailed).toContain('[high c35% p48%] t65% 764ms @');
+    expect(detailed).toContain('tool route');
+    const ctx = context();
+    render(ctx, { statusLine: 'detailed', lastDecision: routed });
+    expect(vi.mocked(ctx.ui.setStatus).mock.calls[0]?.[1]).toContain(detailed);
+    const widget = JSON.stringify(vi.mocked(ctx.ui.setWidget).mock.calls);
+    expect(widget).toContain('confidence=35.0%');
+    expect(widget).toContain('budget=5000ms');
+    expect(widget).toContain('context=113 chars');
+  });
+
+  it('labels uncertainty once in compact mode', () => {
+    const footer = formatAdvisorFooter({
+      ...decision,
+      advisor: 'jev-fallback',
+      jev: {
+        outcome: 'uncertain',
+        choice: 'uncertain',
+        confidence: 0.73,
+        latencyMs: 860,
+      },
+    });
+    expect(footer).toContain('base: uncertain c73% 860ms');
+    expect(footer).not.toContain('uncertain uncertain');
   });
 
   it('formats sorted pins and thinking overrides', () => {
@@ -116,7 +167,7 @@ describe('ui.ts', () => {
     });
     expect(ctx.ui.setStatus).toHaveBeenCalledWith(
       'router',
-      '🚥 router:p [pin:medium] -> medium -> test/model (medium)',
+      '🚥 p [pin:medium] · medium → model/medium',
     );
     const lines = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
     expect(lines).toContain('Router: enabled');

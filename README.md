@@ -138,6 +138,7 @@ The extension stores the last selected profile in `~/.pi/agent/model-router-stat
 | ----------------------- | --------------------------------------------------------------------------------- |
 | `classifierModel`       | (Optional) Pi model used for four-tier semantic advice only when Jev is not active (disabled, not opted in or missing a key). Supports model aliases. Failure means baseline. |
 | `jev`                   | (Optional, user config only) External advisor settings; requires global enablement, a key and an explicit `profiles.<name>.jev.enabled` opt-in. Disabled by default. |
+| `ui.statusLine`        | `compact` (default) or `detailed`. Display only; project config may override it. Widget/debug always include full diagnostics. |
 | `maxSessionBudget`      | (Optional) Soft generation-cost threshold in USD. Unpinned requests prefer eligible medium-or-lower tiers and skip advisors. Not a spending cap; classifier and Jev costs are excluded. |
 | `phaseBias`, `rules`    | Deprecated and ignored, with a fixed value-free warning. Remove these fields; there is no legacy keyword mode. |
 | `profiles.<name>.baselineTier` | (Optional) Preferred configured tier; otherwise use `medium`, `high`, `low`, `micro` in that order, filtered by availability/input/effort. |
@@ -245,19 +246,56 @@ profile, especially work. Short replies, other languages and imperfect sentences
 are advisor input, not local intent branches. Semantic classification and confidence
 are probabilistic, not a security sandbox; Pi owns tool permissions.
 
-Router state and debug history retain only allowlisted local decision metadata:
-source, tier, model, thinking, phase, timing and fixed error classes
-(`advisor-unavailable` or `deadline`). They never retain the Jev key, endpoint,
-request text, raw response or remote explanations. Older saved explanations are
-discarded as non-rendered `legacy` metadata; Pi's own conversation transcript is
-separate from router state.
+Jev classifies the **latest user request**, using earlier messages only as
+context. Criteria describe the reasoning each tier supports, not just its name.
+Do not increase the context limit or lower the threshold just to raise confidence.
+Confidence measures decisiveness across choices, **not** the chance that the
+selected generation model will succeed. It is distinct from the selected option's
+probability. See [Jev Choice](https://docs.typesafe.ai/primitives/choice).
 
-**Footer and widget:** The footer stays in its normal route-only form when Jev is
-not involved. When Jev selects the route it adds `· 🧭 Jev ✓`; when Jev is used
-but its advice is rejected, it adds `· 🧭 Jev ↪ base`. `base` means the local
-deterministic baseline; the selected tier and model remain visible in the route
-text. `/router widget on` and `/router status` show the same marker and a short
-latency value. No marker means no external route guidance was used.
+Concurrent calls for the same turn share one Jev request and its original deadline.
+A repeated same-turn call reuses the validated decision rather than reverting to
+baseline. Cancelling one waiter does not cancel another; the transport is aborted
+when no waiters remain. Each new user turn can choose a different backend and
+thinking level. Tool continuations keep their validated route. The logical
+`router/<profile>` stays selected throughout; this is not conversation-wide pinning.
+
+### Routing diagnostics and display
+
+```json
+{
+  "ui": { "statusLine": "compact" }
+}
+```
+
+- **`compact` (default):** profile, tier, model/thinking, advisor outcome, confidence
+  and latency. Omits the repeated provider prefix to fit split panes.
+  Example: `🧭 Jev high↪base c35%<65% 764ms` means high was advised but its
+  confidence was below the threshold; the displayed generation route is baseline.
+- **`detailed`:** also shows the advised tier, selected probability, threshold and
+  local request-start time. Example:
+  `🧭 Jev ↪ base: low-confidence [high c35% p48%] t65% 764ms @18:34:49`.
+  Use this on wide terminals; long model/profile names can truncate a footer.
+- **Widget / status:** `/router widget on` or `/router status` shows full metrics,
+  including the Jev model label, HTTP status, candidate count and context characters.
+- **History:** `/router debug on`, then `/router debug show`. The last 50 decisions
+  are saved in branch-safe `router-state` session entries and restored on resume.
+  Debug off stops collecting history; the latest decision still persists.
+
+`c` is confidence, `p` is the selected option's probability, `t` is the acceptance
+threshold. `ms` is local request-to-validated-result time, not pure model inference
+time. `@` is the original request's local start time. `reuse` / `tool route` means
+no new Jev request: the displayed metrics belong to the original routing attempt.
+`base` means deterministic local baseline, not necessarily the medium tier.
+`local baseline` / `advice bypassed` distinguishes no advisor from a rejected answer.
+
+Failures are distinguished as `low-confidence`, `uncertain`, `invalid-response`,
+`http-error`, `network-error`, `deadline`, `cancelled` or `unavailable`. A quick
+low-confidence rejection is **not a timeout**; increasing timeout will not fix it.
+Only validated choices and numeric diagnostics are retained. State/debug never
+retain the Jev key, endpoint, request text, raw response or remote explanations.
+Older explanations are discarded as non-rendered `legacy` metadata; Pi's own
+conversation transcript is separate from router state.
 
 For chezmoi, use a **private template**, for example
 `private_model-router.json.tmpl` under your agent-directory source path. Render

@@ -33,8 +33,11 @@ The adapter gets the minimum of that configured
 timeout and the remaining budget, including request and response-body time. The
 separate classifier-only path retains a 10-second bound; it does not share a
 fallback deadline with Jev. Neither advisor retries. Caller cancellation stops
-generation rather than starting a local fallback. Bounded per-turn advisor guards
-avoid duplicate calls and release unsuccessful generation attempts for retry.
+generation rather than starting a local fallback. Same-turn Jev callers share one
+in-flight request and its original deadline; only the final departing waiter aborts
+the transport. A bounded 16-turn decision cache reuses the actual validated route,
+not merely its advisor label. Policy/config/capability changes invalidate cached
+advice; unsuccessful generation attempts release it for retry.
 
 Image support and exact effort are hard capability filters on the concrete target
 and every fallback, not tier labels. Local declarations may restrict but cannot
@@ -83,14 +86,18 @@ config, thinking, tool-call arguments and image/binary blocks are not extracted.
 Conversation text, including bounded tool output, is not redacted and may contain
 private data or secrets: profile opt-in is approval to send it externally. Short,
 multilingual and imperfect replies are data for the advisor, not local branches.
+Choice instructions focus on the latest user request and describe distinct reasoning
+requirements for each tier. Historical task difficulty does not define the new turn.
 
 Candidate IDs encode the tuple `(tier, canonical model reference, thinking)` with
 escaped components, so same-model tiers and separator-containing IDs cannot
 collide. Responses are capped at 64 KiB and must contain `answers.route` with a
 known `choice`, `type: "choice"`, valid confidence and a complete probability
 map. Unknown IDs, `uncertain`, low confidence, invalid distributions, HTTP errors,
-malformed data and timeouts return no advice. Only a locally mapped candidate ID,
-confidence and latency leave the adapter; raw response fields never become a
+malformed data and timeouts return no advice. The detailed adapter also returns an
+allowlisted outcome, local timing, validated choice/confidence/probability, threshold,
+request limits, HTTP status and recognized Jev version labels. These distinguish a
+fast low-confidence rejection from a timeout. Raw response fields never become a
 decision. Registry identity, effort and input validation remain local authority;
 natural-language intent is not locally validated.
 
@@ -131,15 +138,18 @@ At the actual `pi.appendEntry('router-state', ...)` boundary, decisions and debu
 history copy only declared local fields. `RoutingReasonCode` is the closed union
 `baseline | pinned | continuation | classifier | jev | fallback | budget | legacy`.
 `AdvisorOutcome` separately records route guidance as `none | bypassed | jev |
-jev-fallback | classifier | classifier-fallback`; only the informative Jev or
-classifier outcomes render in the footer and widget, so ordinary baseline turns
-return to the normal status text.
+jev-fallback | classifier | classifier-fallback`. The footer distinguishes local
+baseline, bypassed advice, accepted advice and rejected advice. `ui.statusLine`
+selects compact (default) or detailed display without affecting routing. Widget
+and debug output retain full validated metrics.
 Obsolete source codes and old free-form explanations map to non-rendered `legacy`
 without dropping unrelated pins, costs or settings; unknown persisted codes are
-rejected. Continuation decisions clear stale advisor latency/error/classifier fields. Numeric routing latency and the fixed error classes
-`advisor-unavailable` and `deadline` are the only advisor diagnostics. No key,
-endpoint, task text, raw response, rule explanation or remote reasoning enters
-router state/debug/UI. Pi's own conversation storage is outside this boundary.
+rejected. Continuations clear per-call advisor latency/error/classifier fields but
+retain the original nested Jev metrics, including request-start time, with an explicit
+reuse marker. Debug mode persists the last 50 decisions through the existing
+branch-safe state snapshots; no extra transcript message or external log is needed.
+Nested metrics are copied field-by-field on save/restore. No key, endpoint, task text,
+raw response, rule explanation or remote reasoning enters router state/debug/UI. Pi's own conversation storage is outside this boundary.
 
 The last explicitly selected router profile is also stored in `~/.pi/agent/model-router-state.json`. An explicit startup `--model` selection takes precedence over both cross-session and branch state. Otherwise, a resumed session's branch-specific `router-state` entry wins; a fresh startup or `/new` session uses the cross-session profile when Pi starts on the router provider and that profile is still configured.
 

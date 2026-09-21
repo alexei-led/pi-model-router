@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3] - 2026-09-21
+
+- Share same-turn Jev requests and original deadlines; reuse the actual advised route instead of reverting to baseline. One cancelled waiter no longer cancels its peers.
+- Describe tier capabilities and focus Jev on the latest user request, without adding local task heuristics, extra context or lower confidence thresholds.
+- Distinguish low confidence, uncertainty, HTTP/network errors, invalid responses and deadlines. Retain validated choice, confidence, probability, request timing and reuse provenance in branch-safe session/debug snapshots.
+- Add `ui.statusLine`: informative `compact` default and opt-in `detailed`. Widget/status/debug expose full Jev metrics without credentials, request text or remote explanations.
+
 ## 0.6.2 - 2026-09-21
 
 - Increase the default Jev timeout from 750 ms to 1500 ms. User-level `jev.timeoutMs` now sets the total advisory budget without the previous hidden 750 ms cap or an arbitrary upper cap. Positive finite values within Node's timer range are accepted, including 4000 and 5000 ms. Existing explicit shorter timeouts remain valid.

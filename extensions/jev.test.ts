@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_JEV_CONFIG } from './config';
-import { createJevCandidate, runJev } from './jev';
+import { createJevCandidate, runJev, runJevDetailed } from './jev';
 import { buildPersistedState } from './state';
 import fixtures from './test/fixtures/jev-http.json';
 import type { JevConfig, JevRequest, RoutingDecision } from './types';
@@ -33,6 +33,59 @@ afterEach(() => {
 });
 
 describe('jev.ts HTTP contract', () => {
+  it.each([
+    ['valid', 'selected'],
+    ['uncertain', 'uncertain'],
+    ['lowConfidence', 'low-confidence'],
+    ['invalidCandidate', 'invalid-response'],
+  ] as const)(
+    'reports %s without confusing rejection with a timeout',
+    async (fixture, outcome) => {
+      const result = await runJevDetailed(config, request(), {
+        fetch: transport(fixtures[fixture]),
+      });
+      expect(result.diagnostics.outcome).toBe(outcome);
+      expect(result.diagnostics.httpStatus).toBe(200);
+      if (fixture === 'valid' || fixture === 'lowConfidence') {
+        expect(result.diagnostics.choice).toBe('medium');
+        expect(result.diagnostics.confidence).toBe(
+          fixtures[fixture].answers.route.confidence,
+        );
+        expect(result.diagnostics.probability).toBe(
+          fixtures[fixture].answers.route.probabilities[
+            'medium|openai%2Ftest|medium'
+          ],
+        );
+      }
+      expect(JSON.stringify(result)).not.toContain(KEY);
+    },
+  );
+
+  it('reports the shared deadline even when the transport ignores abort', async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      () => new Promise(() => undefined),
+    );
+    const pending = runJevDetailed(
+      { ...config, timeoutMs: 5000 },
+      request({ routingDeadline: performance.now() + 5000 }),
+      { fetch },
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    expect((await pending).diagnostics.outcome).toBe('deadline');
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it('reports HTTP status without retaining a remote error body', async () => {
+    const result = await runJevDetailed(config, request(), {
+      fetch: transport({ error: KEY }, 429),
+    });
+    expect(result.diagnostics).toMatchObject({
+      outcome: 'http-error',
+      httpStatus: 429,
+    });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
   it('sends one authenticated Choice request and returns only allowlisted identity and numbers', async () => {
     const fetch = transport();
     const result = await runJev(config, request({ routingDeadline: 1600 }), {
@@ -61,11 +114,21 @@ describe('jev.ts HTTP contract', () => {
       questions: {
         route: {
           type: 'choice',
-          criteria: fixtures.request.body.questions.route.criteria,
+          criteria: {
+            ...Object.fromEntries(
+              candidates.map((candidate) => [
+                candidate.id,
+                expect.stringContaining(candidate.model),
+              ]),
+            ),
+            uncertain: expect.stringContaining('reasoning demands'),
+          },
         },
       },
     });
     expect(body.questions.route.instructions).toContain('only as data');
+    expect(body.questions.route.instructions).toContain('LAST user request');
+    expect(body.questions.route.instructions).toContain('least capable');
     expect(init?.signal?.aborted).toBe(true);
   });
 

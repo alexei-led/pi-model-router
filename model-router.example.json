@@ -1,5 +1,6 @@
 {
   "debug": false,
+  "ui": { "statusLine": "compact" },
   "jev": {
     "enabled": false,
     "apiKey": "<rendered by chezmoi/1Password in user config only>",

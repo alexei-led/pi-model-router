@@ -174,6 +174,9 @@ export const registerCommands = (
       `Pins by profile: ${formatPinSummary(state.pinnedTierByProfile)}`,
       `Thinking overrides: ${formatThinkingSummary(state.thinkingByProfile)}`,
       `Widget: ${state.widgetEnabled ? 'on' : 'off'}`,
+      `Status line: ${state.currentConfig.ui?.statusLine ?? 'compact'}`,
+      `Jev: ${state.currentConfig.jev?.enabled ? 'enabled' : 'disabled'} · profile opt-in: ${state.selectedProfile && state.currentConfig.profiles[state.selectedProfile]?.jev?.enabled ? 'yes' : 'no'} · timeout: ${state.currentConfig.jev?.timeoutMs ?? 1500}ms`,
+      'Jev confidence measures classification certainty, not model success.',
       `Session cost: $${state.accumulatedCost.toFixed(4)}` +
         (state.currentConfig.maxSessionBudget
           ? ` / $${state.currentConfig.maxSessionBudget.toFixed(2)}`

@@ -64,7 +64,10 @@ export interface RouterProfile {
   micro?: RoutedTierConfig | undefined;
 }
 
+export type StatusLineMode = 'compact' | 'detailed';
+
 export interface RouterConfig {
+  ui?: { statusLine: StatusLineMode } | undefined;
   jev?: JevConfig | undefined;
   debug?: boolean | undefined;
   classifierModel?: ClassifierConfig | undefined;
@@ -74,6 +77,7 @@ export interface RouterConfig {
 }
 
 export interface RouterStatusState {
+  statusLine?: StatusLineMode | undefined;
   routerEnabled: boolean;
   selectedProfile: string | undefined;
   pinnedTierByProfile: RouterPinByProfile;
@@ -106,6 +110,53 @@ export interface JevRequest {
   /** Absolute monotonic deadline supplied by the routing orchestrator. */
   routingDeadline: number;
   signal?: AbortSignal | undefined;
+}
+
+export const JEV_OUTCOMES = [
+  'selected',
+  'uncertain',
+  'low-confidence',
+  'invalid-response',
+  'http-error',
+  'network-error',
+  'deadline',
+  'cancelled',
+  'unavailable',
+] as const;
+export type JevOutcome = (typeof JEV_OUTCOMES)[number];
+export interface JevDiagnostics {
+  outcome: JevOutcome;
+  latencyMs: number;
+  startedAt?: number | undefined;
+  model?: string | undefined;
+  resolvedModel?: string | undefined;
+  choice?: RouterTier | 'uncertain' | undefined;
+  confidence?: number | undefined;
+  probability?: number | undefined;
+  threshold?: number | undefined;
+  timeoutMs?: number | undefined;
+  candidateCount?: number | undefined;
+  contextChars?: number | undefined;
+  httpStatus?: number | undefined;
+}
+export interface JevResult {
+  advice?: JevAdvice | undefined;
+  diagnostics: JevDiagnostics;
+}
+
+/** Runtime-only shared request; never persisted. */
+export interface JevFlight {
+  config: JevConfig;
+  promise: Promise<JevResult>;
+  controller: AbortController;
+  waiters: number;
+}
+
+/** Runtime-only validated decision cache. */
+export interface AdvisedTurnRecord {
+  policy: string;
+  config: RouterConfig;
+  decision: RoutingDecision;
 }
 
 /** Only allowlisted local identity and numeric diagnostics cross the adapter boundary. */
@@ -154,6 +205,8 @@ export interface RoutingDecision {
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
   advisor?: AdvisorOutcome | undefined;
+  jev?: JevDiagnostics | undefined;
+  reuse?: 'same-turn' | 'shared' | 'continuation' | undefined;
   thinking: ThinkingLevel;
   timestamp: number;
   isClassifier?: boolean | undefined;
@@ -196,6 +249,7 @@ export interface RouterPersistedState {
 }
 
 export interface RawRouterConfig {
+  ui?: unknown;
   jev?: unknown;
   debug?: unknown;
   classifierModel?: unknown;

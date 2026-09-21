@@ -8,6 +8,7 @@ import {
   isRouterPersistedState,
   loadLastRouterProfile,
   saveLastRouterProfile,
+  snapshotDecision,
 } from './state';
 import type { RoutingDecision } from './types';
 
@@ -95,6 +96,56 @@ describe('state.ts', () => {
     expect(isRouterPersistedState(JSON.parse(JSON.stringify(state)))).toBe(
       true,
     );
+  });
+
+  it('persists only validated Jev trace fields, including original request time on reuse', () => {
+    const tainted = {
+      ...decision,
+      reuse: 'continuation',
+      jev: {
+        outcome: 'low-confidence',
+        model: 'jev-latest',
+        startedAt: 1234,
+        latencyMs: 764,
+        choice: 'high',
+        probability: 0.48,
+        confidence: 0.35,
+        threshold: 0.65,
+        timeoutMs: 5000,
+        candidateCount: 4,
+        contextChars: 200,
+        httpStatus: 200,
+        explanation: 'secret-task',
+        apiKey: 'secret-key',
+      },
+    } as RoutingDecision;
+    const copy = snapshotDecision(tainted);
+    expect(copy).toMatchObject({
+      reuse: 'continuation',
+      jev: {
+        startedAt: 1234,
+        latencyMs: 764,
+        choice: 'high',
+        confidence: 0.35,
+        probability: 0.48,
+      },
+    });
+    expect(JSON.stringify(copy)).not.toContain('secret');
+    const invalid = {
+      ...tainted,
+      jev: {
+        ...tainted.jev,
+        model: 'secret-key',
+        confidence: 2,
+        choice: 'remote-text',
+      },
+      reuse: 'remote-text',
+    } as unknown as RoutingDecision;
+    const sanitized = snapshotDecision(invalid);
+    expect(sanitized.jev?.model).toBeUndefined();
+    expect(sanitized.jev?.confidence).toBeUndefined();
+    expect(sanitized.jev?.choice).toBeUndefined();
+    expect(sanitized.reuse).toBeUndefined();
   });
 
   it('does not copy incidental or secret decision fields', () => {

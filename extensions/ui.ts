@@ -4,6 +4,7 @@ import type {
   RouterStatusState,
   RouterThinkingByProfile,
   RoutingDecision,
+  StatusLineMode,
 } from './types';
 import { isAdvisorOutcome, isRoutingReasonCode } from './types';
 
@@ -25,8 +26,9 @@ export const formatAdvisorLabel = (
   if (!isAdvisorOutcome(decision.advisor)) return undefined;
   switch (decision.advisor) {
     case 'none':
+      return 'local baseline';
     case 'bypassed':
-      return undefined;
+      return 'advice bypassed';
     case 'jev':
       return '🧭 Jev ✓';
     case 'jev-fallback':
@@ -40,31 +42,109 @@ export const formatAdvisorLabel = (
   }
 };
 
+const formatRunTime = (startedAt: number | undefined): string | undefined =>
+  startedAt !== undefined &&
+  Number.isFinite(startedAt) &&
+  startedAt >= 0 &&
+  startedAt <= 8.64e15
+    ? new Date(startedAt).toLocaleTimeString('en-GB', { hour12: false })
+    : undefined;
+
 export const formatAdvisorDetail = (
   decision: RoutingDecision,
 ): string | undefined => {
   const label = formatAdvisorLabel(decision);
   if (!label) return undefined;
-  const latency = Number.isFinite(decision.routingLatencyMs)
-    ? ` · ${Math.round(decision.routingLatencyMs ?? 0)}ms`
-    : '';
-  return `${label}${latency}`;
+  const metrics = decision.jev;
+  const latencyMs = metrics?.latencyMs ?? decision.routingLatencyMs;
+  const parts = [label];
+  if (metrics) {
+    if (metrics.model) parts.push(metrics.model);
+    if (metrics.resolvedModel && metrics.resolvedModel !== metrics.model)
+      parts.push(`resolved=${metrics.resolvedModel}`);
+    const time = formatRunTime(metrics.startedAt);
+    if (time) parts.push(`started=${time}`);
+    parts.push(metrics.outcome);
+    if (metrics.choice) parts.push(`choice=${metrics.choice}`);
+    if (metrics.probability !== undefined)
+      parts.push(`p=${(metrics.probability * 100).toFixed(1)}%`);
+    if (metrics.confidence !== undefined)
+      parts.push(`confidence=${(metrics.confidence * 100).toFixed(1)}%`);
+    if (metrics.threshold !== undefined)
+      parts.push(`threshold=${(metrics.threshold * 100).toFixed(1)}%`);
+    if (metrics.timeoutMs !== undefined)
+      parts.push(`budget=${metrics.timeoutMs}ms`);
+    if (metrics.candidateCount !== undefined)
+      parts.push(`candidates=${metrics.candidateCount}`);
+    if (metrics.contextChars !== undefined)
+      parts.push(`context=${metrics.contextChars} chars`);
+    if (metrics.httpStatus !== undefined)
+      parts.push(`HTTP ${metrics.httpStatus}`);
+  } else if (decision.errorClass) {
+    parts.push(decision.errorClass);
+  }
+  if (latencyMs !== undefined && Number.isFinite(latencyMs))
+    parts.push(`${Math.round(latencyMs)}ms`);
+  if (decision.reuse) parts.push(`reuse=${decision.reuse}`);
+  return parts.join(' · ');
 };
 
-export const formatAdvisorFooter = (decision: RoutingDecision): string => {
-  if (
-    !decision.advisor ||
-    decision.advisor === 'none' ||
-    decision.advisor === 'bypassed'
-  )
-    return '';
+export const formatAdvisorFooter = (
+  decision: RoutingDecision,
+  mode: StatusLineMode = 'compact',
+): string => {
   const label = formatAdvisorLabel(decision);
-  return label ? ` · ${label}` : '';
+  if (!label) return '';
+  const metrics = decision.jev;
+  const detail = metrics
+    ? metrics.outcome === 'selected'
+      ? ''
+      : `: ${metrics.outcome}`
+    : decision.errorClass
+      ? `: ${decision.errorClass}`
+      : '';
+  const choice = metrics?.choice
+    ? ` [${metrics.choice}${metrics.confidence !== undefined ? ` c${Math.round(metrics.confidence * 100)}%` : ''}${metrics.probability !== undefined ? ` p${Math.round(metrics.probability * 100)}%` : ''}]`
+    : '';
+  const latency = metrics ? ` ${Math.round(metrics.latencyMs)}ms` : '';
+  const time = formatRunTime(metrics?.startedAt);
+  if (mode === 'compact') {
+    const confidence =
+      metrics?.confidence !== undefined
+        ? ` c${Math.round(metrics.confidence * 100)}%`
+        : '';
+    const proposed =
+      decision.advisor === 'jev-fallback' &&
+      metrics?.choice &&
+      metrics.choice !== 'uncertain'
+        ? ` ${metrics.choice}`
+        : '';
+    const reused = decision.reuse ? ' · reuse' : '';
+    if (
+      metrics?.outcome === 'low-confidence' &&
+      metrics.choice &&
+      metrics.confidence !== undefined &&
+      metrics.threshold !== undefined
+    )
+      return ` · 🧭 Jev ${metrics.choice}↪base${confidence}<${Math.round(metrics.threshold * 100)}%${latency}${reused}`;
+    return ` · ${label}${detail}${proposed}${confidence}${latency}${reused}`;
+  }
+  const threshold =
+    metrics?.threshold !== undefined
+      ? ` t${Math.round(metrics.threshold * 100)}%`
+      : '';
+  const reuse =
+    decision.reuse === 'continuation'
+      ? ' · tool route'
+      : decision.reuse
+        ? ' · reused'
+        : '';
+  return ` · ${label}${detail}${choice}${threshold}${latency}${time ? ` @${time}` : ''}${reuse}`;
 };
 
 export const formatDecision = (decision: RoutingDecision): string => {
   const source = formatDecisionSource(decision);
-  const advisor = formatAdvisorLabel(decision);
+  const advisor = formatAdvisorDetail(decision);
   return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}`;
 };
 
@@ -123,7 +203,11 @@ export const updateStatus = (
 
     let statusText: string;
     if (lastDecision && matchesProfile && matchesPin) {
-      statusText = `router:${activeRouterProfile}${pinLabel} -> ${lastDecision.tier} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})${formatAdvisorFooter(lastDecision)}`;
+      const route =
+        state.statusLine === 'detailed'
+          ? `router:${activeRouterProfile}${pinLabel} -> ${lastDecision.tier} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`
+          : `${activeRouterProfile}${pinLabel} · ${lastDecision.tier} → ${lastDecision.targetModelId}/${lastDecision.thinking}`;
+      statusText = `${route}${lastDecision.isFallback ? ' [fallback]' : ''}${formatAdvisorFooter(lastDecision, state.statusLine)}`;
     } else {
       statusText = `router:${activeRouterProfile}${pinLabel} -> waiting`;
     }
@@ -151,7 +235,6 @@ export const updateStatus = (
 
     widgetLines.push(
       `Route: ${lastDecision.tier}${flagsStr} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`,
-      `Phase: ${lastDecision.phase}`,
       `Source: ${formatDecisionSource(lastDecision) || 'unknown'}`,
       ...(advisorDetail ? [advisorDetail] : []),
     );

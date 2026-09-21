@@ -31,7 +31,7 @@ import {
   getBoundedRecentContext,
   hasImageAttachment,
 } from './context';
-import { createJevCandidate, runJev } from './jev';
+import { createJevCandidate, runJevDetailed } from './jev';
 import {
   availableRoutePairs,
   decisionForPair,
@@ -39,7 +39,13 @@ import {
   selectBaselineRoute,
 } from './routing';
 import type {
-  AdvisorOutcome,
+  AdvisedTurnRecord,
+  JevConfig,
+  JevFlight,
+  JevRequest,
+  JevResult,
+  JevRouteCandidate,
+  RoutePair,
   RouterConfig,
   RouterPinByProfile,
   RouterThinkingByProfile,
@@ -50,6 +56,87 @@ import type {
 const REGISTRY_WAIT_TIMEOUT_MS = 5000;
 const REGISTRY_WAIT_INITIAL_DELAY_MS = 50;
 const REGISTRY_WAIT_MAX_DELAY_MS = 500;
+
+const createJevFlightKey = (
+  turn: string,
+  profile: string,
+  candidates: readonly JevRouteCandidate[],
+  config: JevConfig,
+  policy: string,
+): string =>
+  JSON.stringify({
+    turn,
+    profile,
+    policy,
+    candidates: candidates.map((candidate) => candidate.id),
+    endpoint: config.endpoint,
+    model: config.model,
+    timeoutMs: config.timeoutMs,
+    confidenceThreshold: config.confidenceThreshold,
+    maxStateChars: config.maxStateChars,
+  });
+
+const waitForAbortable = async <T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> => {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<T>((_, reject) => {
+    onAbort = () =>
+      reject(
+        signal.reason ??
+          new DOMException('The operation was aborted.', 'AbortError'),
+      );
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+};
+
+const runJevSingleFlight = (
+  pending: Map<string, JevFlight>,
+  key: string,
+  config: JevConfig,
+  request: JevRequest,
+): { promise: Promise<JevResult>; shared: boolean; release: () => void } => {
+  const existing = pending.get(key);
+  const shared = existing?.config === config;
+  const controller = shared ? existing.controller : new AbortController();
+  // One deadline for all waiters; cancel transport only when the last waiter leaves.
+  const flight: JevFlight = shared
+    ? existing
+    : {
+        config,
+        controller,
+        waiters: 0,
+        promise: runJevDetailed(config, {
+          ...request,
+          signal: controller.signal,
+        }),
+      };
+  flight.waiters += 1;
+  pending.set(key, flight);
+  const cleanup = () => {
+    if (pending.get(key) === flight) pending.delete(key);
+  };
+  if (!shared) void flight.promise.then(cleanup, cleanup);
+  return {
+    promise: flight.promise,
+    shared,
+    release: () => {
+      flight.waiters -= 1;
+      if (flight.waiters === 0) {
+        cleanup();
+        controller.abort();
+      }
+    },
+  };
+};
 
 /**
  * Wait for the model registry to become available with exponential backoff.
@@ -280,7 +367,8 @@ export const registerRouterProvider = (
   // Streams can complete out of order. Keep a small turn-keyed history rather
   // than letting the latest stream replace another stream's continuation.
   const continuations = new Map<string, ContinuationRecord>();
-  const advisedTurns = new Map<string, AdvisorOutcome>();
+  const advisedTurns = new Map<string, AdvisedTurnRecord>();
+  const pendingJev = new Map<string, JevFlight>();
   const rememberContinuation = (record: ContinuationRecord) => {
     continuations.delete(record.turn);
     continuations.set(record.turn, record);
@@ -290,14 +378,39 @@ export const registerRouterProvider = (
       continuations.delete(oldest);
     }
   };
-  const rememberAdvisedTurn = (turn: string, outcome: AdvisorOutcome) => {
+  const rememberAdvisedDecision = (
+    turn: string,
+    decision: RoutingDecision,
+    policy: string,
+    config: RouterConfig,
+  ) => {
     advisedTurns.delete(turn);
-    advisedTurns.set(turn, outcome);
+    advisedTurns.set(turn, { policy, config, decision });
     while (advisedTurns.size > 16) {
       const oldest = advisedTurns.keys().next().value;
       if (oldest === undefined) break;
       advisedTurns.delete(oldest);
     }
+  };
+  const reusableAdvisedDecision = (
+    turn: string,
+    policy: string,
+    config: RouterConfig,
+    pairs: readonly RoutePair[],
+  ): RoutingDecision | undefined => {
+    const record = advisedTurns.get(turn);
+    if (!record) return undefined;
+    const available = pairs.some(
+      (pair) =>
+        pair.tier === record.decision.tier &&
+        pair.model === record.decision.targetLabel &&
+        pair.thinking === record.decision.thinking,
+    );
+    if (record.policy !== policy || record.config !== config || !available) {
+      advisedTurns.delete(turn);
+      return undefined;
+    }
+    return { ...record.decision, reuse: 'same-turn', timestamp: Date.now() };
   };
 
   pi.registerProvider('router', {
@@ -442,17 +555,29 @@ export const registerRouterProvider = (
                 pair.model === continuationDecision.targetLabel &&
                 pair.thinking === continuationDecision.thinking,
             );
+          const advisedDecision =
+            !toolContinuation && turn
+              ? reusableAdvisedDecision(
+                  turn,
+                  policy,
+                  state.currentConfig,
+                  pairs,
+                )
+              : undefined;
           let decision: RoutingDecision;
           if (reusable && continuationDecision) {
             decision = {
               ...continuationDecision,
               reasonCode: 'continuation',
+              reuse: 'continuation',
               // Advisor diagnostics describe the original routing attempt only.
               isClassifier: undefined,
               routingLatencyMs: undefined,
               errorClass: undefined,
               timestamp: Date.now(),
             };
+          } else if (advisedDecision) {
+            decision = advisedDecision;
           } else {
             if (toolContinuation && turn) continuations.delete(turn);
             const baseline = selectBaselineRoute(
@@ -469,10 +594,6 @@ export const registerRouterProvider = (
             );
             decision.isBudgetForced = baseline.isBudgetForced;
             decision.advisor = advisorConfigured ? 'bypassed' : 'none';
-            if (!toolContinuation && turn) {
-              const previousAdvisor = advisedTurns.get(turn);
-              if (previousAdvisor) decision.advisor = previousAdvisor;
-            }
           }
 
           // Tool results never invoke advisors, even when their prior route cannot be reused.
@@ -482,6 +603,7 @@ export const registerRouterProvider = (
             !isBudgetExceeded &&
             user &&
             turn &&
+            !advisedDecision &&
             !advisedTurns.has(turn) &&
             advisorConfigured
           ) {
@@ -494,20 +616,34 @@ export const registerRouterProvider = (
             // A single primary bypasses advice, not a baseline's eligible fallback.
             if (candidates.length <= 1) {
               decision.advisor = 'bypassed';
-              rememberAdvisedTurn(turn, 'bypassed');
+              rememberAdvisedDecision(
+                turn,
+                decision,
+                policy,
+                state.currentConfig,
+              );
             } else if (useJev && jev) {
-              decision.advisor = 'jev';
-              rememberAdvisedTurn(turn, 'jev');
-              const advice = await runJev(jev, {
-                taskSummary: getBoundedRecentContext(
-                  context,
-                  jev.maxStateChars,
-                ),
-                candidates,
-                profile: profile.jev,
-                routingDeadline,
-                signal: options?.signal,
-              }).catch(() => undefined);
+              const taskSummary = getBoundedRecentContext(
+                context,
+                jev.maxStateChars,
+              );
+              options?.signal?.throwIfAborted();
+              const flight = runJevSingleFlight(
+                pendingJev,
+                createJevFlightKey(turn, model.id, candidates, jev, policy),
+                jev,
+                {
+                  taskSummary,
+                  candidates,
+                  profile: profile.jev,
+                  routingDeadline,
+                },
+              );
+              const result = await waitForAbortable(
+                flight.promise,
+                options?.signal,
+              ).finally(flight.release);
+              const advice = result.advice;
               options?.signal?.throwIfAborted();
               // Re-read registry capabilities after the network boundary.
               pairs = available();
@@ -536,15 +672,29 @@ export const registerRouterProvider = (
                   baseline.reasonCode,
                 );
                 decision.advisor = 'jev-fallback';
-                rememberAdvisedTurn(turn, 'jev-fallback');
                 decision.errorClass = 'advisor-unavailable';
               }
-              decision.routingLatencyMs = Math.max(
-                0,
-                performance.now() - started,
-              );
-              if (performance.now() >= routingDeadline)
+              decision.jev =
+                decision.advisor === 'jev-fallback' &&
+                result.diagnostics.outcome === 'selected'
+                  ? {
+                      ...result.diagnostics,
+                      outcome:
+                        performance.now() >= routingDeadline
+                          ? 'deadline'
+                          : 'unavailable',
+                    }
+                  : result.diagnostics;
+              decision.reuse = flight.shared ? 'shared' : undefined;
+              decision.routingLatencyMs = result.diagnostics.latencyMs;
+              if (decision.jev.outcome === 'deadline')
                 decision.errorClass = 'deadline';
+              rememberAdvisedDecision(
+                turn,
+                decision,
+                policy,
+                state.currentConfig,
+              );
             } else if (state.currentConfig.classifierModel) {
               const classifier = state.currentConfig.classifierModel;
               const result = await runClassifier(
@@ -572,15 +722,12 @@ export const registerRouterProvider = (
                     isClassifier: true,
                     advisor: 'classifier',
                   };
-                  rememberAdvisedTurn(turn, 'classifier');
                 } else {
                   decision.advisor = 'classifier-fallback';
-                  rememberAdvisedTurn(turn, 'classifier-fallback');
                   decision.errorClass = 'advisor-unavailable';
                 }
               } else {
                 decision.advisor = 'classifier-fallback';
-                rememberAdvisedTurn(turn, 'classifier-fallback');
                 decision.errorClass = 'advisor-unavailable';
               }
               decision.routingLatencyMs = Math.max(
@@ -589,6 +736,12 @@ export const registerRouterProvider = (
               );
               if (performance.now() >= routingDeadline)
                 decision.errorClass = 'deadline';
+              rememberAdvisedDecision(
+                turn,
+                decision,
+                policy,
+                state.currentConfig,
+              );
             }
           }
 

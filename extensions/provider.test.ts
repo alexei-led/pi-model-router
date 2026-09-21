@@ -1188,15 +1188,124 @@ describe('Jev provider integration', () => {
     },
   );
 
-  it('calls Jev once per rapid new turn, not twice for the same user turn', async () => {
+  it('reuses the Jev route on a repeated call for the same user turn', async () => {
     const s = setup();
     enableAdvisors(s);
-    const fetch = mockChoice();
+    const fetch = mockChoice('high');
     for (const timestamp of [1, 2, 3, 3])
       await consume(s.stream(userContext('implement a parser', timestamp)));
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(s.delegate).toHaveBeenCalledTimes(4);
-    expect(advisorOf(s.state.lastDecision)).toBe('jev');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      reasonCode: 'jev',
+      advisor: 'jev',
+    });
+  });
+
+  it('shares one in-flight Jev request across concurrent calls for one turn', async () => {
+    const s = astraSetup();
+    let resolveFetch: (response: Response) => void = () => undefined;
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetch);
+
+    const first = consume(s.stream(userContext('implement a parser')));
+    const second = consume(s.stream(userContext('implement a parser')));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    resolveFetch(choiceResponse(fetch.mock.calls[0]?.[1], 'high'));
+
+    await Promise.all([first, second]);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+      'gpt-6-astra',
+      'gpt-6-astra',
+    ]);
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      reasonCode: 'jev',
+      advisor: 'jev',
+    });
+  });
+
+  it('cancels one waiter without cancelling a shared Jev request or generating for it', async () => {
+    const s = astraSetup();
+    let resolveFetch: (response: Response) => void = () => undefined;
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    const first = consume(s.stream(userContext(), controller.signal));
+    const second = consume(s.stream(userContext()));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    controller.abort();
+    expect((await first).result.stopReason).toBe('aborted');
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+    expect(s.delegate).not.toHaveBeenCalled();
+    resolveFetch(choiceResponse(fetch.mock.calls[0]?.[1], 'high'));
+    await second;
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      reuse: 'shared',
+      jev: { outcome: 'selected' },
+    });
+  });
+
+  it('aborts the transport when the final Jev waiter cancels', async () => {
+    const s = astraSetup();
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      () => new Promise(() => undefined),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    const pending = consume(s.stream(userContext(), controller.signal));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    controller.abort();
+    expect((await pending).result.stopReason).toBe('aborted');
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    expect(s.delegate).not.toHaveBeenCalled();
+  });
+
+  it('reports the same original deadline for a late-joining waiter', async () => {
+    vi.useFakeTimers();
+    try {
+      const s = astraSetup();
+      const fetch = vi.fn<typeof globalThis.fetch>(
+        () => new Promise(() => undefined),
+      );
+      vi.stubGlobal('fetch', fetch);
+      required(s.state.currentConfig.jev).timeoutMs = 5000;
+      const first = consume(s.stream(userContext()));
+      await vi.advanceTimersByTimeAsync(3000);
+      const second = consume(s.stream(userContext()));
+      await vi.advanceTimersByTimeAsync(2000);
+      await Promise.all([first, second]);
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(s.delegate).toHaveBeenCalledTimes(2);
+      expect(s.state.lastDecision).toMatchObject({
+        advisor: 'jev-fallback',
+        errorClass: 'deadline',
+        jev: { outcome: 'deadline', timeoutMs: 5000 },
+      });
+      await consume(s.stream(userContext()));
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(s.state.lastDecision).toMatchObject({
+        reuse: 'same-turn',
+        jev: { outcome: 'deadline' },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(['test', 'google'])(
@@ -1523,6 +1632,10 @@ describe('Jev provider integration', () => {
     await consume(s.stream(userContext()));
     expect(s.state.lastDecision?.reasonCode).not.toBe('jev');
     expect(s.state.lastDecision?.tier).toBe('medium');
+    expect(s.state.lastDecision?.jev).toMatchObject({
+      choice: 'high',
+      outcome: 'unavailable',
+    });
     expect(s.delegate).toHaveBeenCalledOnce();
   });
 

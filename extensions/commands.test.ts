@@ -241,7 +241,7 @@ describe('commands.ts', () => {
       const notifyMessage = ctx.ui.notify.mock.calls[0]?.[0] ?? '';
       expect(notifyMessage).toContain('Model Router Status:');
       expect(notifyMessage).toContain('Selected profile: balanced');
-      expect(notifyMessage).toContain('🧭 Jev ↪ base · 750ms');
+      expect(notifyMessage).toContain('🧭 Jev ↪ base · deadline · 750ms');
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
 

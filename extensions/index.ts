@@ -223,6 +223,7 @@ const routerExtension = (pi: ExtensionAPI) => {
     syncPiThinkingLevel: setThinkingLevelInternally,
     updateStatus: (ctx: ExtensionContext) =>
       updateStatus(ctx, {
+        statusLine: currentConfig.ui?.statusLine,
         routerEnabled,
         selectedProfile,
         pinnedTierByProfile,

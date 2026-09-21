@@ -8,13 +8,14 @@ import {
   parseCanonicalModelRef,
 } from './config';
 import type {
+  JevDiagnostics,
   PersistedStateInput,
   RouterLastProfileState,
   RouterPersistedState,
   RouterPinByProfile,
   RoutingDecision,
 } from './types';
-import { isAdvisorOutcome, isRoutingReasonCode } from './types';
+import { isAdvisorOutcome, isRoutingReasonCode, JEV_OUTCOMES } from './types';
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
 
@@ -143,6 +144,43 @@ export const isRouterPersistedState = (
   );
 };
 
+const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
+  if (!isObjectRecord(value)) return undefined;
+  const outcome = JEV_OUTCOMES.find((entry) => entry === value.outcome);
+  if (!outcome || !isFiniteNumber(value.latencyMs) || value.latencyMs < 0)
+    return undefined;
+  const result: JevDiagnostics = { outcome, latencyMs: value.latencyMs };
+  if (
+    typeof value.model === 'string' &&
+    /^(?:jev-latest|jev-\d+(?:\.\d+){1,3})$/.test(value.model)
+  )
+    result.model = value.model;
+  if (
+    typeof value.resolvedModel === 'string' &&
+    /^jev-\d+(?:\.\d+){1,3}$/.test(value.resolvedModel)
+  )
+    result.resolvedModel = value.resolvedModel;
+  if (isRouterTier(value.choice) || value.choice === 'uncertain')
+    result.choice = value.choice;
+  for (const key of ['confidence', 'probability', 'threshold'] as const) {
+    const number = value[key];
+    if (isFiniteNumber(number) && number >= 0 && number <= 1)
+      result[key] = number;
+  }
+  for (const key of [
+    'startedAt',
+    'timeoutMs',
+    'candidateCount',
+    'contextChars',
+    'httpStatus',
+  ] as const) {
+    const number = value[key];
+    if (isFiniteNumber(number) && Number.isSafeInteger(number) && number >= 0)
+      result[key] = number;
+  }
+  return result;
+};
+
 // Copy only the decision contract, never incidental runtime properties.
 export const snapshotDecision = (
   decision: RoutingDecision,
@@ -166,6 +204,13 @@ export const snapshotDecision = (
       ? decision.errorClass
       : undefined,
   advisor: isAdvisorOutcome(decision.advisor) ? decision.advisor : undefined,
+  jev: snapshotJev(decision.jev),
+  reuse:
+    decision.reuse === 'same-turn' ||
+    decision.reuse === 'shared' ||
+    decision.reuse === 'continuation'
+      ? decision.reuse
+      : undefined,
   thinking: decision.thinking,
   timestamp: decision.timestamp,
   isClassifier: decision.isClassifier,

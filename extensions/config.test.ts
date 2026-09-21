@@ -22,6 +22,39 @@ import {
 } from './config';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
 
+describe('status line configuration', () => {
+  it.each([undefined, {}, { statusLine: 'compact' }])(
+    'defaults to compact for %j',
+    (ui) => {
+      expect(normalizeConfig({ ui }).config.ui?.statusLine).toBe('compact');
+    },
+  );
+  it('merges the project UI preference without touching routing', () => {
+    const result = normalizeConfig(
+      mergeConfig(
+        {
+          ui: { statusLine: 'compact' },
+          profiles: { p: { medium: { model: 'test/model' } } },
+        },
+        { ui: { statusLine: 'detailed' } },
+      ),
+    );
+    expect(result.config.ui?.statusLine).toBe('detailed');
+    expect(result.config.profiles.p?.medium?.model).toBe('test/model');
+  });
+  it.each(['secret', { statusLine: 'secret' }, { statusLine: false }])(
+    'rejects invalid UI config without echoing values: %j',
+    (ui) => {
+      const result = normalizeConfig({ ui });
+      expect(result.config.ui?.statusLine).toBe('compact');
+      expect(result.warnings).toContain(
+        'Invalid ui.statusLine; using compact.',
+      );
+      expect(result.warnings.join()).not.toContain('secret');
+    },
+  );
+});
+
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   getAgentDir: () => '/mock/agent/dir',
 }));

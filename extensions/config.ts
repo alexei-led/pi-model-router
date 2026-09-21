@@ -136,6 +136,7 @@ export const mergeConfig = (
   const mergedModels = { ...baseModels, ...overrideModels };
 
   return {
+    ui: mergeRawValue(base.ui, override.ui),
     jev: mergeRawValue(base.jev, override.jev),
     debug: override.debug ?? base.debug,
     classifierModel: override.classifierModel ?? base.classifierModel,
@@ -607,8 +608,19 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     }
   }
 
+  const statusLine = isObjectRecord(raw.ui) ? raw.ui.statusLine : undefined;
+  if (
+    raw.ui !== undefined &&
+    (!isObjectRecord(raw.ui) ||
+      (statusLine !== undefined &&
+        statusLine !== 'compact' &&
+        statusLine !== 'detailed'))
+  )
+    warnings.push('Invalid ui.statusLine; using compact.');
+
   return {
     config: {
+      ui: { statusLine: statusLine === 'detailed' ? 'detailed' : 'compact' },
       jev: normalizeJevConfig(raw.jev, warnings),
       debug: typeof raw.debug === 'boolean' ? raw.debug : false,
       classifierModel,
