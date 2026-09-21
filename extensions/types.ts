@@ -131,6 +131,17 @@ export const isRoutingReasonCode = (
 ): value is RoutingReasonCode =>
   ROUTING_REASON_CODES.some((code) => code === value);
 export type RoutingErrorClass = 'advisor-unavailable' | 'deadline';
+export const ADVISOR_OUTCOMES = [
+  'none',
+  'bypassed',
+  'jev',
+  'jev-fallback',
+  'classifier',
+  'classifier-fallback',
+] as const;
+export type AdvisorOutcome = (typeof ADVISOR_OUTCOMES)[number];
+export const isAdvisorOutcome = (value: unknown): value is AdvisorOutcome =>
+  ADVISOR_OUTCOMES.some((outcome) => outcome === value);
 
 export interface RoutingDecision {
   profile: string;
@@ -142,6 +153,7 @@ export interface RoutingDecision {
   reasonCode: RoutingReasonCode;
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
+  advisor?: AdvisorOutcome | undefined;
   thinking: ThinkingLevel;
   timestamp: number;
   isClassifier?: boolean | undefined;

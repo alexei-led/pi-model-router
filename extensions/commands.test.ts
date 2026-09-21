@@ -228,13 +228,20 @@ describe('commands.ts', () => {
 
   describe('Handler Subcommands', () => {
     it('handle /router status', async () => {
-      const { actions, ctx, cmd } = setup();
+      const { actions, ctx, cmd, state } = setup();
+      state.lastDecision = {
+        ...state.lastDecision,
+        advisor: 'jev-fallback',
+        errorClass: 'deadline',
+        routingLatencyMs: 750,
+      } as RoutingDecision;
 
       await cmd.handler('status', ctx as unknown as ExtensionCommandContext);
       expect(ctx.ui.notify).toHaveBeenCalled();
       const notifyMessage = ctx.ui.notify.mock.calls[0]?.[0] ?? '';
       expect(notifyMessage).toContain('Model Router Status:');
       expect(notifyMessage).toContain('Selected profile: balanced');
+      expect(notifyMessage).toContain('🧭 Jev ↪ base · 750ms');
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
 

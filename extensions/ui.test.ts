@@ -51,8 +51,51 @@ describe('ui.ts', () => {
     expect(formatDecision(decision)).toBe(
       'p: medium -> test/model [medium] (baseline)',
     );
+    expect(
+      formatDecision({
+        ...decision,
+        advisor: 'jev',
+      } as unknown as RoutingDecision),
+    ).toContain('[🧭 Jev ✓]');
     expect(formatModelRef('openai/gpt-4o')).toBe('openai/gpt-4o');
     expect(formatModelRef(undefined)).toBe('none');
+  });
+
+  it.each([
+    ['jev', '🧭 Jev ✓'],
+    ['jev-fallback', '🧭 Jev ↪ base'],
+    ['classifier', '🧠 Classifier ✓'],
+    ['classifier-fallback', '🧠 Classifier ↪ base'],
+    ['bypassed', ''],
+    ['none', ''],
+    [undefined, ''],
+  ] as const)(
+    'shows advisor provenance in the footer: %s',
+    (advisor, suffix) => {
+      const ctx = context();
+      render(ctx, {
+        lastDecision: { ...decision, advisor } as unknown as RoutingDecision,
+      });
+      const status = vi.mocked(ctx.ui.setStatus).mock.calls[0]?.[1] ?? '';
+      if (suffix) expect(status).toContain(suffix);
+      else expect(status).not.toContain('Jev');
+    },
+  );
+
+  it('shows detailed advisor status without remote data', () => {
+    const ctx = context();
+    render(ctx, {
+      lastDecision: {
+        ...decision,
+        advisor: 'jev-fallback',
+        routingLatencyMs: 750,
+        errorClass: 'deadline',
+      } as unknown as RoutingDecision,
+    });
+    const lines = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1] ?? [];
+    expect(lines).toContain('🧭 Jev ↪ base · 750ms');
+    expect(lines).not.toContain('Routing: 750ms');
+    expect(lines).not.toContain('Routing error: deadline');
   });
 
   it('formats sorted pins and thinking overrides', () => {

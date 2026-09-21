@@ -126,6 +126,10 @@ Snapshots are deeply copied at save and restore boundaries. Optional persisted f
 At the actual `pi.appendEntry('router-state', ...)` boundary, decisions and debug
 history copy only declared local fields. `RoutingReasonCode` is the closed union
 `baseline | pinned | continuation | classifier | jev | fallback | budget | legacy`.
+`AdvisorOutcome` separately records route guidance as `none | bypassed | jev |
+jev-fallback | classifier | classifier-fallback`; only the informative Jev or
+classifier outcomes render in the footer and widget, so ordinary baseline turns
+return to the normal status text.
 Obsolete source codes and old free-form explanations map to non-rendered `legacy`
 without dropping unrelated pins, costs or settings; unknown persisted codes are
 rejected. Continuation decisions clear stale advisor latency/error/classifier fields. Numeric routing latency and the fixed error classes

@@ -23,6 +23,7 @@ import type { JevConfig } from './types';
 
 type State = Parameters<typeof registerRouterProvider>[1];
 type MutableState = { -readonly [K in keyof State]: State[K] };
+const advisorOf = (decision: State['lastDecision']) => decision?.advisor;
 
 const setup = () => {
   const models = [
@@ -110,6 +111,7 @@ describe('router provider', () => {
       selectedProfile: 'balanced',
       routerEnabled: true,
     });
+    expect(advisorOf(s.state.lastDecision)).toBe('none');
     expect(s.actions.persistState).toHaveBeenCalledOnce();
   });
 
@@ -443,6 +445,7 @@ describe('four-level provider routing', () => {
       tier: 'micro',
       thinking: 'off',
     });
+    expect(advisorOf(s.state.lastDecision)).toBe('bypassed');
   });
 
   it.each(['micro', 'low', 'medium', 'high'] as const)(
@@ -530,6 +533,7 @@ describe('four-level provider routing', () => {
       reasonCode: 'classifier',
       isClassifier: true,
     });
+    expect(advisorOf(s.state.lastDecision)).toBe('classifier');
   });
 
   it('supports partial profiles and reports only unavailable pinned routes', async () => {
@@ -717,6 +721,7 @@ describe('Jev provider integration', () => {
       expect(fetch).toHaveBeenCalledOnce();
       expect(s.delegate).toHaveBeenCalledOnce();
       expect(s.state.lastDecision).toMatchObject({ tier, reasonCode: 'jev' });
+      expect(advisorOf(s.state.lastDecision)).toBe('jev');
     },
   );
 
@@ -778,6 +783,7 @@ describe('Jev provider integration', () => {
         tier: 'medium',
         reasonCode: 'baseline',
       });
+      expect(advisorOf(s.state.lastDecision)).toBe('jev-fallback');
     },
   );
 
@@ -821,6 +827,7 @@ describe('Jev provider integration', () => {
         tier: 'medium',
         reasonCode: 'baseline',
       });
+      expect(advisorOf(s.state.lastDecision)).toBe('classifier-fallback');
     },
   );
 
@@ -853,6 +860,7 @@ describe('Jev provider integration', () => {
       tier: 'high',
       reasonCode: 'jev',
     });
+    expect(advisorOf(s.state.lastDecision)).toBe('jev');
     const recorded = JSON.stringify(s.actions.recordDebugDecision.mock.calls);
     for (const value of [
       'private-test-key',
@@ -862,6 +870,26 @@ describe('Jev provider integration', () => {
     ])
       expect(recorded).not.toContain(value);
     expect(s.state.lastDecision?.routingLatencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('keeps Jev provenance when generation falls back to an explicit target', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    required(s.state.currentConfig.profiles.balanced).high = {
+      model: 'test/primary',
+      fallbacks: ['test/fallback'],
+    };
+    mockChoice('high');
+    s.delegate.mockReturnValueOnce(failure()).mockReturnValueOnce(done());
+
+    await consume(s.stream(userContext()));
+
+    expect(s.state.lastDecision).toMatchObject({
+      targetLabel: 'test/fallback',
+      reasonCode: 'fallback',
+      isFallback: true,
+    });
+    expect(advisorOf(s.state.lastDecision)).toBe('jev');
   });
 
   it.each(['pin', 'single', 'budget', 'disabled-profile'] as const)(
@@ -890,6 +918,9 @@ describe('Jev provider integration', () => {
       await consume(s.stream(context));
       expect(fetch).not.toHaveBeenCalled();
       expect(s.delegate).toHaveBeenCalledOnce();
+      expect(advisorOf(s.state.lastDecision)).toBe(
+        kind === 'disabled-profile' ? 'none' : 'bypassed',
+      );
     },
   );
 
@@ -938,6 +969,9 @@ describe('Jev provider integration', () => {
           targetLabel: 'test/fallback',
           reasonCode: 'fallback',
         });
+        expect(advisorOf(s.state.lastDecision)).toBe(
+          advisor === 'none' ? 'none' : 'bypassed',
+        );
       }
     },
   );
@@ -962,6 +996,7 @@ describe('Jev provider integration', () => {
         thinking: 'off',
         reasonCode: advisor,
       });
+      expect(advisorOf(s.state.lastDecision)).toBe(advisor);
       expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('primary');
       expect(s.delegate.mock.calls.at(-1)?.[2]?.reasoning).toBeUndefined();
       if (advisor === 'jev') {
@@ -1030,6 +1065,7 @@ describe('Jev provider integration', () => {
           tier: 'high',
           reasonCode: advisor,
         });
+        expect(advisorOf(s.state.lastDecision)).toBe(advisor);
         expect(s.delegate).toHaveBeenCalledTimes(
           advisor === 'classifier' ? 4 : 2,
         );
@@ -1046,6 +1082,7 @@ describe('Jev provider integration', () => {
       await consume(s.stream(userContext('implement a parser', timestamp)));
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(s.delegate).toHaveBeenCalledTimes(4);
+    expect(advisorOf(s.state.lastDecision)).toBe('jev');
   });
 
   it.each(['test', 'google'])(
@@ -1065,6 +1102,7 @@ describe('Jev provider integration', () => {
       expect(fetch).toHaveBeenCalledOnce();
       expect(s.delegate).toHaveBeenCalledTimes(2);
       expect(s.state.lastDecision?.reasonCode).toBe('continuation');
+      expect(advisorOf(s.state.lastDecision)).toBe('jev');
       expect(s.delegate.mock.calls[1]?.[0].provider).toBe(provider);
     },
   );
@@ -1096,6 +1134,9 @@ describe('Jev provider integration', () => {
       expect(s.state.lastDecision?.isClassifier).toBeUndefined();
       expect(s.state.lastDecision?.routingLatencyMs).toBeUndefined();
       expect(s.state.lastDecision?.errorClass).toBeUndefined();
+      expect(advisorOf(s.state.lastDecision)).toBe(
+        source === 'jev' ? 'jev-fallback' : 'classifier',
+      );
     },
   );
 
@@ -1116,6 +1157,7 @@ describe('Jev provider integration', () => {
       tier: 'low',
       reasonCode: 'continuation',
     });
+    expect(advisorOf(s.state.lastDecision)).toBe('jev');
     await consume(
       s.stream(
         toolContext(userContext('same task', 1), toolMessage('test', 'small')),
@@ -1125,6 +1167,7 @@ describe('Jev provider integration', () => {
       tier: 'medium',
       reasonCode: 'baseline',
     });
+    expect(advisorOf(s.state.lastDecision)).toBe('bypassed');
     expect(fetch).toHaveBeenCalledTimes(17);
   });
 

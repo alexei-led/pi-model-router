@@ -39,6 +39,7 @@ import {
   selectBaselineRoute,
 } from './routing';
 import type {
+  AdvisorOutcome,
   RouterConfig,
   RouterPinByProfile,
   RouterThinkingByProfile,
@@ -279,7 +280,7 @@ export const registerRouterProvider = (
   // Streams can complete out of order. Keep a small turn-keyed history rather
   // than letting the latest stream replace another stream's continuation.
   const continuations = new Map<string, ContinuationRecord>();
-  const advisedTurns = new Map<string, true>();
+  const advisedTurns = new Map<string, AdvisorOutcome>();
   const rememberContinuation = (record: ContinuationRecord) => {
     continuations.delete(record.turn);
     continuations.set(record.turn, record);
@@ -289,9 +290,9 @@ export const registerRouterProvider = (
       continuations.delete(oldest);
     }
   };
-  const rememberAdvisedTurn = (turn: string) => {
+  const rememberAdvisedTurn = (turn: string, outcome: AdvisorOutcome) => {
     advisedTurns.delete(turn);
-    advisedTurns.set(turn, true);
+    advisedTurns.set(turn, outcome);
     while (advisedTurns.size > 16) {
       const oldest = advisedTurns.keys().next().value;
       if (oldest === undefined) break;
@@ -391,6 +392,14 @@ export const registerRouterProvider = (
           ]);
           const toolContinuation =
             context.messages.at(-1)?.role === 'toolResult';
+          const jev = state.currentConfig.jev;
+          const useJev = Boolean(
+            jev?.enabled &&
+              profile.jev?.enabled &&
+              jev.apiKey.trim().length > 0,
+          );
+          const advisorConfigured =
+            useJev || Boolean(state.currentConfig.classifierModel);
           const continuationRecord =
             toolContinuation && turn ? continuations.get(turn) : undefined;
           const continuationDecision = continuationRecord?.decision;
@@ -459,6 +468,11 @@ export const registerRouterProvider = (
               baseline.reasonCode,
             );
             decision.isBudgetForced = baseline.isBudgetForced;
+            decision.advisor = advisorConfigured ? 'bypassed' : 'none';
+            if (!toolContinuation && turn) {
+              const previousAdvisor = advisedTurns.get(turn);
+              if (previousAdvisor) decision.advisor = previousAdvisor;
+            }
           }
 
           // Tool results never invoke advisors, even when their prior route cannot be reused.
@@ -469,99 +483,110 @@ export const registerRouterProvider = (
             user &&
             turn &&
             !advisedTurns.has(turn) &&
-            (state.currentConfig.classifierModel ||
-              (state.currentConfig.jev?.enabled && profile.jev?.enabled))
+            advisorConfigured
           ) {
-            rememberAdvisedTurn(turn);
             const started = performance.now();
-            const jev = state.currentConfig.jev;
-            const useJev =
-              jev?.enabled &&
-              profile.jev?.enabled &&
-              jev.apiKey.trim().length > 0;
             const routingDeadline = started + (useJev ? 1500 : 10_000);
             const candidates = primaryRoutePairs(profile, pairs).map(
               createJevCandidate,
             );
             // A single primary bypasses advice, not a baseline's eligible fallback.
-            if (candidates.length > 1) {
-              if (useJev && jev) {
-                const advice = await runJev(
-                  {
-                    ...jev,
-                    timeoutMs: Math.min(750, jev.timeoutMs),
-                  },
-                  {
-                    taskSummary: getBoundedRecentContext(
-                      context,
-                      jev.maxStateChars,
-                    ),
-                    candidates,
-                    profile: profile.jev,
-                    routingDeadline,
-                    signal: options?.signal,
-                  },
-                ).catch(() => undefined);
-                options?.signal?.throwIfAborted();
-                // Re-read registry capabilities after the network boundary.
-                pairs = available();
-                const candidate = candidates.find(
-                  (entry) => entry.id === advice?.candidateId,
-                );
-                if (
-                  candidate &&
-                  performance.now() < routingDeadline &&
-                  pairs.some(
-                    (pair) =>
-                      pair.model === candidate.model &&
-                      pair.tier === candidate.tier &&
-                      pair.thinking === candidate.thinking,
-                  )
-                ) {
-                  decision = decisionForPair(model.id, candidate, 'jev');
-                } else {
-                  const baseline = selectBaselineRoute(
-                    model.id,
-                    profile,
-                    pairs,
-                  );
-                  decision = decisionForPair(
-                    model.id,
-                    baseline.pair,
-                    baseline.reasonCode,
-                  );
-                  decision.errorClass = 'advisor-unavailable';
-                }
-              } else if (state.currentConfig.classifierModel) {
-                const classifier = state.currentConfig.classifierModel;
-                const result = await runClassifier(
-                  classifier.model,
-                  registry,
-                  context,
-                  undefined,
-                  classifier.thinking,
-                  options?.signal,
+            if (candidates.length <= 1) {
+              decision.advisor = 'bypassed';
+              rememberAdvisedTurn(turn, 'bypassed');
+            } else if (useJev && jev) {
+              decision.advisor = 'jev';
+              rememberAdvisedTurn(turn, 'jev');
+              const advice = await runJev(
+                {
+                  ...jev,
+                  timeoutMs: Math.min(750, jev.timeoutMs),
+                },
+                {
+                  taskSummary: getBoundedRecentContext(
+                    context,
+                    jev.maxStateChars,
+                  ),
+                  candidates,
+                  profile: profile.jev,
                   routingDeadline,
-                ).catch(() => undefined);
-                options?.signal?.throwIfAborted();
-                pairs = available();
+                  signal: options?.signal,
+                },
+              ).catch(() => undefined);
+              options?.signal?.throwIfAborted();
+              // Re-read registry capabilities after the network boundary.
+              pairs = available();
+              const candidate = candidates.find(
+                (entry) => entry.id === advice?.candidateId,
+              );
+              if (
+                candidate &&
+                performance.now() < routingDeadline &&
+                pairs.some(
+                  (pair) =>
+                    pair.model === candidate.model &&
+                    pair.tier === candidate.tier &&
+                    pair.thinking === candidate.thinking,
+                )
+              ) {
+                decision = {
+                  ...decisionForPair(model.id, candidate, 'jev'),
+                  advisor: 'jev',
+                };
+              } else {
                 const baseline = selectBaselineRoute(model.id, profile, pairs);
                 decision = decisionForPair(
                   model.id,
                   baseline.pair,
                   baseline.reasonCode,
                 );
-                if (result && performance.now() < routingDeadline) {
-                  const pair = pairs.find(
-                    (entry) => entry.tier === result.tier,
-                  );
-                  if (pair) {
-                    decision = {
-                      ...decisionForPair(model.id, pair, 'classifier'),
-                      isClassifier: true,
-                    };
-                  } else decision.errorClass = 'advisor-unavailable';
-                } else decision.errorClass = 'advisor-unavailable';
+                decision.advisor = 'jev-fallback';
+                rememberAdvisedTurn(turn, 'jev-fallback');
+                decision.errorClass = 'advisor-unavailable';
+              }
+              decision.routingLatencyMs = Math.max(
+                0,
+                performance.now() - started,
+              );
+              if (performance.now() >= routingDeadline)
+                decision.errorClass = 'deadline';
+            } else if (state.currentConfig.classifierModel) {
+              const classifier = state.currentConfig.classifierModel;
+              const result = await runClassifier(
+                classifier.model,
+                registry,
+                context,
+                undefined,
+                classifier.thinking,
+                options?.signal,
+                routingDeadline,
+              ).catch(() => undefined);
+              options?.signal?.throwIfAborted();
+              pairs = available();
+              const baseline = selectBaselineRoute(model.id, profile, pairs);
+              decision = decisionForPair(
+                model.id,
+                baseline.pair,
+                baseline.reasonCode,
+              );
+              if (result && performance.now() < routingDeadline) {
+                const pair = pairs.find((entry) => entry.tier === result.tier);
+                if (pair) {
+                  decision = {
+                    ...decisionForPair(model.id, pair, 'classifier'),
+                    isClassifier: true,
+                    advisor: 'classifier',
+                  };
+                  rememberAdvisedTurn(turn, 'classifier');
+                } else {
+                  decision.advisor = 'classifier-fallback';
+                  rememberAdvisedTurn(turn, 'classifier-fallback');
+                  decision.errorClass = 'advisor-unavailable';
+                }
+              } else {
+                decision.advisor = 'classifier-fallback';
+                rememberAdvisedTurn(turn, 'classifier-fallback');
+                decision.errorClass = 'advisor-unavailable';
               }
               decision.routingLatencyMs = Math.max(
                 0,
@@ -603,7 +628,10 @@ export const registerRouterProvider = (
               throw new Error(
                 'No compatible route for Google tool continuation.',
               );
-            decision = decisionForPair(model.id, priorPair, 'continuation');
+            decision = {
+              ...decisionForPair(model.id, priorPair, 'continuation'),
+              advisor: decision.advisor,
+            };
           }
 
           state.lastDecision = decision;

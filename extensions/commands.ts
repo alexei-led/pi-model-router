@@ -24,6 +24,7 @@ import type {
   RoutingDecision,
 } from './types';
 import {
+  formatAdvisorDetail,
   formatDecision,
   formatDecisionSource,
   formatModelRef,
@@ -183,6 +184,7 @@ export const registerCommands = (
       `Debug history: ${state.debugHistory.length} decisions`,
     ];
     if (state.lastDecision) {
+      const advisorDetail = formatAdvisorDetail(state.lastDecision);
       lines.push(
         `Last routed tier: ${state.lastDecision.tier}`,
         `Last phase: ${state.lastDecision.phase}`,
@@ -190,6 +192,7 @@ export const registerCommands = (
         ...(formatDecisionSource(state.lastDecision)
           ? [`Reason: ${formatDecisionSource(state.lastDecision)}`]
           : []),
+        ...(advisorDetail ? [advisorDetail] : []),
       );
     }
     if (state.lastConfigWarnings && state.lastConfigWarnings.length > 0) {

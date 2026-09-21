@@ -14,7 +14,7 @@ import type {
   RouterPinByProfile,
   RoutingDecision,
 } from './types';
-import { isRoutingReasonCode } from './types';
+import { isAdvisorOutcome, isRoutingReasonCode } from './types';
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
 
@@ -57,6 +57,7 @@ const isDecision = (value: unknown): value is RoutingDecision =>
   (value.reasonCode === undefined
     ? typeof value.reasoning === 'string'
     : isPersistedReasonCode(value.reasonCode)) &&
+  (value.advisor === undefined || isAdvisorOutcome(value.advisor)) &&
   ['isClassifier', 'isFallback', 'isBudgetForced'].every(
     (key) => value[key] === undefined || typeof value[key] === 'boolean',
   );
@@ -164,6 +165,7 @@ export const snapshotDecision = (
     decision.errorClass === 'deadline'
       ? decision.errorClass
       : undefined,
+  advisor: isAdvisorOutcome(decision.advisor) ? decision.advisor : undefined,
   thinking: decision.thinking,
   timestamp: decision.timestamp,
   isClassifier: decision.isClassifier,

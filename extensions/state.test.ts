@@ -62,6 +62,7 @@ describe('state.ts', () => {
       { lastDecision: { tier: 'high' } },
       { lastNonRouterModel: 'invalid' },
       { debugEnabled: 'yes' },
+      { lastDecision: { ...decision, advisor: 'remote' } },
     ])
       expect(isRouterPersistedState({ ...valid, ...invalid })).toBe(false);
   });
@@ -74,14 +75,22 @@ describe('state.ts', () => {
       thinkingByProfile: { p: { medium: 'medium' } },
       debugEnabled: true,
       widgetEnabled: false,
-      debugHistory: [decision],
-      lastDecision: decision,
+      debugHistory: [
+        {
+          ...decision,
+          advisor: 'jev-fallback',
+        } as unknown as RoutingDecision,
+      ],
+      lastDecision: {
+        ...decision,
+        advisor: 'jev-fallback',
+      } as unknown as RoutingDecision,
       lastNonRouterModel: 'openai/gpt-4o',
       accumulatedCost: 0.0045,
     });
     expect(state.pinTier).toBe('medium');
-    expect(state.lastDecision).toEqual(decision);
-    expect(state.debugHistory).toEqual([decision]);
+    expect(state.lastDecision?.advisor).toBe('jev-fallback');
+    expect(state.debugHistory?.[0]?.advisor).toBe('jev-fallback');
     expect(state.accumulatedCost).toBe(0.0045);
     expect(isRouterPersistedState(JSON.parse(JSON.stringify(state)))).toBe(
       true,
@@ -97,6 +106,7 @@ describe('state.ts', () => {
       apiKey: 'secret',
       errorClass: 'remote-error-text',
       routingLatencyMs: Number.NaN,
+      advisor: 'remote-advisor',
     } as unknown as RoutingDecision;
     const state = buildPersistedState({
       routerEnabled: true,
@@ -111,6 +121,7 @@ describe('state.ts', () => {
       accumulatedCost: 0,
     });
     expect(state.lastDecision?.reasonCode).toBe('legacy');
+    expect(state.lastDecision?.advisor).toBeUndefined();
     expect(JSON.stringify(state)).not.toContain('secret');
     expect(JSON.stringify(state)).not.toContain('remote explanation');
   });
@@ -166,5 +177,24 @@ describe('state.ts', () => {
         lastDecision: { ...decision, reasonCode: 'keyword' },
       }),
     ).toBe(false);
+    expect(
+      isRouterPersistedState({
+        enabled: true,
+        selectedProfile: 'p',
+        timestamp: 1,
+        lastDecision: { ...decision, advisor: 'remote' },
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts old snapshots without advisor provenance', () => {
+    expect(
+      isRouterPersistedState({
+        enabled: true,
+        selectedProfile: 'p',
+        timestamp: 1,
+        lastDecision: decision,
+      }),
+    ).toBe(true);
   });
 });

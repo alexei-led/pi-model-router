@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 — 2026-09-21
+
+- Add compact human-readable route provenance to the Pi footer, widget and `/router status`: `🧭 Jev ✓` means Jev selected the route, `🧭 Jev ↪ base` means Jev ran but the local baseline was used, and no marker means Jev was not involved.
+- Track closed route-guidance outcomes across Jev, classifier, bypass and baseline paths, including reusable tool continuations and explicit generation fallbacks without persisting remote text or credentials.
+- Keep the normal footer uncluttered for turns without external route guidance; retain latency only as a short widget/status diagnostic.
+- Add regression coverage for UI rendering, persistence compatibility, advisor fallback, continuation inheritance and privacy boundaries.
+
 ## 0.6.0 — 2026-09-21
 
 - Add the optional `micro` tier with `off` thinking by default; all four tiers are configured model/effort choices, not security permissions. Existing three-tier and partial profiles remain supported.

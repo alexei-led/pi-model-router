@@ -244,6 +244,13 @@ request text, raw response or remote explanations. Older saved explanations are
 discarded as non-rendered `legacy` metadata; Pi's own conversation transcript is
 separate from router state.
 
+**Footer and widget:** The footer stays in its normal route-only form when Jev is
+not involved. When Jev selects the route it adds `· 🧭 Jev ✓`; when Jev is used
+but its advice is rejected, it adds `· 🧭 Jev ↪ base`. `base` means the local
+deterministic baseline; the selected tier and model remain visible in the route
+text. `/router widget on` and `/router status` show the same marker and a short
+latency value. No marker means no external route guidance was used.
+
 For chezmoi, use a **private template**, for example
 `private_model-router.json.tmpl` under your agent-directory source path. Render
 only the `apiKey` value using a reference such as
@@ -268,11 +275,11 @@ keeps Jev disabled.
 | `/router thinking <tier> <level>` | Override thinking level for a specific tier (e.g. `/router thinking low off`). |
 | `/router disable`           | Disable the router and switch back to the last non-router model.                |
 | `/router widget <on\|off>`  | Toggle the persistent state widget (supports `toggle`).                         |
-| `/router debug <on\|off>`   | Toggle turn-by-turn routing notifications (supports `toggle`, `clear`, `show`). |
+| `/router debug <on\|off>`   | Toggle router debug state; use `show` or `clear` for local decision history. |
 | `/router reload`            | Hot-reload the configuration JSON.                                              |
 | `/router help`              | Show usage help for all subcommands.                                            |
 
 ## Documentation
 
 - [Architecture Guide](docs/ARCHITECTURE.md): Deep dive into the routing logic and modular design.
-- [Sample Configuration](model-router.example.json): Diverse profile examples (`cheap`, `deep`, `balanced`).
+- [Sample Configuration](model-router.example.json): Profile examples (`auto`, `cheap`, `deep`, `anthropic`).

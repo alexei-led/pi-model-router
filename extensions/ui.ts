@@ -5,7 +5,7 @@ import type {
   RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
-import { isRoutingReasonCode } from './types';
+import { isAdvisorOutcome, isRoutingReasonCode } from './types';
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
@@ -19,9 +19,53 @@ export const formatDecisionSource = (decision: RoutingDecision): string =>
     ? decision.reasonCode
     : '';
 
+export const formatAdvisorLabel = (
+  decision: RoutingDecision,
+): string | undefined => {
+  if (!isAdvisorOutcome(decision.advisor)) return undefined;
+  switch (decision.advisor) {
+    case 'none':
+    case 'bypassed':
+      return undefined;
+    case 'jev':
+      return '🧭 Jev ✓';
+    case 'jev-fallback':
+      return '🧭 Jev ↪ base';
+    case 'classifier':
+      return '🧠 Classifier ✓';
+    case 'classifier-fallback':
+      return '🧠 Classifier ↪ base';
+    default:
+      return undefined;
+  }
+};
+
+export const formatAdvisorDetail = (
+  decision: RoutingDecision,
+): string | undefined => {
+  const label = formatAdvisorLabel(decision);
+  if (!label) return undefined;
+  const latency = Number.isFinite(decision.routingLatencyMs)
+    ? ` · ${Math.round(decision.routingLatencyMs ?? 0)}ms`
+    : '';
+  return `${label}${latency}`;
+};
+
+export const formatAdvisorFooter = (decision: RoutingDecision): string => {
+  if (
+    !decision.advisor ||
+    decision.advisor === 'none' ||
+    decision.advisor === 'bypassed'
+  )
+    return '';
+  const label = formatAdvisorLabel(decision);
+  return label ? ` · ${label}` : '';
+};
+
 export const formatDecision = (decision: RoutingDecision): string => {
   const source = formatDecisionSource(decision);
-  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${source ? ` (${source})` : ''}`;
+  const advisor = formatAdvisorLabel(decision);
+  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}`;
 };
 
 export const formatPinSummary = (
@@ -79,7 +123,7 @@ export const updateStatus = (
 
     let statusText: string;
     if (lastDecision && matchesProfile && matchesPin) {
-      statusText = `router:${activeRouterProfile}${pinLabel} -> ${lastDecision.tier} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`;
+      statusText = `router:${activeRouterProfile}${pinLabel} -> ${lastDecision.tier} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})${formatAdvisorFooter(lastDecision)}`;
     } else {
       statusText = `router:${activeRouterProfile}${pinLabel} -> waiting`;
     }
@@ -103,18 +147,13 @@ export const updateStatus = (
   if (lastDecision && lastDecision.profile === statusProfile) {
     const flags = getDecisionFlags(lastDecision);
     const flagsStr = flags.length > 0 ? ` [${flags.join(',')}]` : '';
+    const advisorDetail = formatAdvisorDetail(lastDecision);
 
     widgetLines.push(
       `Route: ${lastDecision.tier}${flagsStr} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`,
       `Phase: ${lastDecision.phase}`,
       `Source: ${formatDecisionSource(lastDecision) || 'unknown'}`,
-      ...(Number.isFinite(lastDecision.routingLatencyMs)
-        ? [`Routing: ${Math.round(lastDecision.routingLatencyMs ?? 0)}ms`]
-        : []),
-      ...(lastDecision.errorClass === 'deadline' ||
-      lastDecision.errorClass === 'advisor-unavailable'
-        ? [`Routing error: ${lastDecision.errorClass}`]
-        : []),
+      ...(advisorDetail ? [advisorDetail] : []),
     );
   } else if (!routerEnabled && lastNonRouterModel) {
     widgetLines.push(`Fallback: ${lastNonRouterModel}`);
