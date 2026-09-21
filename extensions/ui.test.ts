@@ -110,7 +110,7 @@ describe('ui.ts', () => {
         lastNonRouterModel,
         accumulatedCost,
         widgetEnabled,
-        currentConfig,
+        maxSessionBudget: currentConfig.maxSessionBudget,
       });
 
     it('remove status if disabled', () => {
@@ -404,7 +404,7 @@ describe('four-tier rendering', () => {
         lastNonRouterModel: undefined,
         accumulatedCost: 0,
         widgetEnabled: true,
-        currentConfig: { profiles: {} },
+        maxSessionBudget: undefined,
       });
       expect(ctx.ui.setStatus).toHaveBeenCalledWith(
         'router',
@@ -446,7 +446,7 @@ describe('local floor status', () => {
         lastNonRouterModel: undefined,
         accumulatedCost: 0,
         widgetEnabled: false,
-        currentConfig: { profiles: {} },
+        maxSessionBudget: undefined,
       });
       expect(ctx.ui.setStatus).toHaveBeenCalledWith(
         'router',
@@ -489,7 +489,7 @@ describe('safe source rendering', () => {
       lastNonRouterModel: undefined,
       accumulatedCost: 0,
       widgetEnabled: true,
-      currentConfig: { profiles: {} },
+      maxSessionBudget: undefined,
     });
     const rendered = JSON.stringify(ctx.ui.setWidget.mock.calls);
     for (const text of ['private key', 'remote', 'legacy'])
@@ -516,7 +516,7 @@ describe('safe source rendering', () => {
       lastNonRouterModel: undefined,
       accumulatedCost: 0,
       widgetEnabled: true,
-      currentConfig: { profiles: {} },
+      maxSessionBudget: undefined,
       lastDecision: {
         profile: 'p',
         tier: 'medium',

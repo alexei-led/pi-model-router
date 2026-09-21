@@ -14,7 +14,7 @@ import {
 } from './config';
 import { MAX_DEBUG_HISTORY } from './constants';
 import { registerRouterProvider } from './provider';
-import { availableRoutePairs } from './routing';
+import { preservesRouteCoverage } from './routing';
 import {
   buildPersistedState,
   isRouterPersistedState,
@@ -212,7 +212,7 @@ const routerExtension = (pi: ExtensionAPI) => {
         lastNonRouterModel,
         accumulatedCost,
         widgetEnabled,
-        currentConfig,
+        maxSessionBudget: currentConfig.maxSessionBudget,
       }),
     reloadConfig: (
       ctx?: ExtensionContext,
@@ -529,14 +529,12 @@ const routerExtension = (pi: ExtensionAPI) => {
     const activeProfile = currentConfig.profiles[selectedProfile];
     if (!activeProfile) return;
     if (
-      availableRoutePairs(
+      preservesRouteCoverage(
         activeProfile,
-        'micro',
         (provider, id) => ctx.modelRegistry.find(provider, id),
-        false,
         overrides,
         currentConfig.models,
-      ).length === 0
+      ) === false
     ) {
       actions.syncPiThinkingLevel(event.previousLevel);
       ctx.ui.notify(

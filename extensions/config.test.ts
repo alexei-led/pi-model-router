@@ -295,6 +295,10 @@ describe('config.ts', () => {
         thinking: 'medium',
         thinkingExplicit: false,
         fallbacks: ['test/fallback', 'test/other'],
+        resolvedFallbacks: [
+          { model: 'test/fallback', thinkingLevels: ['low'] },
+          { model: 'test/other' },
+        ],
       });
       expect(config.profiles.p?.micro).toMatchObject({
         thinking: 'off',

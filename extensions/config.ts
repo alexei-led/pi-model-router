@@ -280,7 +280,11 @@ export const normalizeTierConfig = (
     return undefined;
   }
 
-  const defaultThinking = tier === 'micro' ? 'off' : 'medium';
+  const tierReasoning =
+    typeof value.reasoning === 'boolean' ? value.reasoning : undefined;
+  const effectiveReasoning = tierReasoning ?? aliasDefinition?.reasoning;
+  const defaultThinking =
+    tier === 'micro' || effectiveReasoning === false ? 'off' : 'medium';
   const thinking = isThinkingLevel(value.thinking)
     ? value.thinking
     : defaultThinking;
@@ -291,6 +295,7 @@ export const normalizeTierConfig = (
   }
 
   let fallbacks: string[] | undefined;
+  const resolvedFallbacks: ModelDefinition[] = [];
   if (Array.isArray(value.fallbacks)) {
     fallbacks = [];
     for (const f of value.fallbacks) {
@@ -301,7 +306,9 @@ export const normalizeTierConfig = (
           const { provider, modelId } = parseCanonicalModelRef(
             resolvedFallback.canonicalRef,
           );
-          fallbacks.push(`${provider}/${modelId}`);
+          const model = `${provider}/${modelId}`;
+          fallbacks.push(model);
+          resolvedFallbacks.push({ ...resolvedFallback.definition, model });
         } catch (error) {
           warnings.push(
             `Invalid fallback model "${f}" in profile "${profileName}" ${tier} tier: ${error instanceof Error ? error.message : String(error)}`,
@@ -328,11 +335,6 @@ export const normalizeTierConfig = (
       : undefined;
   const resolvedMaxTokens =
     tierMaxTokens ?? aliasDefinition?.maxTokens ?? DEFAULT_MAX_TOKENS;
-
-  // Resolve reasoning: tier config > alias > undefined (assumed true)
-  const tierReasoning =
-    typeof value.reasoning === 'boolean' ? value.reasoning : undefined;
-  const effectiveReasoning = tierReasoning ?? aliasDefinition?.reasoning;
 
   // Resolve thinkingLevels: tier config > alias > default
   // Validate tier-level thinkingLevels array
@@ -367,9 +369,10 @@ export const normalizeTierConfig = (
     thinkingExplicit: isThinkingLevel(value.thinking),
     thinking,
     fallbacks,
+    resolvedFallbacks,
     contextWindow: tierContextWindow,
     maxTokens: tierMaxTokens,
-    reasoning: tierReasoning,
+    reasoning: effectiveReasoning,
     thinkingLevels: tierThinkingLevels,
     resolvedContextWindow,
     resolvedMaxTokens,

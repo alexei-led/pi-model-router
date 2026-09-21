@@ -35,6 +35,8 @@ export interface RoutedTierConfig {
   thinkingExplicit?: boolean | undefined;
   thinking?: ThinkingLevel | undefined;
   fallbacks?: string[] | undefined;
+  /** Canonical targets and exact alias metadata, in the same order as fallbacks. */
+  resolvedFallbacks?: ModelDefinition[] | undefined;
   contextWindow?: number | undefined;
   maxTokens?: number | undefined;
   reasoning?: boolean | undefined;
@@ -86,7 +88,7 @@ export interface RouterStatusState {
   lastNonRouterModel: string | undefined;
   accumulatedCost: number;
   widgetEnabled: boolean;
-  currentConfig: RouterConfig;
+  maxSessionBudget: number | undefined;
 }
 
 export interface RoutePair {

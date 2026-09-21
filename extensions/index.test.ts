@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import routerExtension from './index';
 import { done, model } from './test/fixtures';
 import type { RouterConfig } from './types';
+import * as ui from './ui';
 
 const stateMocks = vi.hoisted(() => ({
   advisors: {} as Pick<RouterConfig, 'jev' | 'classifierModel'>,
@@ -100,6 +101,39 @@ describe('index.ts (orchestrator)', () => {
       theme: { fg: (_color: string, text: string) => text },
       notify: vi.fn(),
     },
+  });
+
+  it('passes only public status fields across the UI boundary', async () => {
+    stateMocks.advisors = {
+      jev: {
+        enabled: true,
+        apiKey: 'private-key-sentinel',
+        endpoint: 'https://private-endpoint.example/v1/systemone',
+        model: 'jev-1.13.0',
+        timeoutMs: 750,
+        confidenceThreshold: 0.65,
+        maxStateChars: 12000,
+        mode: 'advisory',
+      },
+    };
+    const status = vi.spyOn(ui, 'updateStatus');
+    try {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      for (const handler of handlersFor('session_start'))
+        await handler({}, ctx);
+      expect(status).toHaveBeenCalled();
+      for (const [, projection] of status.mock.calls) {
+        expect(projection).toHaveProperty('maxSessionBudget');
+        expect(projection).not.toHaveProperty('currentConfig');
+        expect(JSON.stringify(projection)).not.toContain(
+          'private-key-sentinel',
+        );
+        expect(JSON.stringify(projection)).not.toContain('private-endpoint');
+      }
+    } finally {
+      status.mockRestore();
+    }
   });
 
   it('restores micro pins and thinking overrides without migration', async () => {
@@ -532,6 +566,43 @@ describe('index.ts (orchestrator)', () => {
         expect(mockPi.setThinkingLevel).toHaveBeenLastCalledWith('medium');
         expect(ctx.ui.notify).toHaveBeenCalledWith(
           expect.stringContaining('leaves no eligible route'),
+          'warning',
+        );
+      },
+    );
+
+    it.each(['high-floor', 'image'] as const)(
+      'preserves configured %s coverage when selecting thinking',
+      async (capability) => {
+        routerExtension(mockPi);
+        const ctx = buildMockCtx();
+        ctx.modelRegistry.find.mockImplementation((provider, id) =>
+          model(id, {
+            provider,
+            input:
+              capability === 'image' && id === 'gpt-4o'
+                ? ['text']
+                : ['text', 'image'],
+            thinkingLevelMap: {
+              low: (
+                capability === 'high-floor'
+                  ? id === 'gpt-4o'
+                  : id !== 'gpt-4o'
+              )
+                ? null
+                : 'low',
+            },
+          }),
+        );
+        for (const handler of handlersFor('session_start'))
+          await handler({}, ctx);
+        mockPi.appendEntry.mockClear();
+        for (const handler of handlersFor('thinking_level_select'))
+          handler({ level: 'low', previousLevel: 'medium' }, ctx);
+        expect(mockPi.appendEntry).not.toHaveBeenCalled();
+        expect(mockPi.setThinkingLevel).toHaveBeenLastCalledWith('medium');
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining('unchanged'),
           'warning',
         );
       },

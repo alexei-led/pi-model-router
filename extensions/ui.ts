@@ -64,7 +64,7 @@ export const updateStatus = (
     lastNonRouterModel,
     accumulatedCost,
     widgetEnabled,
-    currentConfig,
+    maxSessionBudget,
   } = state;
   const activeRouterProfile = routerEnabled ? selectedProfile : undefined;
   const statusProfile = selectedProfile ?? 'none';
@@ -103,9 +103,7 @@ export const updateStatus = (
     `Profile: ${statusProfile}${activeRouterProfile ? ' (active)' : ''}`,
     `Pin: ${activePin ?? 'auto'}`,
     `Cost: $${accumulatedCost.toFixed(4)}` +
-      (currentConfig.maxSessionBudget
-        ? ` / $${currentConfig.maxSessionBudget.toFixed(2)}`
-        : ''),
+      (maxSessionBudget ? ` / $${maxSessionBudget.toFixed(2)}` : ''),
   ];
   if (lastDecision && lastDecision.profile === statusProfile) {
     const flags = getDecisionFlags(lastDecision);

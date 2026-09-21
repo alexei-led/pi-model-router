@@ -953,3 +953,96 @@ describe('normalized route thinking', () => {
     },
   );
 });
+
+describe('review route eligibility regressions', () => {
+  it.each(['tier', 'alias'] as const)(
+    'defaults %s reasoning:false to off but rejects explicit thinking',
+    (source) => {
+      for (const thinking of [undefined, 'medium'] as const) {
+        const config = normalizeConfig({
+          models: { disabled: { model: 'test/worker', reasoning: false } },
+          profiles: {
+            p: {
+              medium: {
+                model: source === 'alias' ? 'disabled' : 'test/worker',
+                ...(source === 'tier' ? { reasoning: false } : {}),
+                ...(thinking ? { thinking } : {}),
+              },
+            },
+          },
+        }).config;
+        const profile = required(config.profiles.p);
+        expect(profile.medium?.thinking).toBe(thinking ?? 'off');
+        expect(
+          availableRoutePairs(profile, 'medium', () => model(), false),
+        ).toEqual(
+          thinking
+            ? []
+            : [{ tier: 'medium', model: 'test/worker', thinking: 'off' }],
+        );
+      }
+    },
+  );
+
+  it('excludes image-only models from text routes', () => {
+    const profile = { high: { model: 'test/image', thinking: 'off' as const } };
+    const find = () => model('image', { input: ['image'] });
+    expect(availableRoutePairs(profile, 'high', find, false)).toEqual([]);
+    expect(availableRoutePairs(profile, 'high', find, true)).toHaveLength(1);
+  });
+
+  it.each([
+    'git branch -D feature',
+    'git branch -df feature',
+    'git branch --delete --force feature',
+    'git branch --force feature main',
+    'git branch -M feature main',
+    'git branch -C main feature',
+  ])('requires high safety for %s', (command) => {
+    expect(
+      localSafetyFloor({
+        messages: [{ role: 'user', content: `run ${command}`, timestamp: 1 }],
+      }),
+    ).toBe('high');
+  });
+
+  it.each(
+    [false, true].flatMap((reverse) =>
+      [['backup'], ['restricted'], ['restricted', 'backup']].map(
+        (fallbacks) => ({ reverse, fallbacks }),
+      ),
+    ),
+  )(
+    'uses exact fallback aliases $fallbacks with reversed order $reverse',
+    ({ reverse, fallbacks }) => {
+      const entries = [
+        ['restricted', { model: 'test/fallback', thinkingLevels: ['high'] }],
+        ['backup', { model: 'test/fallback', thinkingLevels: ['medium'] }],
+      ];
+      const config = normalizeConfig({
+        models: Object.fromEntries(reverse ? entries.reverse() : entries),
+        profiles: {
+          p: {
+            medium: {
+              model: 'test/missing',
+              fallbacks,
+            },
+          },
+        },
+      }).config;
+      const pairs = availableRoutePairs(
+        required(config.profiles.p),
+        'medium',
+        (_provider, id) => (id === 'fallback' ? model(id) : undefined),
+        false,
+        undefined,
+        config.models,
+      );
+      expect(pairs).toEqual(
+        fallbacks.includes('backup')
+          ? [{ tier: 'medium', model: 'test/fallback', thinking: 'medium' }]
+          : [],
+      );
+    },
+  );
+});

@@ -4,7 +4,7 @@ import {
   getSupportedThinkingLevels,
   type Model,
 } from '@earendil-works/pi-ai';
-import { parseCanonicalModelRef } from './config';
+import { parseCanonicalModelRef, resolveModelRef } from './config';
 import {
   containsAny,
   countToolResults,
@@ -62,6 +62,9 @@ export const localSafetyFloor = (context: Context): RouterTier => {
       prompt,
     ) ||
     /\bgit\s+(?:reset|clean|push)\b/.test(prompt) ||
+    /\bgit\s+branch\b[^\r\n;&|]*(?:\s--(?:delete|force|move|copy)\b|\s-[a-z]*[cdfm][a-z]*(?=\s|$))/i.test(
+      prompt,
+    ) ||
     /\b(?:debug|debugging|investigate)\b.*\b(?:system|entire|whole|broad)\b/.test(
       prompt,
     ) ||
@@ -417,8 +420,7 @@ export const validateRoutePair = (
     if (provider === 'router') return false;
     const model = findModel(provider, modelId);
     return Boolean(
-      model &&
-        (!imageAttached || model.input.includes('image')) &&
+      model?.input.includes(imageAttached ? 'image' : 'text') &&
         getSupportedThinkingLevels(model).includes(pair.thinking) &&
         (!declaredLevels ||
           pair.thinking === 'off' ||
@@ -441,43 +443,89 @@ export const availableRoutePairs = (
     const config = profile[tier];
     if (!config || !allowed(tier, floor)) return [];
     const primary = resolveRoutePair(profile, tier, thinkingOverrides);
-    return [...new Set([primary.model, ...(config.fallbacks ?? [])])].flatMap(
-      (ref) => {
+    return [primary.model, ...(config.fallbacks ?? [])]
+      .flatMap((ref, index) => {
         try {
-          const { provider, modelId } = parseCanonicalModelRef(ref);
+          const resolved = resolveModelRef(ref, models ?? {});
+          const { provider, modelId } = parseCanonicalModelRef(
+            resolved.canonicalRef,
+          );
           const model = findModel(provider, modelId);
+          const fallback = config.resolvedFallbacks?.[index - 1];
           const ownConfig =
-            ref === primary.model
+            index === 0
               ? config
-              : Object.values(models ?? {}).find(
-                  (entry) => entry.model === ref,
-                );
+              : fallback?.model === resolved.canonicalRef
+                ? fallback
+                : resolved.definition;
           // A non-reasoning model defaults to off, but explicit unsupported effort is rejected.
           const thinking =
             thinkingOverrides?.[tier] ??
             ((config.thinkingExplicit ?? config.thinking !== undefined)
               ? primary.thinking
-              : model?.reasoning
-                ? primary.thinking
-                : 'off');
+              : ownConfig?.reasoning === false || !model?.reasoning
+                ? 'off'
+                : primary.thinking);
           const pair = { tier, model: `${provider}/${modelId}`, thinking };
           return validateRoutePair(
             pair,
             floor,
             findModel,
             imageAttached,
-            ref === primary.model
-              ? (config.thinkingLevels ?? config.resolvedThinkingLevels)
-              : ownConfig?.thinkingLevels,
+            ownConfig?.reasoning === false
+              ? []
+              : index === 0
+                ? (config.thinkingLevels ?? config.resolvedThinkingLevels)
+                : ownConfig?.thinkingLevels,
           )
             ? [pair]
             : [];
         } catch {
           return [];
         }
-      },
-    );
+      })
+      .filter(
+        (pair, index, pairs) =>
+          pairs.findIndex((other) => other.model === pair.model) === index,
+      );
   });
+
+/** An override must retain every floor/input combination the configured profile can serve. */
+export const preservesRouteCoverage = (
+  profile: RouterProfile,
+  findModel: (provider: string, modelId: string) => Model<Api> | undefined,
+  thinkingOverrides: RouterThinkingByTier,
+  models?: Record<string, ModelDefinition>,
+): boolean => {
+  const configured = [false, true].map((imageAttached) => ({
+    pairs: availableRoutePairs(
+      profile,
+      'micro',
+      findModel,
+      imageAttached,
+      undefined,
+      models,
+    ),
+    overridden: availableRoutePairs(
+      profile,
+      'micro',
+      findModel,
+      imageAttached,
+      thinkingOverrides,
+      models,
+    ),
+  }));
+  return (
+    configured.some(({ overridden }) => overridden.length > 0) &&
+    configured.every(({ pairs, overridden }) =>
+      ROUTER_TIERS.every(
+        (floor) =>
+          !pairs.some((pair) => allowed(pair.tier, floor)) ||
+          overridden.some((pair) => allowed(pair.tier, floor)),
+      ),
+    )
+  );
+};
 
 export const decisionForPair = (
   profile: string,

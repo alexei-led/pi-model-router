@@ -15,7 +15,7 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
-import { availableRoutePairs } from './routing';
+import { preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
   RouterPinByProfile,
@@ -365,14 +365,12 @@ export const registerCommands = (
     if (
       nextLevel &&
       activeProfile &&
-      availableRoutePairs(
+      preservesRouteCoverage(
         activeProfile,
-        'micro',
         (provider, id) => ctx.modelRegistry.find(provider, id),
-        false,
         overrides,
         state.currentConfig.models,
-      ).length === 0
+      ) === false
     ) {
       ctx.ui.notify(
         `Router thinking unchanged: '${nextLevel}' leaves no eligible route.`,

@@ -273,10 +273,10 @@ describe('commands.ts', () => {
       const { state, actions, ctx, cmd } = setup();
 
       await cmd.handler(
-        'thinking high xhigh',
+        'thinking high high',
         ctx as unknown as ExtensionCommandContext,
       );
-      expect(state.thinkingByProfile.balanced?.high).toBe('xhigh');
+      expect(state.thinkingByProfile.balanced?.high).toBe('high');
       expect(actions.persistState).toHaveBeenCalled();
       expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     });
@@ -653,6 +653,44 @@ describe('commands.ts', () => {
       );
       expect(actions.syncPiThinkingLevel).toHaveBeenCalledWith('medium');
     });
+
+    it.each(['high-floor', 'image'] as const)(
+      'rejects overrides that remove configured %s coverage atomically',
+      async (capability) => {
+        const { state, actions, ctx, cmd } = setup();
+        state.thinkingByProfile.balanced = { micro: 'off' };
+        ctx.modelRegistry.find.mockImplementation(
+          (provider: string, id: string) =>
+            model(id, {
+              provider,
+              input:
+                capability === 'image' && id === 'gpt-4o'
+                  ? ['text']
+                  : ['text', 'image'],
+              thinkingLevelMap: {
+                low: (
+                  capability === 'high-floor'
+                    ? id === 'gpt-4o'
+                    : id !== 'gpt-4o'
+                )
+                  ? null
+                  : 'low',
+              },
+            }),
+        );
+        await cmd.handler(
+          'thinking low',
+          ctx as unknown as ExtensionCommandContext,
+        );
+        expect(state.thinkingByProfile.balanced).toEqual({ micro: 'off' });
+        expect(actions.persistState).not.toHaveBeenCalled();
+        expect(actions.syncPiThinkingLevel).not.toHaveBeenCalled();
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining('unchanged'),
+          'warning',
+        );
+      },
+    );
 
     it('warns when an accepted override skips unsupported tiers', async () => {
       const { state, ctx, cmd } = setup();
