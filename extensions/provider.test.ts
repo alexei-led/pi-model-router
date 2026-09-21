@@ -893,6 +893,151 @@ describe('Jev provider integration', () => {
     },
   );
 
+  it.each(['none', 'jev', 'classifier'] as const)(
+    'preserves a fallback-only baseline with one eligible primary (%s)',
+    async (advisor) => {
+      for (const unavailable of ['missing', 'image'] as const) {
+        const s = setup();
+        s.state.currentConfig = normalizeConfig({
+          profiles: {
+            balanced: {
+              baselineTier: 'medium',
+              high: { model: 'test/small' },
+              medium: {
+                model: 'test/primary',
+                fallbacks: ['test/fallback'],
+              },
+            },
+          },
+        }).config;
+        delete s.state.pinnedTierByProfile.balanced;
+        if (advisor === 'jev') enableAdvisors(s);
+        if (advisor === 'classifier')
+          s.state.currentConfig.classifierModel = { model: 'test/small' };
+        const fetch = mockChoice('high');
+        const context = userContext();
+        if (unavailable === 'missing') s.models.shift();
+        else {
+          required(s.models[0]).input = ['text'];
+          context.messages.push({
+            role: 'user',
+            content: [
+              { type: 'image', data: 'synthetic', mimeType: 'image/png' },
+            ],
+            timestamp: 2,
+          });
+        }
+        expect((await consume(s.stream(context))).result.stopReason).toBe(
+          'stop',
+        );
+        expect(fetch).not.toHaveBeenCalled();
+        expect(s.delegate).toHaveBeenCalledOnce();
+        expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
+        expect(s.state.lastDecision).toMatchObject({
+          tier: 'medium',
+          targetLabel: 'test/fallback',
+          reasonCode: 'fallback',
+        });
+      }
+    },
+  );
+
+  it.each(['jev', 'classifier'] as const)(
+    'keeps non-reasoning primaries eligible for %s with implicit thinking',
+    async (advisor) => {
+      const s = setup();
+      enableAdvisors(s);
+      if (advisor === 'classifier') s.state.currentConfig.jev = undefined;
+      required(s.models[0]).reasoning = false;
+      const fetch = mockChoice('medium');
+      if (advisor === 'classifier')
+        s.delegate.mockReturnValueOnce(
+          done('Tier: medium\nReasoning: semantic'),
+        );
+      expect((await consume(s.stream(userContext()))).result.stopReason).toBe(
+        'stop',
+      );
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'medium',
+        thinking: 'off',
+        reasonCode: advisor,
+      });
+      expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('primary');
+      expect(s.delegate.mock.calls.at(-1)?.[2]?.reasoning).toBeUndefined();
+      if (advisor === 'jev') {
+        expect(fetch).toHaveBeenCalledOnce();
+        const body = JSON.parse(
+          String(fetch.mock.calls[0]?.[1]?.body),
+        ) as ChoiceRequest;
+        expect(Object.keys(body.questions.route.criteria)).toContain(
+          'medium|test%2Fprimary|off',
+        );
+      } else expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['jev', 'classifier'] as const)(
+    'releases the %s guard after terminal abort/error without retrying generation',
+    async (advisor) => {
+      for (const kind of [
+        'aborted',
+        'visible-error',
+        'visible-abort',
+      ] as const) {
+        const s = setup();
+        enableAdvisors(s);
+        if (advisor === 'classifier') s.state.currentConfig.jev = undefined;
+        const fetch = mockChoice('high');
+        const reason = kind === 'visible-error' ? 'error' : 'aborted';
+        const terminal: AssistantMessageEvent = {
+          type: 'error',
+          reason,
+          error: message({ stopReason: reason }),
+        };
+        const failed =
+          kind === 'aborted'
+            ? events(terminal)
+            : events(
+                {
+                  type: 'text_delta',
+                  contentIndex: 0,
+                  delta: 'partial',
+                  partial: message(),
+                },
+                terminal,
+              );
+        if (advisor === 'classifier')
+          s.delegate.mockReturnValueOnce(
+            done('Tier: high\nReasoning: semantic'),
+          );
+        s.delegate.mockReturnValueOnce(failed);
+        const first = await consume(s.stream(userContext()));
+        expect(first.result.stopReason).toBe(reason);
+        expect(
+          first.received.filter((event) => event.type === 'error'),
+        ).toHaveLength(1);
+        expect(s.delegate).toHaveBeenCalledTimes(
+          advisor === 'classifier' ? 2 : 1,
+        );
+        if (advisor === 'classifier')
+          s.delegate.mockReturnValueOnce(
+            done('Tier: high\nReasoning: semantic'),
+          );
+        expect((await consume(s.stream(userContext()))).result.stopReason).toBe(
+          'stop',
+        );
+        expect(s.state.lastDecision).toMatchObject({
+          tier: 'high',
+          reasonCode: advisor,
+        });
+        expect(s.delegate).toHaveBeenCalledTimes(
+          advisor === 'classifier' ? 4 : 2,
+        );
+        expect(fetch).toHaveBeenCalledTimes(advisor === 'jev' ? 2 : 0);
+      }
+    },
+  );
+
   it('calls Jev once per rapid new turn, not twice for the same user turn', async () => {
     const s = setup();
     enableAdvisors(s);

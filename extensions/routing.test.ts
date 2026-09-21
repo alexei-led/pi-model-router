@@ -1,16 +1,10 @@
 import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
 import { normalizeConfig } from './config';
-import {
-  extractTextFromContent,
-  getLastUserText,
-  getRecentConversationText,
-  hasImageAttachment,
-} from './context';
+import { extractTextFromContent, hasImageAttachment } from './context';
 import {
   availableRoutePairs,
   BASELINE_TIER_ORDER,
-  buildRoutingDecision,
   decisionForPair,
   phaseForTier,
   preservesRouteCoverage,
@@ -53,22 +47,6 @@ describe('routing context helpers', () => {
     expect(extracted).toContain('some text');
     expect(extracted).toContain('some thought');
     expect(extracted).toContain('read_file {"path":"file.txt"}');
-  });
-
-  it('returns the latest user text and bounded recent text', () => {
-    const value: Context = {
-      messages: [
-        { role: 'user', content: 'First', timestamp: 1 },
-        {
-          role: 'assistant',
-          content: 'Answer',
-          timestamp: 2,
-        } as unknown as Message,
-        { role: 'user', content: 'Second', timestamp: 3 },
-      ],
-    };
-    expect(getLastUserText(value)).toBe('Second');
-    expect(getRecentConversationText(value, 2)).toBe('answer\nsecond');
   });
 
   it('detects images while keeping ordinary text separate', () => {
@@ -247,6 +225,54 @@ describe('route capability validation', () => {
     ).toBe(true);
   });
 
+  it('accepts a corrective thinking override when the default has no eligible route', () => {
+    const profile: RouterProfile = {
+      medium: { model: 'test/worker', thinking: 'high' },
+    };
+    const findModel = () => model('worker', { reasoning: false });
+    expect(availableRoutePairs(profile, findModel, false)).toEqual([]);
+    expect(preservesRouteCoverage(profile, findModel, { medium: 'off' })).toBe(
+      true,
+    );
+    expect(preservesRouteCoverage(profile, findModel, { medium: 'low' })).toBe(
+      false,
+    );
+  });
+
+  it('preserves existing input coverage when applying thinking overrides', () => {
+    const profile: RouterProfile = {
+      medium: { model: 'test/text' },
+      low: { model: 'test/image', thinking: 'off' },
+    };
+    const findModel = (_provider: string, id: string) =>
+      model(id, {
+        input: id === 'image' ? ['image'] : ['text'],
+        reasoning: id !== 'image',
+      });
+    expect(preservesRouteCoverage(profile, findModel, { low: 'high' })).toBe(
+      false,
+    );
+  });
+
+  it.each(ROUTER_TIERS)(
+    'offers the validated effective effort for a non-reasoning %s primary',
+    (tier) => {
+      const profile = required(
+        normalizeConfig({
+          profiles: { p: { [tier]: { model: 'test/worker' } } },
+        }).config.profiles.p,
+      );
+      const pairs = availableRoutePairs(
+        profile,
+        () => model('worker', { reasoning: false }),
+        false,
+      );
+      expect(primaryRoutePairs(profile, pairs)).toEqual([
+        { tier, model: 'test/worker', thinking: 'off' },
+      ]);
+    },
+  );
+
   it('offers only primary candidates to advisors', () => {
     const profile: RouterProfile = {
       medium: { model: 'test/medium', fallbacks: ['test/backup'] },
@@ -291,26 +317,6 @@ describe('route capability validation', () => {
 });
 
 describe('routing decisions', () => {
-  const profile = allTierProfile();
-
-  it('builds fixed reason and phase metadata from a selected pair', () => {
-    const decision = buildRoutingDecision(
-      'balanced',
-      profile,
-      'medium',
-      'implementation',
-      'baseline',
-    );
-    expect(decision).toMatchObject({
-      profile: 'balanced',
-      tier: 'medium',
-      targetProvider: 'test',
-      targetModelId: 'medium',
-      targetLabel: 'test/medium',
-      reasonCode: 'baseline',
-    });
-  });
-
   it.each(ROUTER_TIERS)('maps %s to a stable phase', (tier) => {
     expect(phaseForTier(tier)).toBe(
       tier === 'high'

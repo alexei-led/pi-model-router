@@ -480,14 +480,11 @@ export const registerRouterProvider = (
               profile.jev?.enabled &&
               jev.apiKey.trim().length > 0;
             const routingDeadline = started + (useJev ? 1500 : 10_000);
-            const candidates = primaryRoutePairs(
-              profile,
-              pairs,
-              thinkingOverrides,
-            ).map(createJevCandidate);
-            if (candidates.length === 1 && candidates[0]) {
-              decision = decisionForPair(model.id, candidates[0], 'baseline');
-            } else if (candidates.length > 1) {
+            const candidates = primaryRoutePairs(profile, pairs).map(
+              createJevCandidate,
+            );
+            // A single primary bypasses advice, not a baseline's eligible fallback.
+            if (candidates.length > 1) {
               if (useJev && jev) {
                 const advice = await runJev(
                   {
@@ -771,6 +768,7 @@ export const registerRouterProvider = (
                 }
                 if (event.type === 'done' || event.type === 'error') {
                   terminalReceived = true;
+                  generationSucceeded = event.type === 'done';
                   recordTarget();
                   const cost = (
                     event.type === 'done' ? event.message : event.error
@@ -807,7 +805,6 @@ export const registerRouterProvider = (
                   'Provider stream ended without a terminal event.',
                 );
               success = true;
-              generationSucceeded = true;
               break;
             } catch (err) {
               if (contentReceived || options?.signal?.aborted) throw err;
@@ -828,8 +825,6 @@ export const registerRouterProvider = (
           actions.recordDebugDecision(decision);
           stream.end();
         } catch (error) {
-          if (!generationSucceeded && activeTurn)
-            advisedTurns.delete(activeTurn);
           const reason = options?.signal?.aborted ? 'aborted' : 'error';
           stream.push({
             type: 'error',
@@ -843,6 +838,8 @@ export const registerRouterProvider = (
           });
           stream.end();
         } finally {
+          if (!generationSucceeded && activeTurn)
+            advisedTurns.delete(activeTurn);
           try {
             actions.persistState();
           } catch {

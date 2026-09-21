@@ -49,32 +49,6 @@ export const resolveRoutePair = (
   };
 };
 
-export const buildRoutingDecision = (
-  profileName: string,
-  profile: RouterProfile,
-  tier: RouterTier,
-  phase: RouterPhase,
-  reasonCode: RoutingReasonCode,
-  thinkingOverrides?: RouterThinkingByTier,
-  isClassifier?: boolean,
-): RoutingDecision => {
-  const pair = resolveRoutePair(profile, tier, thinkingOverrides);
-  const { provider, modelId } = parseCanonicalModelRef(pair.model);
-
-  return {
-    profile: profileName,
-    tier,
-    phase,
-    targetProvider: provider,
-    targetModelId: modelId,
-    targetLabel: pair.model,
-    reasonCode,
-    thinking: pair.thinking,
-    timestamp: Date.now(),
-    isClassifier,
-  };
-};
-
 /**
  * Revalidate the actual target against the live registry. A configured effort
  * declaration is restrictive: it can reject a route, but never grants a
@@ -190,7 +164,8 @@ export const preservesRouteCoverage = (
   }
   return [false, true].some(
     (imageAttached) =>
-      availableRoutePairs(profile, findModel, imageAttached).length > 0,
+      availableRoutePairs(profile, findModel, imageAttached, thinkingOverrides)
+        .length > 0,
   );
 };
 
@@ -274,25 +249,13 @@ export const selectBaselineRoute = (
 export const primaryRoutePairs = (
   profile: RouterProfile,
   pairs: readonly RoutePair[],
-  thinkingOverrides?: RouterThinkingByTier,
 ): RoutePair[] =>
   BASELINE_TIER_ORDER.flatMap((tier) => {
-    const primary = (() => {
-      try {
-        return resolveRoutePair(profile, tier, thinkingOverrides);
-      } catch {
-        return undefined;
-      }
-    })();
-    if (!primary) return [];
-    return pairs.some(
-      (pair) =>
-        pair.tier === tier &&
-        pair.model === primary.model &&
-        pair.thinking === primary.thinking,
-    )
-      ? [primary]
-      : [];
+    // Keep the effective effort already validated against the live registry.
+    const primary = pairs.find(
+      (pair) => pair.tier === tier && pair.model === profile[tier]?.model,
+    );
+    return primary ? [primary] : [];
   });
 
 export const decisionForPair = (

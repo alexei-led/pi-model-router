@@ -17,29 +17,6 @@ export const extractTextFromContent = (
     .join('\n');
 };
 
-export const getLastUserText = (context: Context): string => {
-  for (let i = context.messages.length - 1; i >= 0; i -= 1) {
-    const message = context.messages[i];
-    if (message?.role === 'user') {
-      return extractTextFromContent(message.content).trim();
-    }
-  }
-  return '';
-};
-
-export const getRecentConversationText = (
-  context: Context,
-  limit = 6,
-): string =>
-  context.messages
-    .slice(-limit)
-    .map((message) =>
-      message ? extractTextFromContent(message.content).trim() : '',
-    )
-    .filter(Boolean)
-    .join('\n')
-    .toLowerCase();
-
 /** Text blocks only: never include system/config, thinking, tool arguments or binary data. */
 export const getBoundedRecentContext = (
   context: Context,
