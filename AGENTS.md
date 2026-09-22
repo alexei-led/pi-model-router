@@ -25,8 +25,8 @@ Four tiers (`micro`, `low`, `medium`, `high`) are model/effort choices, not secu
 1. Validate config, live capabilities and caller cancellation. Reuse a validated same-turn tool route, or select a compatible local route without advisors for an invalid continuation.
 2. Honor an explicit pin within its configured tier; reject an ineligible pin. Otherwise, above the soft generation budget, skip advisors and prefer an eligible baseline among medium-or-lower tiers if any. Advisor costs are excluded.
 3. Build eligible primary candidates; one candidate bypasses advisors. Explicit ordered generation fallbacks are not extra Jev candidates.
-4. User-level Jev enablement, active-profile privacy opt-in and a key authorize one bounded recent-context request. Accept only a validated current candidate. Failure/uncertainty goes directly to baseline, never a second advisor. `jev.timeoutMs` sets Jev's total advisory budget (default 1500 ms, positive and within Node's timer range, with no product-level cap); the request and body reader share the remaining budget.
-5. When Jev is not active, the optional Pi classifier may advise any of the four tiers under its separate 10-second bound. Failure or no advisor means baseline. Caller abort never starts baseline generation.
+4. User-level Jev enablement, active-profile privacy opt-in and a key authorize one bounded recent-context request. Accept only a validated current candidate: the top option at or above `confidenceThreshold`, otherwise the lowest tier whose cumulative probability reaches `probabilityThreshold` (abstention mass counts for the baseline tier). Abstention, invalid advice or transport failure goes directly to baseline, never a second advisor. `jev.timeoutMs` sets Jev's total advisory budget (default 1500 ms, positive and within Node's timer range, with no product-level cap); the request, one retry of a documented transient status and the body reader share that budget.
+5. When Jev is not active, the optional Pi classifier may advise any of the four tiers under its separate `classifierModel.timeoutMs` bound (default 10 s). Failure or no advisor means baseline. Caller abort never starts baseline generation.
 6. Revalidate the actual generation/fallback target and delegate through Pi. Retry only explicit fallbacks before visible content, never on cancellation.
 
 `profiles.<name>.baselineTier` optionally names a configured tier. Filter availability/input/effort first, then prefer that baseline followed by `medium`, `high`, `low`, `micro`. Partial profiles are valid; only no eligible route is an error. Deprecated `rules` and `phaseBias` load with a value-free warning but have no routing effect. Do not restore keyword floors, mechanical detectors, phase inference or a hidden legacy mode.
@@ -41,6 +41,9 @@ Bounded advisor text can include recent tool output and private data. Exclude sy
 - **Error Handling**: Preserve explicit fallback order, capability/effort validation, cancellation and no retry after visible content. Never persist remote explanations or secret-bearing configuration; retain only allowlisted local reason codes and diagnostics.
 
 ## Documentation Reference
-- `docs/ARCHITECTURE.md`: Detailed architectural deep dive.
+- `docs/README.md`: Index and conventions (folders by type, lowercase kebab-case names, dated `research/` reports, `archive/` for superseded documents, one fact in one place).
+- `docs/architecture.md`: Mechanism and module boundaries.
+- `docs/jev-advisor.md`: Jev configuration, acceptance policy, diagnostics and troubleshooting.
+- `docs/research/`: Dated experiments behind the current defaults.
 - `README.md`: Usage and installation guide.
 - `model-router.example.json`: Reference for configuration structure.

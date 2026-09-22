@@ -6,7 +6,10 @@ import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
   DEFAULT_CONTEXT_WINDOW,
   DEFAULT_JEV_CONTEXT,
+  DEFAULT_JEV_RETRY,
   DEFAULT_MAX_TOKENS,
+  MAX_JEV_ATTEMPTS,
+  MAX_JEV_BACKOFF_MS,
   MAX_JEV_CONTEXT_TURNS,
   MAX_JEV_STATE_TOKENS,
 } from './constants';
@@ -15,6 +18,7 @@ import type {
   ConfigLoadResult,
   JevConfig,
   JevContextConfig,
+  JevRetryConfig,
   ModelDefinition,
   ParsedConfigFile,
   RawRouterConfig,
@@ -143,14 +147,13 @@ export const mergeConfig = (
   const mergedModels = { ...baseModels, ...overrideModels };
 
   const mergedJev = mergeRawValue(base.jev, override.jev);
+  const nestedJev = (key: 'context' | 'retry') =>
+    mergeRawValue(
+      isObjectRecord(base.jev) ? base.jev[key] : undefined,
+      isObjectRecord(override.jev) ? override.jev[key] : undefined,
+    );
   const jev = isObjectRecord(mergedJev)
-    ? {
-        ...mergedJev,
-        context: mergeRawValue(
-          isObjectRecord(base.jev) ? base.jev.context : undefined,
-          isObjectRecord(override.jev) ? override.jev.context : undefined,
-        ),
-      }
+    ? { ...mergedJev, context: nestedJev('context'), retry: nestedJev('retry') }
     : mergedJev;
   return {
     ui: mergeRawValue(base.ui, override.ui),
@@ -402,6 +405,7 @@ export const DEFAULT_JEV_CONFIG = {
   model: 'jev-1.13.0',
   timeoutMs: 1500,
   confidenceThreshold: 0.65,
+  probabilityThreshold: 0.8,
   maxStateTokens: 3000,
   mode: 'advisory',
 } as const;
@@ -449,6 +453,28 @@ const normalizeJevContext = (raw: unknown): JevContextConfig | undefined => {
   return context;
 };
 
+const normalizeJevRetry = (raw: unknown): JevRetryConfig | undefined => {
+  if (raw === undefined) return { ...DEFAULT_JEV_RETRY };
+  if (
+    !isObjectRecord(raw) ||
+    Object.keys(raw).some((key) => !Object.hasOwn(DEFAULT_JEV_RETRY, key))
+  )
+    return undefined;
+  const retry = { ...DEFAULT_JEV_RETRY, ...raw };
+  if (
+    typeof retry.maxAttempts !== 'number' ||
+    !Number.isSafeInteger(retry.maxAttempts) ||
+    retry.maxAttempts < 1 ||
+    retry.maxAttempts > MAX_JEV_ATTEMPTS ||
+    typeof retry.backoffMs !== 'number' ||
+    !Number.isSafeInteger(retry.backoffMs) ||
+    retry.backoffMs < 0 ||
+    retry.backoffMs > MAX_JEV_BACKOFF_MS
+  )
+    return undefined;
+  return retry;
+};
+
 export const normalizeJevConfig = (
   raw: unknown,
   warnings: string[],
@@ -462,6 +488,8 @@ export const normalizeJevConfig = (
   const value: Record<string, unknown> = { ...DEFAULT_JEV_CONFIG, ...raw };
   const context = normalizeJevContext(value.context);
   if (!context) return invalid();
+  const retry = normalizeJevRetry(value.retry);
+  if (!retry) return invalid();
   if (
     (value.enabled !== undefined && typeof value.enabled !== 'boolean') ||
     !isJevEndpoint(value.endpoint) ||
@@ -475,6 +503,10 @@ export const normalizeJevConfig = (
     !Number.isFinite(value.confidenceThreshold) ||
     value.confidenceThreshold < 0 ||
     value.confidenceThreshold > 1 ||
+    typeof value.probabilityThreshold !== 'number' ||
+    !Number.isFinite(value.probabilityThreshold) ||
+    value.probabilityThreshold <= 0 ||
+    value.probabilityThreshold > 1 ||
     typeof value.maxStateTokens !== 'number' ||
     !Number.isInteger(value.maxStateTokens) ||
     value.maxStateTokens < 1 ||
@@ -495,8 +527,10 @@ export const normalizeJevConfig = (
     model: value.model,
     timeoutMs: value.timeoutMs,
     confidenceThreshold: value.confidenceThreshold,
+    probabilityThreshold: value.probabilityThreshold,
     maxStateTokens: value.maxStateTokens,
     context,
+    retry,
     mode: 'advisory',
   };
 };
@@ -644,7 +678,17 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
             'classifierModel has an invalid thinking level. Ignored.',
           );
         }
-        classifierModel = { model: resolved.canonicalRef, thinking };
+        const timeoutMs =
+          typeof rawClassifier.timeoutMs === 'number' &&
+          Number.isFinite(rawClassifier.timeoutMs) &&
+          rawClassifier.timeoutMs > 0 &&
+          rawClassifier.timeoutMs <= MAX_TIMER_DELAY_MS
+            ? rawClassifier.timeoutMs
+            : undefined;
+        if (rawClassifier.timeoutMs !== undefined && timeoutMs === undefined) {
+          warnings.push('classifierModel has an invalid timeoutMs. Ignored.');
+        }
+        classifierModel = { model: resolved.canonicalRef, thinking, timeoutMs };
       } catch {
         warnings.push('Invalid classifierModel model reference. Ignored.');
       }

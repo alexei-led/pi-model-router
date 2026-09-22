@@ -103,7 +103,11 @@ describe('state.ts', () => {
       ...decision,
       reuse: 'continuation',
       jev: {
-        outcome: 'low-confidence',
+        outcome: 'selected',
+        selectedTier: 'high',
+        selectionBasis: 'probability',
+        routeProbability: 0.91,
+        probabilityThreshold: 0.8,
         model: 'jev-latest',
         requestId: '00000000-0000-4000-8000-000000000001',
         startedAt: 1234,
@@ -138,6 +142,10 @@ describe('state.ts', () => {
         startedAt: 1234,
         latencyMs: 764,
         choice: 'high',
+        selectedTier: 'high',
+        selectionBasis: 'probability',
+        routeProbability: 0.91,
+        probabilityThreshold: 0.8,
         confidence: 0.35,
         probability: 0.48,
         estimatedInputTokens: 700,
@@ -161,6 +169,9 @@ describe('state.ts', () => {
         requestId: 'secret-key',
         confidence: 2,
         choice: 'remote-text',
+        selectedTier: 'remote-text',
+        selectionBasis: 'remote-basis',
+        routeProbability: 2,
         context: { currentRequestTokens: -1 },
       },
       reuse: 'remote-text',
@@ -171,6 +182,9 @@ describe('state.ts', () => {
     expect(sanitized.jev?.context).toBeUndefined();
     expect(sanitized.jev?.confidence).toBeUndefined();
     expect(sanitized.jev?.choice).toBeUndefined();
+    expect(sanitized.jev?.selectedTier).toBeUndefined();
+    expect(sanitized.jev?.selectionBasis).toBeUndefined();
+    expect(sanitized.jev?.routeProbability).toBeUndefined();
     expect(sanitized.reuse).toBeUndefined();
   });
 
@@ -184,6 +198,7 @@ describe('state.ts', () => {
       errorClass: 'remote-error-text',
       routingLatencyMs: Number.NaN,
       advisor: 'remote-advisor',
+      bypassReason: 'remote-reason',
     } as unknown as RoutingDecision;
     const state = buildPersistedState({
       routerEnabled: true,
@@ -199,8 +214,16 @@ describe('state.ts', () => {
     });
     expect(state.lastDecision?.reasonCode).toBe('legacy');
     expect(state.lastDecision?.advisor).toBeUndefined();
+    expect(state.lastDecision?.bypassReason).toBeUndefined();
     expect(JSON.stringify(state)).not.toContain('secret');
     expect(JSON.stringify(state)).not.toContain('remote explanation');
+    expect(
+      snapshotDecision({
+        ...decision,
+        advisor: 'bypassed',
+        bypassReason: 'single-candidate',
+      }),
+    ).toMatchObject({ advisor: 'bypassed', bypassReason: 'single-candidate' });
   });
 
   it('maps obsolete prompt-derived sources from old snapshots to legacy', () => {

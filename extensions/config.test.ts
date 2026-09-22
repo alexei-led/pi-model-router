@@ -692,6 +692,32 @@ describe('config.ts', () => {
       expect(JSON.stringify(warnings)).not.toContain('super-invalid');
     });
 
+    it.each([
+      [undefined, undefined, []],
+      [2500, 2500, []],
+      [0, undefined, ['classifierModel has an invalid timeoutMs. Ignored.']],
+      [
+        '5000',
+        undefined,
+        ['classifierModel has an invalid timeoutMs. Ignored.'],
+      ],
+      [
+        Number.NaN,
+        undefined,
+        ['classifierModel has an invalid timeoutMs. Ignored.'],
+      ],
+    ])(
+      'normalizes classifierModel.timeoutMs %j',
+      (timeoutMs, expected, expectedWarnings) => {
+        const { config, warnings } = normalizeConfig({
+          profiles: { balanced: { high: { model: 'openai/gpt-4o' } } },
+          classifierModel: { model: 'openai/gpt-4o', timeoutMs },
+        } as unknown as RouterConfig);
+        expect(config.classifierModel?.timeoutMs).toBe(expected);
+        expect(warnings).toEqual(expectedWarnings);
+      },
+    );
+
     it('warn when classifierModel object is missing model field', () => {
       const raw = {
         profiles: {
@@ -836,6 +862,7 @@ describe('config.ts Jev user-config provenance', () => {
       model: 'jev-1.13.0',
       timeoutMs: 1500,
       confidenceThreshold: 0.65,
+      probabilityThreshold: 0.8,
       maxStateTokens: 3000,
       context: {
         previousTurns: 2,
@@ -843,6 +870,7 @@ describe('config.ts Jev user-config provenance', () => {
         toolResults: 'last-error',
         maxToolTokens: 250,
       },
+      retry: { maxAttempts: 2, backoffMs: 400 },
       mode: 'advisory',
     });
     expect(config.profiles.personal?.jev?.enabled).toBe(true);
@@ -955,6 +983,19 @@ describe('config.ts Jev user-config provenance', () => {
     { confidenceThreshold: -1 },
     { confidenceThreshold: 2 },
     { confidenceThreshold: Number.NaN },
+    { probabilityThreshold: 0 },
+    { probabilityThreshold: -1 },
+    { probabilityThreshold: 1.01 },
+    { probabilityThreshold: Number.NaN },
+    { probabilityThreshold: '0.8' },
+    { retry: null },
+    { retry: { maxAttempts: 0 } },
+    { retry: { maxAttempts: 6 } },
+    { retry: { maxAttempts: 1.5 } },
+    { retry: { backoffMs: -1 } },
+    { retry: { backoffMs: 60_001 } },
+    { retry: { backoffMs: '400' } },
+    { retry: { unknown: 1 } },
     { maxStateTokens: 0 },
     { maxStateTokens: 24001 },
     { maxStateTokens: 1.5 },
@@ -1020,6 +1061,33 @@ describe('review safety diagnostics', () => {
     ]);
     expect(JSON.stringify(warnings)).not.toContain('sentinel');
     expect(config.profiles.p?.high?.model).toBe('test/model');
+  });
+
+  it.each([
+    [undefined, { maxAttempts: 2, backoffMs: 400 }],
+    [{ maxAttempts: 1 }, { maxAttempts: 1, backoffMs: 400 }],
+    [{ backoffMs: 0 }, { maxAttempts: 2, backoffMs: 0 }],
+    [
+      { maxAttempts: 5, backoffMs: 60_000 },
+      { maxAttempts: 5, backoffMs: 60_000 },
+    ],
+  ])('normalizes jev.retry %j with defaults', (retry, expected) => {
+    const warnings: string[] = [];
+    expect(normalizeJevConfig({ retry }, warnings)?.retry).toEqual(expected);
+    expect(warnings).toEqual([]);
+  });
+
+  it('merges nested retry knobs without mutating either source', () => {
+    const base = { jev: { retry: { maxAttempts: 3 } } };
+    const override = { jev: { retry: { backoffMs: 100 } } };
+    const merged = mergeConfig(
+      base as unknown as RouterConfig,
+      override as unknown as RouterConfig,
+    );
+    expect(merged.jev).toMatchObject({
+      retry: { maxAttempts: 3, backoffMs: 100 },
+    });
+    expect(base.jev.retry).toEqual({ maxAttempts: 3 });
   });
 
   it.each([1, 500, 750, 1500, 2000, 3000, 4000, 5000, 2_147_483_647])(

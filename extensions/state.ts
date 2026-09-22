@@ -16,7 +16,14 @@ import type {
   RouterPinByProfile,
   RoutingDecision,
 } from './types';
-import { isAdvisorOutcome, isRoutingReasonCode, JEV_OUTCOMES } from './types';
+import {
+  isAdvisorOutcome,
+  isBypassReason,
+  isRoutingReasonCode,
+  JEV_OUTCOMES,
+  JEV_RESPONSE_ISSUES,
+  JEV_SELECTION_BASES,
+} from './types';
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
 
@@ -191,11 +198,27 @@ const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
     result.resolvedModel = value.resolvedModel;
   if (isRouterTier(value.choice) || value.choice === 'uncertain')
     result.choice = value.choice;
-  for (const key of ['confidence', 'probability', 'threshold'] as const) {
+  if (isRouterTier(value.selectedTier))
+    result.selectedTier = value.selectedTier;
+  const basis = JEV_SELECTION_BASES.find(
+    (entry) => entry === value.selectionBasis,
+  );
+  if (basis) result.selectionBasis = basis;
+  for (const key of [
+    'confidence',
+    'probability',
+    'routeProbability',
+    'threshold',
+    'probabilityThreshold',
+  ] as const) {
     const number = value[key];
     if (isFiniteNumber(number) && number >= 0 && number <= 1)
       result[key] = number;
   }
+  const issue = JEV_RESPONSE_ISSUES.find(
+    (entry) => entry === value.responseIssue,
+  );
+  if (issue) result.responseIssue = issue;
   for (const key of [
     'startedAt',
     'timeoutMs',
@@ -203,6 +226,7 @@ const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
     'estimatedInputTokens',
     'actualInputTokens',
     'httpStatus',
+    'attempts',
   ] as const) {
     const number = value[key];
     if (isFiniteNumber(number) && Number.isSafeInteger(number) && number >= 0)
@@ -234,6 +258,9 @@ export const snapshotDecision = (
       ? decision.errorClass
       : undefined,
   advisor: isAdvisorOutcome(decision.advisor) ? decision.advisor : undefined,
+  bypassReason: isBypassReason(decision.bypassReason)
+    ? decision.bypassReason
+    : undefined,
   jev: snapshotJev(decision.jev),
   reuse:
     decision.reuse === 'same-turn' ||

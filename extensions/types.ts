@@ -22,6 +22,8 @@ export interface ModelDefinition {
 export interface ClassifierConfig {
   model: string;
   thinking?: ThinkingLevel | undefined;
+  /** Total classifier budget in ms; `DEFAULT_CLASSIFIER_TIMEOUT_MS` when omitted. */
+  timeoutMs?: number | undefined;
 }
 
 export interface RoutedTierConfig {
@@ -46,6 +48,12 @@ export interface JevContextConfig {
   maxHistoryTokens: number;
   toolResults: 'none' | 'last' | 'last-error';
   maxToolTokens: number;
+}
+export interface JevRetryConfig {
+  /** HTTP attempts in total; 1 disables retries. */
+  maxAttempts: number;
+  /** First backoff delay; doubled per attempt, raised by `Retry-After`. */
+  backoffMs: number;
 }
 export interface JevTextExcerpt {
   text: string;
@@ -72,8 +80,10 @@ export interface JevConfig {
   model: string;
   timeoutMs: number;
   confidenceThreshold: number;
+  probabilityThreshold: number;
   maxStateTokens: number;
   context?: JevContextConfig | undefined;
+  retry?: JevRetryConfig | undefined;
   mode: 'advisory';
 }
 
@@ -133,15 +143,32 @@ export interface JevRequest {
   context: Context;
   candidates: readonly JevRouteCandidate[];
   profile: JevProfileConfig | undefined;
+  /** Local fallback tier; abstention mass is assigned to it, never inferred remotely. */
+  baselineTier: RouterTier;
   /** Absolute monotonic deadline supplied by the routing orchestrator. */
   routingDeadline: number;
   signal?: AbortSignal | undefined;
 }
 
+export const JEV_SELECTION_BASES = ['choice', 'probability'] as const;
+export type JevSelectionBasis = (typeof JEV_SELECTION_BASES)[number];
+
+/** Local validation codes; remote error text is never retained. */
+export const JEV_RESPONSE_ISSUES = [
+  'unreadable-body',
+  'missing-answer',
+  'unexpected-answer-type',
+  'unknown-choice',
+  'invalid-confidence',
+  'distribution-keys',
+  'distribution-sum',
+  'distribution-argmax',
+] as const;
+export type JevResponseIssue = (typeof JEV_RESPONSE_ISSUES)[number];
+
 export const JEV_OUTCOMES = [
   'selected',
   'uncertain',
-  'low-confidence',
   'invalid-response',
   'http-error',
   'network-error',
@@ -161,14 +188,23 @@ export interface JevDiagnostics {
   model?: string | undefined;
   resolvedModel?: string | undefined;
   choice?: RouterTier | 'uncertain' | undefined;
+  /** Acted-on tier, which a conservative probability selection can raise above `choice`. */
+  selectedTier?: RouterTier | undefined;
+  selectionBasis?: JevSelectionBasis | undefined;
   confidence?: number | undefined;
   probability?: number | undefined;
+  /** Cumulative probability of the selected tier and every lower tier. */
+  routeProbability?: number | undefined;
   threshold?: number | undefined;
+  probabilityThreshold?: number | undefined;
   timeoutMs?: number | undefined;
   candidateCount?: number | undefined;
   estimatedInputTokens?: number | undefined;
   actualInputTokens?: number | undefined;
   httpStatus?: number | undefined;
+  /** HTTP attempts made, including the retry of a documented transient status. */
+  attempts?: number | undefined;
+  responseIssue?: JevResponseIssue | undefined;
 }
 export interface JevResult {
   advice?: JevAdvice | undefined;
@@ -224,6 +260,18 @@ export const ADVISOR_OUTCOMES = [
 export type AdvisorOutcome = (typeof ADVISOR_OUTCOMES)[number];
 export const isAdvisorOutcome = (value: unknown): value is AdvisorOutcome =>
   ADVISOR_OUTCOMES.some((outcome) => outcome === value);
+/** Why a configured advisor was not asked on this decision. */
+export const BYPASS_REASONS = [
+  'pinned',
+  'budget',
+  'single-candidate',
+  'tool-continuation',
+  'no-user-turn',
+  'turn-advised',
+] as const;
+export type BypassReason = (typeof BYPASS_REASONS)[number];
+export const isBypassReason = (value: unknown): value is BypassReason =>
+  BYPASS_REASONS.some((reason) => reason === value);
 
 export interface RoutingDecision {
   profile: string;
@@ -236,6 +284,7 @@ export interface RoutingDecision {
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
   advisor?: AdvisorOutcome | undefined;
+  bypassReason?: BypassReason | undefined;
   jev?: JevDiagnostics | undefined;
   reuse?: 'same-turn' | 'shared' | 'continuation' | undefined;
   thinking: ThinkingLevel;

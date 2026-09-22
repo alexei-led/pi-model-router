@@ -110,9 +110,13 @@ export const estimateJevTextTokens = (text: string): number => {
   return Math.ceil((ascii / 4 + nonAsciiBytes / 2) * 1.1);
 };
 
-/** Includes measured fixed headroom for the current four-choice request envelope. */
+/**
+ * Includes fixed headroom for the structured four-choice request envelope. Live
+ * `usage.input_tokens` exceeded the text estimate by 110-135 tokens on ten
+ * structured requests, so the headroom is set well above that gap.
+ */
 export const estimateJevRequestTokens = (serializedRequest: string): number =>
-  200 + estimateJevTextTokens(serializedRequest);
+  400 + estimateJevTextTokens(serializedRequest);
 
 const safePrefix = (text: string, units: number): string =>
   text.slice(0, units).replace(/[\uD800-\uDBFF]$/u, '');

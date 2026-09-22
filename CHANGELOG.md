@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.7.0] - 2026-09-22
+
+### Behavior change
+
+- A Choice below `confidenceThreshold` is not discarded. The router selects the lowest tier whose cumulative probability reaches `probabilityThreshold` (default 0.8). Abstention mass counts for the baseline tier.
+- Each Jev tier is a structured Choice option with `covers`, `notFor` and `examples`. The instructions are a structured object that names the state fields.
+- The router retries one transient Jev status (`408`, `429`, `5xx`) inside the existing total budget. The backoff honors `Retry-After`. Permanent statuses and cancellation are not retried.
+- The response validator accepts omitted zero-mass options and two-decimal rounding.
+- The request token estimate adds 400 tokens of headroom instead of 200.
+
+### Removed
+
+- The `low-confidence` outcome. Debug output shows `selected`, `basis`, `route-p` and `route-threshold` instead.
+- The `/router` verbs `status`, `profile`, `fix`, `disable`, `debug`, `?` and per-tier `thinking`. A removed verb prints its replacement and does nothing.
+
+### Added
+
+- `jev.probabilityThreshold`, `jev.retry.maxAttempts`, `jev.retry.backoffMs` and `classifierModel.timeoutMs`. Defaults are unchanged.
+- The `/router` verbs `off`, `log [on|off|clear]` and argument-free `widget`. Top-level completion lists verbs and profile names.
+- A skipped advisor records `bypassReason` and the footer shows it: `advice skipped: pinned high`, `over budget`, `only high eligible`, `tool turn`.
+- An `invalid-response` names the failing local check. Remote text is not retained.
+
+### Documentation
+
+- `docs/README.md` is the index. `docs/jev-advisor.md` holds the Jev guide. `docs/research/` holds dated experiment reports. `docs/archive/` holds superseded reports. File names are lowercase.
+- Parallel Noul questions were tested and not added. See `docs/research/jev-routing-policy.md`.
+
 ## [0.6.5] - 2026-09-22
 
 - The router now sends structured Jev state for the current request, recent dialogue, and optional tool evidence.

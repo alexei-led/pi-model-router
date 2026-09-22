@@ -1,4 +1,8 @@
-# Architecture: Pi Model Router Extension
+# Architecture
+
+How the router works and where its boundaries are. Operator-facing Jev
+configuration and diagnostics are in [jev-advisor.md](jev-advisor.md); the
+experiments behind the defaults are in [research/](research/).
 
 The `pi-model-router` is an extension-first model router for the `pi` coding agent. It registers a custom logical provider (`router`) that exposes "profiles" as models (e.g., `router/balanced`). For every turn, it selects a configured model/effort pair using optional semantic advice or a deterministic eligible baseline. No prompt words, language, punctuation, word count or inferred phase choose a local tier.
 
@@ -23,7 +27,7 @@ For every request sent to a `router/*` model, the following logic is executed:
 1. **Validation and continuation**: Validate config/registry and handle caller cancellation. Reuse a validated same-turn tool route before any advisor. Invalid continuations select a compatible local route, without advice.
 2. **Pin or budget**: Manual pins skip advisors, use only their configured tier and fail actionably if it has no eligible route. Words never raise or lower a pin. Otherwise, above `maxSessionBudget`, skip advisors and prefer the eligible baseline within medium-or-lower tiers if any; retain an eligible configured baseline otherwise. Report the fixed `budget` reason. This is a soft generation-cost policy, not a billing cap; advisor costs are excluded.
 3. **Primary candidates**: Build eligible primary model/effort candidates from the active profile. Exactly one candidate bypasses advisors without transmitting task text.
-4. **Jev (optional)**: User-level global enablement, active-profile opt-in and a key authorize one request. Accept only a validated current candidate ID. Failure, uncertainty, invalid advice or timeout means eligible baseline directly, never a classifier cascade.
+4. **Jev (optional)**: User-level global enablement, active-profile opt-in and a key authorize one request. Accept only a validated current candidate ID: the top option when confidence clears `confidenceThreshold`, otherwise the lowest tier whose cumulative probability clears `probabilityThreshold`. Abstention, invalid advice, HTTP failure or timeout means eligible baseline directly, never a classifier cascade.
 5. **Classifier-only compatibility path (optional)**: When Jev is not active (disabled, not opted in or missing a key), a configured Pi classifier can advise `micro|low|medium|high` semantically. Its isolated bounded recent context excludes the main system prompt/tools and output is limited to 256 tokens. Failure/uncertainty means baseline. Without either advisor, use baseline directly.
 6. **Revalidation and delegation**: Revalidate after advice and before every generation/fallback attempt. Only explicit configured generation fallbacks authorize cross-provider alternatives; no implicit profile/account switch.
 
@@ -31,11 +35,16 @@ For every request sent to a `router/*` model, the following logic is executed:
 (default 1500 ms, validated against Node's timer range, without a product-level cap).
 The adapter gets the minimum of that configured
 timeout and the remaining budget, including request and response-body time. The
-separate classifier-only path retains a 10-second bound; it does not share a
-fallback deadline with Jev. Neither advisor retries. Caller cancellation stops
+separate classifier-only path gets `classifierModel.timeoutMs` (default
+10 s); it does not share a deadline with Jev. The Jev adapter retries a
+documented transient status (`408`, `429`, `5xx`) up to `jev.retry.maxAttempts`
+times with exponential backoff from `jev.retry.backoffMs`, honoring
+`Retry-After`, only when a full round trip still fits inside the same deadline;
+permanent statuses, malformed bodies and cancellation never retry. The classifier never
+retries. Caller cancellation stops
 generation rather than starting a local fallback. Same-turn Jev callers share one
 in-flight request and its original deadline; only the final departing waiter aborts
-the transport. A bounded 16-turn decision cache reuses the actual validated route,
+the transport. A bounded per-turn decision cache (`MAX_TURN_CACHE_ENTRIES`) reuses the actual validated route,
 not merely its advisor label. Policy/config/capability changes invalidate cached
 advice; unsuccessful generation attempts release it for retry.
 
@@ -55,7 +64,7 @@ not a security or tool-permission boundary.
 
 ### Continuation predicate
 
-The bounded runtime-only continuation map retains up to 16 interleaved turns and records a hash of active-turn context, policy,
+The bounded runtime-only continuation map retains up to `MAX_TURN_CACHE_ENTRIES` interleaved turns and records a hash of active-turn context, policy,
 config identity, branch ancestry, actual successful decision and generated tool
 call IDs. Reuse requires matching user-turn identity, profile, pin/effort/policy,
 unchanged config, compatible known branch ancestry, matching assistant
@@ -82,51 +91,58 @@ and serializes only its allowlisted `currentRequest`, `recentDialogue` and
 `recentToolEvidence` fields. System/tool definitions never cross this boundary.
 Selection/serialization consume the same absolute advisory deadline as transport.
 
-`context.ts` prioritizes current text, then prior dialogue, then tool evidence.
-By default it selects two prior user turns with their last non-empty text replies
-(maximum 500 estimated dialogue tokens), and the last tool result of the immediately
-previous turn only if `isError: true` (maximum 250 estimated tokens). Intermediate
-narration and text-empty assistant messages do not consume dialogue slots. An
-older failure is not recovered after a successful or binary-only final result.
-User-only `jev.context` knobs can change these bounds or include/omit the last
-result. Dialogue is returned chronologically. Text exceeds neither its per-section
-ceiling nor the global `maxStateTokens` estimate (default 3000, maximum 24000).
-The preflight estimator weights ASCII characters, non-ASCII UTF-8 bytes and a 10%
-margin. Serialized requests add 200 measured overhead tokens and are rejected above
-28000 estimated tokens, leaving room below Jev's 32k state-plus-question limit.
-The server-reported `usage.input_tokens` and local estimate are retained as numeric
-diagnostics; no exact Jev tokenizer or count endpoint is published. Configuration
-uses estimated-token budgets only. JSON metadata is also bounded by at most 20
-prior turns. Head/tail excerpts have explicit truncation
-flags; no keyword scoring, failure-text parsing, summarizer or additional advisor
-call is used. The Pi-classifier
-compatibility path retains its existing role-labelled text window. System prompts, raw config, credentials from
-config, thinking, tool-call arguments and image/binary blocks are not extracted.
-Conversation text, including bounded tool output, is not redacted and may contain
-private data or secrets: profile opt-in is approval to send it externally. Short,
-multilingual and imperfect replies are data for the advisor, not local branches.
-Choice instructions focus on the latest user request and describe distinct reasoning
-requirements for each tier. The quality-first objective favors frontier reasoning
-when it can materially improve correctness or reduce rework, not only when cheaper
-routes are incapable. Micro/low remain appropriate for straightforward work.
-Historical task difficulty does not define the new turn.
+`context.ts` selects the state deterministically: the current request first,
+then up to `context.previousTurns` prior user turns with their last non-empty
+text replies, then the last tool result of the immediately previous turn when
+the configured `toolResults` policy admits it. Every section has its own
+estimated-token ceiling under the global `maxStateTokens` budget; long text is
+kept as a head/tail excerpt with an explicit `truncated` flag. Intermediate
+narration and text-empty assistant messages do not consume dialogue slots, and
+an older failure is not recovered after a later successful result. No keyword
+scoring, failure-text parsing, summarizer or extra advisor call is used. System
+prompts, raw config, credentials, thinking, tool-call arguments and image/binary
+blocks are never extracted; the selected text itself is not redacted.
+
+Token counts are local estimates (ASCII/4, non-ASCII UTF-8 bytes/2, a 10%
+margin, plus 400 tokens of fixed request headroom for the structured JSON
+question). TypeSafe publishes no tokenizer or count endpoint. A serialized
+request above 28000 estimated tokens is rejected before transport, leaving room
+below Jev's 32k state-plus-question limit. The estimate and the server-reported
+`usage.input_tokens` are both retained as numeric diagnostics. Calibration data:
+[research/jev-context-selection.md](research/jev-context-selection.md).
+
+The question is one Choice. Its instructions are a structured object that
+focuses on `currentRequest` and names the other state fields; each tier is a
+structured option (`covers`, `notFor`, `examples`, `useWhen` for high) plus its
+concrete route, and `uncertain` allows abstention. A single Choice is used
+deliberately: parallel Noul questions separated the extremes but changed no
+route in the recorded experiments
+([research/jev-routing-policy.md](research/jev-routing-policy.md)).
 
 Candidate IDs encode the tuple `(tier, canonical model reference, thinking)` with
 escaped components, so same-model tiers and separator-containing IDs cannot
 collide. Responses are capped at 64 KiB and must contain `answers.route` with a
-known `choice`, `type: "choice"`, valid confidence and a complete probability
-map. Unknown IDs, `uncertain`, low confidence, invalid distributions, HTTP errors,
-malformed data and timeouts return no advice. The detailed adapter also returns an
-allowlisted outcome, local timing, validated choice/confidence/probability, threshold,
-request limits, HTTP status and recognized Jev version labels. These distinguish a
-fast low-confidence rejection from a timeout. Raw response fields never become a
+known `choice`, `type: "choice"`, valid confidence and a probability map over
+known options only (omitted options count as zero; the sum may deviate by the
+two-decimal rounding of each option; `choice` must carry the top probability).
+Unknown IDs, `uncertain`, invalid distributions, HTTP errors, malformed data and
+timeouts return no advice. A Choice below `confidenceThreshold` is resolved in
+`selectRoute`: the lowest tier whose cumulative probability from micro upward
+reaches `probabilityThreshold` is selected, with abstention mass assigned to the
+local baseline tier supplied by `provider.ts`. Only a candidate that exists in
+the request can be returned. The detailed adapter also returns an allowlisted
+outcome, local timing, validated choice/confidence/probability, the acted-on tier
+and basis, cumulative route probability, both thresholds, request limits, HTTP
+status, attempt count, a local response-issue code and recognized Jev version
+labels. These distinguish a fast rejection from a timeout and name the failing
+local check without retaining remote text. Raw response fields never become a
 decision. Registry identity, effort and input validation remain local authority;
 natural-language intent is not locally validated.
 
-chezmoi/1Password rendering is operator-owned (see [README](../README.md)). The
-extension reads the rendered user JSON, never runs secret lookup commands and
-does not require an environment variable. Render with a private chezmoi template,
-keep the output out of Git and verify mode `0600` before storing a key.
+Credential rendering is operator-owned (see
+[jev-advisor.md](jev-advisor.md#storing-the-key)). The extension reads the
+rendered user JSON, never runs secret lookup commands and does not require an
+environment variable.
 
 ## Module Architecture
 
@@ -161,7 +177,9 @@ history copy only declared local fields. `RoutingReasonCode` is the closed union
 `baseline | pinned | continuation | classifier | jev | fallback | budget | legacy`.
 `AdvisorOutcome` separately records route guidance as `none | bypassed | jev |
 jev-fallback | classifier | classifier-fallback`. The footer distinguishes local
-baseline, bypassed advice, accepted advice and rejected advice. `ui.statusLine`
+baseline, skipped advice (with a closed `bypassReason`: pinned, budget,
+single-candidate, tool-continuation, no-user-turn, turn-advised), accepted
+advice and rejected advice. `ui.statusLine`
 selects compact (default) or detailed display without affecting routing. Widget
 and debug output retain full validated metrics.
 Obsolete source codes and old free-form explanations map to non-rendered `legacy`
@@ -174,7 +192,7 @@ Nested metrics are copied field-by-field on save/restore. Context metrics includ
 only numeric current/history/tool sizes, included turns/results and truncation
 counts; selected text is never persisted as router diagnostics. A local UUID is generated
 only when an HTTP request is attempted; it is shared across waiters and route reuse.
-`/router debug stats` deduplicates these IDs within the retained 50-decision window,
+`/router log` deduplicates these IDs within the retained 50-decision window,
 not across session lifetime. Entries without IDs are excluded. Debug-off stops
 collection while preserving existing history and the latest decision. No key, endpoint, task text,
 raw response, rule explanation or remote reasoning enters router state/debug/UI. Pi's own conversation storage is outside this boundary.

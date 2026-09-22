@@ -85,6 +85,27 @@ describe('ui.ts', () => {
     },
   );
 
+  it.each([
+    ['pinned', 'advice skipped: pinned high'],
+    ['budget', 'advice skipped: over budget'],
+    ['single-candidate', 'advice skipped: only high eligible'],
+    ['tool-continuation', 'advice skipped: tool turn'],
+    ['no-user-turn', 'advice skipped: no user turn'],
+    ['turn-advised', 'advice skipped: turn already advised'],
+    [undefined, 'advice bypassed'],
+  ] as const)('explains why advice was skipped: %s', (bypassReason, text) => {
+    const routed = {
+      ...decision,
+      tier: 'high',
+      advisor: 'bypassed',
+      bypassReason,
+    } as unknown as RoutingDecision;
+    expect(formatAdvisorFooter(routed)).toContain(text);
+    const ctx = context();
+    render(ctx, { lastDecision: routed });
+    expect(vi.mocked(ctx.ui.setStatus).mock.calls[0]?.[1]).toContain(text);
+  });
+
   it('shows detailed advisor status without remote data', () => {
     const ctx = context();
     render(ctx, {
@@ -107,10 +128,14 @@ describe('ui.ts', () => {
       advisor: 'jev-fallback',
       reuse: 'continuation',
       jev: {
-        outcome: 'low-confidence',
+        outcome: 'selected',
         latencyMs: 764,
         startedAt: 1234,
-        choice: 'high',
+        choice: 'medium',
+        selectedTier: 'high',
+        selectionBasis: 'probability',
+        routeProbability: 0.91,
+        probabilityThreshold: 0.8,
         confidence: 0.35,
         probability: 0.48,
         threshold: 0.65,
@@ -118,19 +143,23 @@ describe('ui.ts', () => {
       },
     };
     const compact = formatAdvisorFooter(routed);
-    expect(compact).toContain('high c35% <65% → baseline · 764ms');
+    expect(compact).toContain('medium c35% <65% → high · 764ms');
     expect(compact).toContain('reuse');
     expect(compact).not.toContain('p48%');
     expect(compact).not.toContain('HTTP');
     expect(compact.length).toBeLessThan(80);
     const detailed = formatAdvisorFooter(routed, 'detailed');
-    expect(detailed).toContain('high c35% <65% → baseline · 764ms · p48% @');
+    expect(detailed).toContain('medium c35% <65% → high · 764ms · p48% @');
     expect(detailed).toContain('tool route');
     const ctx = context();
     render(ctx, { statusLine: 'detailed', lastDecision: routed });
     expect(vi.mocked(ctx.ui.setStatus).mock.calls[0]?.[1]).toContain(detailed);
     const widget = JSON.stringify(vi.mocked(ctx.ui.setWidget).mock.calls);
     expect(widget).toContain('confidence=35.0%');
+    expect(widget).toContain('selected=high');
+    expect(widget).toContain('basis=probability');
+    expect(widget).toContain('route-p=91.0%');
+    expect(widget).toContain('route-threshold=80.0%');
     expect(widget).toContain('budget=5000ms');
     expect(widget).not.toContain('private task text');
   });

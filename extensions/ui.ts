@@ -25,6 +25,25 @@ export const formatDecisionSource = (decision: RoutingDecision): string =>
     ? decision.reasonCode
     : '';
 
+const formatBypassReason = (decision: RoutingDecision): string => {
+  switch (decision.bypassReason) {
+    case 'pinned':
+      return `pinned ${decision.tier}`;
+    case 'budget':
+      return 'over budget';
+    case 'single-candidate':
+      return `only ${decision.tier} eligible`;
+    case 'tool-continuation':
+      return 'tool turn';
+    case 'no-user-turn':
+      return 'no user turn';
+    case 'turn-advised':
+      return 'turn already advised';
+    default:
+      return '';
+  }
+};
+
 export const formatAdvisorLabel = (
   decision: RoutingDecision,
 ): string | undefined => {
@@ -32,8 +51,10 @@ export const formatAdvisorLabel = (
   switch (decision.advisor) {
     case 'none':
       return 'local baseline';
-    case 'bypassed':
-      return 'advice bypassed';
+    case 'bypassed': {
+      const reason = formatBypassReason(decision);
+      return reason ? `advice skipped: ${reason}` : 'advice bypassed';
+    }
     case 'jev':
       return '🧭 Jev ✓';
     case 'jev-fallback':
@@ -76,6 +97,11 @@ export const formatAdvisorDetail = (
     );
     if (metrics.choice && metrics.choice !== 'uncertain')
       parts.push(`choice=${metrics.choice}`);
+    if (metrics.selectedTier && metrics.selectedTier !== metrics.choice)
+      parts.push(`selected=${metrics.selectedTier}`);
+    if (metrics.selectionBasis) parts.push(`basis=${metrics.selectionBasis}`);
+    if (metrics.routeProbability !== undefined)
+      parts.push(`route-p=${(metrics.routeProbability * 100).toFixed(1)}%`);
     if (metrics.probability !== undefined)
       parts.push(
         `${metrics.outcome === 'uncertain' ? 'abstention-p' : 'p'}=${(metrics.probability * 100).toFixed(1)}%`,
@@ -86,6 +112,13 @@ export const formatAdvisorDetail = (
       );
     if (metrics.threshold !== undefined && metrics.outcome !== 'uncertain')
       parts.push(`threshold=${(metrics.threshold * 100).toFixed(1)}%`);
+    if (
+      metrics.probabilityThreshold !== undefined &&
+      metrics.selectionBasis === 'probability'
+    )
+      parts.push(
+        `route-threshold=${(metrics.probabilityThreshold * 100).toFixed(1)}%`,
+      );
     if (metrics.timeoutMs !== undefined)
       parts.push(`budget=${metrics.timeoutMs}ms`);
     if (metrics.candidateCount !== undefined)
@@ -102,6 +135,15 @@ export const formatAdvisorDetail = (
       parts.push(`Jev usage=${metrics.actualInputTokens} input tokens`);
     if (metrics.httpStatus !== undefined)
       parts.push(`HTTP ${metrics.httpStatus}`);
+    if (metrics.attempts !== undefined && metrics.attempts > 1)
+      parts.push(`attempts=${metrics.attempts}`);
+    if (metrics.responseIssue) parts.push(`response=${metrics.responseIssue}`);
+    if (metrics.httpStatus === 401)
+      parts.push('Check the user-config Jev API key.');
+    if (metrics.httpStatus === 422)
+      parts.push('Jev rejected the request shape.');
+    if (metrics.httpStatus === 429 || metrics.httpStatus === 529)
+      parts.push('Transient Jev limit; the router retried once within budget.');
   } else if (decision.errorClass) {
     parts.push(decision.errorClass);
   }
@@ -127,10 +169,10 @@ export const formatAdvisorFooter = (
   let summary: string;
   switch (metrics.outcome) {
     case 'selected':
-      summary = `→ ${metrics.choice ?? decision.tier}${confidence}`;
-      break;
-    case 'low-confidence':
-      summary = `${metrics.choice ?? 'choice'}${confidence}${metrics.threshold !== undefined ? ` <${Math.round(metrics.threshold * 100)}%` : ''} → baseline`;
+      summary =
+        metrics.selectionBasis === 'probability'
+          ? `${metrics.choice ?? 'choice'}${confidence}${metrics.threshold !== undefined ? ` <${Math.round(metrics.threshold * 100)}%` : ''} → ${metrics.selectedTier ?? decision.tier}`
+          : `→ ${metrics.choice ?? decision.tier}${confidence}`;
       break;
     case 'uncertain':
       summary = ': no tier chosen → baseline';
@@ -145,7 +187,7 @@ export const formatAdvisorFooter = (
       summary = ': network error → baseline';
       break;
     case 'invalid-response':
-      summary = ': invalid response → baseline';
+      summary = `: invalid response${metrics.responseIssue ? ` (${metrics.responseIssue})` : ''} → baseline`;
       break;
     case 'cancelled':
       summary = ': cancelled';

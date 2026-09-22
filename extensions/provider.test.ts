@@ -563,6 +563,7 @@ const jevConfig: JevConfig = {
   model: 'jev-1.13.0',
   timeoutMs: 750,
   confidenceThreshold: 0.65,
+  probabilityThreshold: 0.8,
   maxStateTokens: 3000,
   mode: 'advisory',
 };
@@ -878,7 +879,6 @@ describe('Jev provider integration', () => {
   it.each([
     'uncertain',
     'invalid-id',
-    'low-confidence',
     'http-error',
     'malformed',
     'transport-error',
@@ -897,12 +897,12 @@ describe('Jev provider integration', () => {
         ).json();
         if (kind === 'invalid-id')
           response.answers.route.choice = 'foreign-model';
-        if (kind === 'low-confidence') response.answers.route.confidence = 0.1;
         return new Response(JSON.stringify(response));
       });
       vi.stubGlobal('fetch', transport);
       await consume(s.stream(userContext()));
-      expect(transport).toHaveBeenCalledOnce();
+      // Only a documented transient status is retried, once, inside the budget.
+      expect(transport).toHaveBeenCalledTimes(kind === 'http-error' ? 2 : 1);
       expect(s.delegate).toHaveBeenCalledOnce();
       expect(s.state.lastDecision).toMatchObject({
         tier: 'medium',
@@ -911,6 +911,49 @@ describe('Jev provider integration', () => {
       expect(advisorOf(s.state.lastDecision)).toBe('jev-fallback');
     },
   );
+
+  it('routes a split low-confidence distribution up instead of discarding the answer', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    required(s.state.currentConfig.profiles.balanced).micro = {
+      model: 'test/small',
+    };
+    const transport = vi.fn<typeof fetch>(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as ChoiceRequest;
+      const ids = Object.keys(body.questions.route.criteria);
+      const find = (tier: string) =>
+        ids.find((id) => id.startsWith(`${tier}|`)) ?? 'uncertain';
+      return new Response(
+        JSON.stringify({
+          answers: {
+            route: {
+              type: 'choice',
+              choice: find('micro'),
+              confidence: 0.3,
+              probabilities: Object.fromEntries(
+                ids.map((id) => [
+                  id,
+                  id === find('micro') ? 0.5 : id === find('high') ? 0.5 : 0,
+                ]),
+              ),
+            },
+          },
+        }),
+      );
+    });
+    vi.stubGlobal('fetch', transport);
+    await consume(s.stream(userContext()));
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      reasonCode: 'jev',
+      jev: {
+        choice: 'micro',
+        selectedTier: 'high',
+        selectionBasis: 'probability',
+      },
+    });
+    expect(advisorOf(s.state.lastDecision)).toBe('jev');
+  });
 
   it.each([true, false])(
     'missing Jev key uses only the configured compatibility path (classifier=%s)',
@@ -1046,6 +1089,62 @@ describe('Jev provider integration', () => {
       expect(advisorOf(s.state.lastDecision)).toBe(
         kind === 'disabled-profile' ? 'none' : 'bypassed',
       );
+      expect(s.state.lastDecision?.bypassReason).toBe(
+        {
+          pin: 'pinned',
+          single: 'single-candidate',
+          budget: 'budget',
+          'disabled-profile': undefined,
+        }[kind],
+      );
+      expect(s.actions.recordDebugDecision).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          advisor: kind === 'disabled-profile' ? 'none' : 'bypassed',
+        }),
+      );
+    },
+  );
+
+  it('names a tool turn that cannot reuse its route as the bypass reason', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    mockChoice();
+    await consume(
+      s.stream(
+        toolContext(userContext('same task', 1), toolMessage('test', 'small')),
+      ),
+    );
+    expect(s.state.lastDecision).toMatchObject({
+      reasonCode: 'baseline',
+      advisor: 'bypassed',
+      bypassReason: 'tool-continuation',
+    });
+  });
+
+  it.each([undefined, 20_000, 2_000])(
+    'gives the classifier its configured budget (%s) as the routing deadline',
+    async (timeoutMs) => {
+      const s = setup();
+      delete s.state.pinnedTierByProfile.balanced;
+      s.state.currentConfig.classifierModel = {
+        model: 'test/small',
+        timeoutMs,
+      };
+      s.delegate.mockReturnValueOnce(done('Tier: low\nReasoning: cheap'));
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      try {
+        await consume(s.stream(userContext()));
+        const budget = timeoutSpy.mock.calls[0]?.[0] ?? 0;
+        const expected = timeoutMs ?? 10_000;
+        expect(budget).toBeGreaterThan(expected - 500);
+        expect(budget).toBeLessThanOrEqual(expected);
+      } finally {
+        timeoutSpy.mockRestore();
+      }
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'low',
+        reasonCode: 'classifier',
+      });
     },
   );
 

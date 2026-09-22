@@ -1,8 +1,14 @@
-# Jev context selection experiments
+# Jev context selection and token budgeting
 
-Date: 2026-09-22. This is a bounded engineering comparison, not a model-quality benchmark.
-No summary model, translation model, extra advisor retry, confidence-threshold change
-or keyword-based tier selection was introduced.
+Date: 2026-09-22. Released in 0.6.5. Bounded engineering comparison, not a
+model-quality benchmark. No summary model, translation model or keyword-based
+tier selection was introduced.
+
+These experiments used the flat one-string criteria and the threshold-only
+acceptance policy of 0.6.5. Both were replaced afterwards; see
+[jev-routing-policy.md](jev-routing-policy.md). The context defaults and the
+token estimator chosen here are still current and are documented for users in
+[../jev-advisor.md](../jev-advisor.md#context-selection).
 
 ## Sources and current boundary
 
@@ -30,7 +36,7 @@ until the final configuration was chosen. Only read/search tools were enabled in
 
 All runs used `jev-latest` (responses identified `jev-1.13.0`), 5000 ms and 0.65.
 The operator's high/Astra baseline remained unchanged. The eight prompts are in
-[`jev-context-tasks.json`](../extensions/test/fixtures/jev-context-tasks.json).
+[`jev-context-tasks.json`](../../extensions/test/fixtures/jev-context-tasks.json).
 The long-tail prompt uses a generated quoted reference block followed by the actual
 arithmetic request. Other cases cover RU/EN follow-ups, an intentional missing-file
 error, two file reads, a distant referent and simple → complex → simple transitions.
@@ -97,7 +103,9 @@ largest miss on Russian. Those packages also add 22–27 MB unpacked.
 
 A transparent local estimate performed better on this bounded sample: ASCII/4 plus
 non-ASCII UTF-8 bytes/2, followed by a 10% margin; the full serialized request adds
-200 tokens of fixed measured overhead.
+fixed headroom for the question envelope (200 tokens at the time; raised to 400
+after the structured criteria were introduced, see
+[jev-routing-policy.md](jev-routing-policy.md#live-piagterm-validation)).
 
 | Synthetic full request | Jev actual input tokens | Local estimate | Ratio |
 | --- | ---: | ---: | ---: |
@@ -117,27 +125,16 @@ the sample does not establish a universal error bound.
 Server-reported input usage is retained for observation, not automatic estimator
 adaptation, because `jev-latest` can change model/tokenization.
 
-## Chosen defaults and implementation
+## Chosen defaults
 
 Two prior user turns provide a little reference continuity without a large history
 window. A 500-estimated-token dialogue ceiling limits old material; a 250-token
 error-only tool ceiling preserves an explicit failure without routinely sending
 successful stdout, source dumps or tool schemas. These are a conservative
-compromise from this sample, not a statistically proven global optimum.
-
-The selector preserves user-turn boundaries and the last non-empty text reply per
-turn. Intermediate narration, thinking and tool-call-only messages cannot displace
-those anchors. Only the last result of the immediately previous user turn is eligible;
-`last-error` uses its native `isError` flag, not words in output, and does not recover
-an older failure after a success. Beginning/end excerpts carry truncation flags.
-
-Four user-only knobs remain: `previousTurns`, `maxHistoryTokens`, `toolResults` and
-`maxToolTokens`, under the total `maxStateTokens` estimate (default 3000). Head/tail
-truncation is fixed, not another speculative tuning switch. Prior turns are limited
-to 20 to bound metadata overhead too. The whole serialized request is rejected
-locally above 28000 estimated tokens, leaving margin below the 32k state/question
-limit. Configuration uses estimated-token budgets only. Generation context and Pi-classifier behavior
-are unchanged. Only numeric composition metrics enter router snapshots/debug UI.
+compromise from this sample, not a statistically proven global optimum. Head/tail
+truncation is fixed rather than another tuning switch. The resulting selector
+rules and the four `jev.context` knobs are described in
+[../jev-advisor.md](../jev-advisor.md#context-selection).
 
 ## Token-budget live validation
 
@@ -156,24 +153,15 @@ the token migration. The earlier 48-turn character-budget run did verify generat
 metadata, and provider delegation remains covered by the full integration suite.
 No target-project files were modified. Both experiment sessions were closed.
 
-## Verification and remaining limits
+## Limits
 
-Regression tests cover role exclusions, latest-request priority, tail preservation,
-turn anchors under tool-heavy history, independent switches, section/global bounds,
-stale-error exclusion, invalid knobs, merge purity, ignored project overrides,
-numeric-only snapshotting and provider HTTP integration. The full existing routing,
-continuation, cancellation, timeout and state tests also remain applicable.
-
-Local user settings and the chezmoi template were synchronized for these knobs and
-the existing `openai-personal` high baseline. The API key was unchanged and its
-`onepasswordRead` template expression was not replaced with a literal. Redacted
-JSON syntax and scoped settings equality were verified. Full template rendering
-initially timed out on the existing secret lookup. After the operator unlocked
-1Password, full rendering succeeded: context settings, the high baseline and the
-credential matched the local file, with only booleans reported. No broad
-`chezmoi apply`, auth-store inspection or credential replacement was performed.
-
-Filtering is not redaction: selected original text can still contain private data.
-For confidentiality-sensitive profiles use `toolResults: "none"` or leave Jev off.
-For references to older discussions, deliberately increase history and measure;
-sending the whole session or raising confidence alone is not a success criterion.
+- Filtering is not redaction: selected original text can still contain private
+  data. For confidentiality-sensitive profiles use `toolResults: "none"` or
+  leave Jev off.
+- For references to older discussions, deliberately increase history and
+  measure; sending the whole session or raising confidence alone is not a
+  success criterion.
+- The token-budget live check verified routing and metrics, not generation,
+  because both providers hit usage limits during that run. Generation with the
+  same selector was verified later in
+  [jev-routing-policy.md](jev-routing-policy.md#live-piagterm-validation).

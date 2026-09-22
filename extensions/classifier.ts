@@ -5,10 +5,10 @@ import type {
 } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { isRouterTier, parseCanonicalModelRef } from './config';
+import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
 import { extractTextFromContent, getBoundedRecentContext } from './context';
 import type { ClassifierTier, RouterPhase } from './types';
 
-const CLASSIFIER_TIMEOUT_MS = 10_000;
 const CLASSIFIER_MAX_TOKENS = 256;
 
 export const runClassifier = async (
@@ -18,7 +18,7 @@ export const runClassifier = async (
   currentPhase?: RouterPhase,
   thinking?: ThinkingLevel,
   signal?: AbortSignal,
-  routingDeadline = performance.now() + CLASSIFIER_TIMEOUT_MS,
+  routingDeadline = performance.now() + DEFAULT_CLASSIFIER_TIMEOUT_MS,
 ): Promise<{ tier: ClassifierTier } | undefined> => {
   try {
     const remaining = routingDeadline - performance.now();
@@ -51,9 +51,8 @@ export const runClassifier = async (
         },
       ],
     };
-    const timeout = AbortSignal.timeout(
-      Math.max(1, Math.ceil(Math.min(CLASSIFIER_TIMEOUT_MS, remaining))),
-    );
+    // The caller's deadline already reflects the configured classifier budget.
+    const timeout = AbortSignal.timeout(Math.max(1, Math.ceil(remaining)));
     const classifierSignal = signal
       ? AbortSignal.any([signal, timeout])
       : timeout;

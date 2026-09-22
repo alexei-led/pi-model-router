@@ -113,7 +113,7 @@ describe('index.ts (orchestrator)', () => {
       ([name]) => name === 'router',
     )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1] | undefined;
     if (!command) throw new Error('Missing router command');
-    for (const args of ['status', 'debug show'])
+    for (const args of ['', 'log'])
       await command.handler(args, ctx as unknown as ExtensionCommandContext);
     expect(ctx.ui.notify).toHaveBeenCalled();
   };
@@ -127,6 +127,7 @@ describe('index.ts (orchestrator)', () => {
         model: 'jev-1.13.0',
         timeoutMs: 750,
         confidenceThreshold: 0.65,
+        probabilityThreshold: 0.8,
         maxStateTokens: 3000,
         mode: 'advisory',
       },
@@ -179,23 +180,17 @@ describe('index.ts (orchestrator)', () => {
       debugHistory: [],
       lastDecision: expect.any(Object),
     });
-    await command.handler(
-      'debug on',
-      ctx as unknown as ExtensionCommandContext,
-    );
+    await command.handler('log on', ctx as unknown as ExtensionCommandContext);
     for (let turn = 2; turn <= 53; turn++) await send(turn);
     const before = mockPi.appendEntry.mock.calls.at(-1)?.[1];
     expect(before.debugHistory).toHaveLength(50);
-    await command.handler(
-      'debug off',
-      ctx as unknown as ExtensionCommandContext,
-    );
+    await command.handler('log off', ctx as unknown as ExtensionCommandContext);
     await send(54);
     expect(mockPi.appendEntry.mock.calls.at(-1)?.[1].debugHistory).toEqual(
       before.debugHistory,
     );
     await command.handler(
-      'debug clear',
+      'log clear',
       ctx as unknown as ExtensionCommandContext,
     );
     expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
@@ -247,6 +242,7 @@ describe('index.ts (orchestrator)', () => {
             model: 'jev-1.13.0',
             timeoutMs: 750,
             confidenceThreshold: 0.65,
+            probabilityThreshold: 0.8,
             maxStateTokens: 3000,
             mode: 'advisory',
           },
@@ -286,7 +282,7 @@ describe('index.ts (orchestrator)', () => {
           ([name]) => name === 'router',
         )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1];
         await command.handler(
-          'debug on',
+          'log on',
           ctx as unknown as ExtensionCommandContext,
         );
         const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
@@ -307,10 +303,10 @@ describe('index.ts (orchestrator)', () => {
           /* Drain the actual provider callback. */
         }
         expect((await stream.result()).stopReason).toBe('stop');
-        const expectedSource = source === 'jev' ? 'baseline' : source;
+        // Omitted zero-mass options are accepted, so the Jev choice is acted on.
         expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
-          lastDecision: { reasonCode: expectedSource },
-          debugHistory: [{ reasonCode: expectedSource }],
+          lastDecision: { reasonCode: source },
+          debugHistory: [{ reasonCode: source }],
         });
         await notifyDiagnostics(ctx);
         const output = JSON.stringify([
@@ -658,6 +654,7 @@ describe('index.ts (orchestrator)', () => {
             model: 'jev-1.13.0',
             timeoutMs: 750,
             confidenceThreshold: 0.65,
+            probabilityThreshold: 0.8,
             maxStateTokens: 3000,
             mode: 'advisory',
           },

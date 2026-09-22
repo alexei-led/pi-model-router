@@ -1,7 +1,12 @@
-# Quality-first routing validation — 0.6.4
+# Quality-first routing validation (0.6.4)
+
+> Archived. Describes 0.6.4 behavior: flat one-string criteria and a
+> threshold-only acceptance policy, both replaced later. Current evidence:
+> [../research/jev-routing-policy.md](../research/jev-routing-policy.md).
 
 Date: 2026-09-21. Local extension in a real Pi/agterm session, not mocked generation.
-The earlier input comparison is in [JEV-VALIDATION.md](JEV-VALIDATION.md).
+The earlier input comparison is in
+[2026-09-21-jev-input-comparison.md](2026-09-21-jev-input-comparison.md).
 
 ## Setup
 
@@ -12,7 +17,7 @@ The earlier input comparison is in [JEV-VALIDATION.md](JEV-VALIDATION.md).
 - Read-only tools (`read`, `grep`, `find`, `ls`) in the `pi-plan-exec` checkout.
 - 24 sequential prompts in one session. Prompts and acceptable tier ranges were
   written before the run in
-  [`jev-quality-tasks.json`](../extensions/test/fixtures/jev-quality-tasks.json).
+  [`jev-quality-tasks.json`](../../extensions/test/fixtures/jev-quality-tasks.json).
 - Actual model/provider and completion were checked from assistant-message metadata;
   Jev outcomes and request identities came from persisted router state. Footer text
   was captured from agterm. Each task had exactly one distinct Jev request ID.

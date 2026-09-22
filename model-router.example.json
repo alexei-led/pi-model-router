@@ -8,6 +8,7 @@
     "model": "jev-1.13.0",
     "timeoutMs": 1500,
     "confidenceThreshold": 0.65,
+    "probabilityThreshold": 0.8,
     "maxStateTokens": 3000,
     "context": {
       "previousTurns": 2,
@@ -15,6 +16,7 @@
       "toolResults": "last-error",
       "maxToolTokens": 250
     },
+    "retry": { "maxAttempts": 2, "backoffMs": 400 },
     "mode": "advisory"
   },
   "classifierModel": "flash",

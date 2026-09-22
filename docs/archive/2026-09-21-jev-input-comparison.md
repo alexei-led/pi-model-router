@@ -1,4 +1,9 @@
-# Jev routing validation — 2026-09-21
+# Jev input comparison and routing fixes (0.6.3)
+
+> Archived. Describes the 0.6.3 investigation: five-message context window,
+> flat criteria and threshold-only acceptance, all replaced later. Current
+> context selection: [../research/jev-context-selection.md](../research/jev-context-selection.md);
+> current policy: [../research/jev-routing-policy.md](../research/jev-routing-policy.md).
 
 ## Findings
 

@@ -25,7 +25,12 @@ import {
   resolveContextWindow,
   resolveMaxTokens,
 } from './config';
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
+import {
+  DEFAULT_CLASSIFIER_TIMEOUT_MS,
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_TOKENS,
+  MAX_TURN_CACHE_ENTRIES,
+} from './constants';
 import { extractTextFromContent, hasImageAttachment } from './context';
 import { createJevCandidate, runJevDetailed } from './jev';
 import {
@@ -69,8 +74,10 @@ const createJevFlightKey = (
     model: config.model,
     timeoutMs: config.timeoutMs,
     confidenceThreshold: config.confidenceThreshold,
+    probabilityThreshold: config.probabilityThreshold,
     maxStateTokens: config.maxStateTokens,
     context: config.context,
+    retry: config.retry,
   });
 
 const waitForAbortable = async <T>(
@@ -369,7 +376,7 @@ export const registerRouterProvider = (
   const rememberContinuation = (record: ContinuationRecord) => {
     continuations.delete(record.turn);
     continuations.set(record.turn, record);
-    while (continuations.size > 16) {
+    while (continuations.size > MAX_TURN_CACHE_ENTRIES) {
       const oldest = continuations.keys().next().value;
       if (oldest === undefined) break;
       continuations.delete(oldest);
@@ -383,7 +390,7 @@ export const registerRouterProvider = (
   ) => {
     advisedTurns.delete(turn);
     advisedTurns.set(turn, { policy, config, decision });
-    while (advisedTurns.size > 16) {
+    while (advisedTurns.size > MAX_TURN_CACHE_ENTRIES) {
       const oldest = advisedTurns.keys().next().value;
       if (oldest === undefined) break;
       advisedTurns.delete(oldest);
@@ -591,6 +598,18 @@ export const registerRouterProvider = (
             );
             decision.isBudgetForced = baseline.isBudgetForced;
             decision.advisor = advisorConfigured ? 'bypassed' : 'none';
+            if (advisorConfigured)
+              decision.bypassReason = pinnedTier
+                ? 'pinned'
+                : isBudgetExceeded
+                  ? 'budget'
+                  : toolContinuation
+                    ? 'tool-continuation'
+                    : !user || !turn
+                      ? 'no-user-turn'
+                      : advisedTurns.has(turn)
+                        ? 'turn-advised'
+                        : undefined;
           }
 
           // Tool results never invoke advisors, even when their prior route cannot be reused.
@@ -606,13 +625,18 @@ export const registerRouterProvider = (
           ) {
             const started = performance.now();
             const routingDeadline =
-              started + (useJev && jev ? jev.timeoutMs : 10_000);
+              started +
+              (useJev && jev
+                ? jev.timeoutMs
+                : (state.currentConfig.classifierModel?.timeoutMs ??
+                  DEFAULT_CLASSIFIER_TIMEOUT_MS));
             const candidates = primaryRoutePairs(profile, pairs).map(
               createJevCandidate,
             );
             // A single primary bypasses advice, not a baseline's eligible fallback.
             if (candidates.length <= 1) {
               decision.advisor = 'bypassed';
+              decision.bypassReason = 'single-candidate';
               rememberAdvisedDecision(
                 turn,
                 decision,
@@ -629,6 +653,8 @@ export const registerRouterProvider = (
                   context,
                   candidates,
                   profile: profile.jev,
+                  baselineTier: selectBaselineRoute(model.id, profile, pairs)
+                    .pair.tier,
                   routingDeadline,
                 },
               );

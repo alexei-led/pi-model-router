@@ -9,5 +9,12 @@ export const DEFAULT_JEV_CONTEXT = {
   toolResults: 'last-error',
   maxToolTokens: 250,
 } as const;
+/** One retry of a documented transient status; the total budget stays `jev.timeoutMs`. */
+export const DEFAULT_JEV_RETRY = { maxAttempts: 2, backoffMs: 400 } as const;
+export const MAX_JEV_ATTEMPTS = 5;
+export const MAX_JEV_BACKOFF_MS = 60_000;
+export const DEFAULT_CLASSIFIER_TIMEOUT_MS = 10_000;
+/** Runtime-only per-turn caches: continuations and advised decisions. */
+export const MAX_TURN_CACHE_ENTRIES = 16;
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_MAX_TOKENS = 16_384;
