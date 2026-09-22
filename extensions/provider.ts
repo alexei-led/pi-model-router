@@ -26,11 +26,7 @@ import {
   resolveMaxTokens,
 } from './config';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
-import {
-  extractTextFromContent,
-  getBoundedRecentContext,
-  hasImageAttachment,
-} from './context';
+import { extractTextFromContent, hasImageAttachment } from './context';
 import { createJevCandidate, runJevDetailed } from './jev';
 import {
   availableRoutePairs,
@@ -73,7 +69,8 @@ const createJevFlightKey = (
     model: config.model,
     timeoutMs: config.timeoutMs,
     confidenceThreshold: config.confidenceThreshold,
-    maxStateChars: config.maxStateChars,
+    maxStateTokens: config.maxStateTokens,
+    context: config.context,
   });
 
 const waitForAbortable = async <T>(
@@ -623,17 +620,13 @@ export const registerRouterProvider = (
                 state.currentConfig,
               );
             } else if (useJev && jev) {
-              const taskSummary = getBoundedRecentContext(
-                context,
-                jev.maxStateChars,
-              );
               options?.signal?.throwIfAborted();
               const flight = runJevSingleFlight(
                 pendingJev,
                 createJevFlightKey(turn, model.id, candidates, jev, policy),
                 jev,
                 {
-                  taskSummary,
+                  context,
                   candidates,
                   profile: profile.jev,
                   routingDeadline,

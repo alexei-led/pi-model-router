@@ -90,8 +90,16 @@ export const formatAdvisorDetail = (
       parts.push(`budget=${metrics.timeoutMs}ms`);
     if (metrics.candidateCount !== undefined)
       parts.push(`candidates=${metrics.candidateCount}`);
-    if (metrics.contextChars !== undefined)
-      parts.push(`context=${metrics.contextChars} chars`);
+    if (metrics.context) {
+      const context = metrics.context;
+      parts.push(
+        `state≈${context.currentRequestTokens + context.historyTokens + context.toolTokens} tokens: ${context.currentRequestTokens} current + ${context.historyTokens} dialogue/${context.historyTurns} turns + ${context.toolTokens} tool/${context.toolResults} results; truncated=${context.truncatedBlocks}`,
+      );
+    }
+    if (metrics.estimatedInputTokens !== undefined)
+      parts.push(`request≈${metrics.estimatedInputTokens} tokens`);
+    if (metrics.actualInputTokens !== undefined)
+      parts.push(`Jev usage=${metrics.actualInputTokens} input tokens`);
     if (metrics.httpStatus !== undefined)
       parts.push(`HTTP ${metrics.httpStatus}`);
   } else if (decision.errorClass) {
@@ -144,6 +152,9 @@ export const formatAdvisorFooter = (
       break;
     case 'unavailable':
       summary = `: ${metrics.choice ? 'target' : 'advice'} unavailable → baseline`;
+      break;
+    case 'input-too-large':
+      summary = ': estimated request too large → baseline';
       break;
   }
   const latency =

@@ -76,12 +76,31 @@ with inherited Jev credentials. All profiles, including work, default to off.
 
 `jev.ts` uses built-in fetch for one TypeSafe System One Choice request with
 `Authorization: Bearer`, redirects disabled and injected transport/clock in tests.
-It sends at most four primary route choices, plus `uncertain`, and bounded recent
-text as `untrustedTaskSummary`. `context.ts` reserves space for the latest user
-request and shares the remaining `maxStateChars` budget (at most 12000) across up
-to five recent user/assistant/tool messages. It labels roles, truncates
-deterministically and performs no keyword scoring or summarizer call. Tiny budgets
-prioritize request text over labels. System prompts, raw config, credentials from
+It sends at most four primary route choices, plus `uncertain`. `JevRequest` carries
+Pi context internally; the adapter invokes `buildJevContext` after authorization
+and serializes only its allowlisted `currentRequest`, `recentDialogue` and
+`recentToolEvidence` fields. System/tool definitions never cross this boundary.
+Selection/serialization consume the same absolute advisory deadline as transport.
+
+`context.ts` prioritizes current text, then prior dialogue, then tool evidence.
+By default it selects two prior user turns with their last non-empty text replies
+(maximum 500 estimated dialogue tokens), and the last tool result of the immediately
+previous turn only if `isError: true` (maximum 250 estimated tokens). Intermediate
+narration and text-empty assistant messages do not consume dialogue slots. An
+older failure is not recovered after a successful or binary-only final result.
+User-only `jev.context` knobs can change these bounds or include/omit the last
+result. Dialogue is returned chronologically. Text exceeds neither its per-section
+ceiling nor the global `maxStateTokens` estimate (default 3000, maximum 24000).
+The preflight estimator weights ASCII characters, non-ASCII UTF-8 bytes and a 10%
+margin. Serialized requests add 200 measured overhead tokens and are rejected above
+28000 estimated tokens, leaving room below Jev's 32k state-plus-question limit.
+The server-reported `usage.input_tokens` and local estimate are retained as numeric
+diagnostics; no exact Jev tokenizer or count endpoint is published. Configuration
+uses estimated-token budgets only. JSON metadata is also bounded by at most 20
+prior turns. Head/tail excerpts have explicit truncation
+flags; no keyword scoring, failure-text parsing, summarizer or additional advisor
+call is used. The Pi-classifier
+compatibility path retains its existing role-labelled text window. System prompts, raw config, credentials from
 config, thinking, tool-call arguments and image/binary blocks are not extracted.
 Conversation text, including bounded tool output, is not redacted and may contain
 private data or secrets: profile opt-in is approval to send it externally. Short,
@@ -151,7 +170,9 @@ rejected. Continuations clear per-call advisor latency/error/classifier fields b
 retain the original nested Jev metrics, including request-start time, with an explicit
 reuse marker. Debug mode persists the last 50 decisions through the existing
 branch-safe state snapshots; no extra transcript message or external log is needed.
-Nested metrics are copied field-by-field on save/restore. A local UUID is generated
+Nested metrics are copied field-by-field on save/restore. Context metrics include
+only numeric current/history/tool sizes, included turns/results and truncation
+counts; selected text is never persisted as router diagnostics. A local UUID is generated
 only when an HTTP request is attempted; it is shared across waiters and route reuse.
 `/router debug stats` deduplicates these IDs within the retained 50-decision window,
 not across session lifetime. Entries without IDs are excluded. Debug-off stops

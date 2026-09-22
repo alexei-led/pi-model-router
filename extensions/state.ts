@@ -8,6 +8,7 @@ import {
   parseCanonicalModelRef,
 } from './config';
 import type {
+  JevContextMetrics,
   JevDiagnostics,
   PersistedStateInput,
   RouterLastProfileState,
@@ -144,12 +145,35 @@ export const isRouterPersistedState = (
   );
 };
 
+const snapshotContextMetrics = (
+  value: unknown,
+): JevContextMetrics | undefined => {
+  if (!isObjectRecord(value)) return undefined;
+  const result: JevContextMetrics = {
+    currentRequestTokens: 0,
+    historyTokens: 0,
+    toolTokens: 0,
+    historyTurns: 0,
+    toolResults: 0,
+    truncatedBlocks: 0,
+  };
+  for (const key of Object.keys(result) as (keyof JevContextMetrics)[]) {
+    const number = value[key];
+    if (!isFiniteNumber(number) || !Number.isSafeInteger(number) || number < 0)
+      return undefined;
+    result[key] = number;
+  }
+  return result;
+};
+
 const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
   if (!isObjectRecord(value)) return undefined;
   const outcome = JEV_OUTCOMES.find((entry) => entry === value.outcome);
   if (!outcome || !isFiniteNumber(value.latencyMs) || value.latencyMs < 0)
     return undefined;
   const result: JevDiagnostics = { outcome, latencyMs: value.latencyMs };
+  const context = snapshotContextMetrics(value.context);
+  if (context) result.context = context;
   if (
     typeof value.requestId === 'string' &&
     /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value.requestId)
@@ -176,7 +200,8 @@ const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
     'startedAt',
     'timeoutMs',
     'candidateCount',
-    'contextChars',
+    'estimatedInputTokens',
+    'actualInputTokens',
     'httpStatus',
   ] as const) {
     const number = value[key];

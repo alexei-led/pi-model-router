@@ -3,11 +3,18 @@ import { join } from 'node:path';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_JEV_CONTEXT,
+  DEFAULT_MAX_TOKENS,
+  MAX_JEV_CONTEXT_TURNS,
+  MAX_JEV_STATE_TOKENS,
+} from './constants';
 import type {
   ClassifierConfig,
   ConfigLoadResult,
   JevConfig,
+  JevContextConfig,
   ModelDefinition,
   ParsedConfigFile,
   RawRouterConfig,
@@ -135,9 +142,19 @@ export const mergeConfig = (
   const overrideModels = isObjectRecord(override.models) ? override.models : {};
   const mergedModels = { ...baseModels, ...overrideModels };
 
+  const mergedJev = mergeRawValue(base.jev, override.jev);
+  const jev = isObjectRecord(mergedJev)
+    ? {
+        ...mergedJev,
+        context: mergeRawValue(
+          isObjectRecord(base.jev) ? base.jev.context : undefined,
+          isObjectRecord(override.jev) ? override.jev.context : undefined,
+        ),
+      }
+    : mergedJev;
   return {
     ui: mergeRawValue(base.ui, override.ui),
-    jev: mergeRawValue(base.jev, override.jev),
+    jev,
     debug: override.debug ?? base.debug,
     classifierModel: override.classifierModel ?? base.classifierModel,
     phaseBias: override.phaseBias ?? base.phaseBias,
@@ -385,7 +402,7 @@ export const DEFAULT_JEV_CONFIG = {
   model: 'jev-1.13.0',
   timeoutMs: 1500,
   confidenceThreshold: 0.65,
-  maxStateChars: 12000,
+  maxStateTokens: 3000,
   mode: 'advisory',
 } as const;
 
@@ -405,6 +422,33 @@ export const isJevEndpoint = (value: unknown): value is string => {
   }
 };
 
+const normalizeJevContext = (raw: unknown): JevContextConfig | undefined => {
+  if (raw === undefined) return { ...DEFAULT_JEV_CONTEXT };
+  if (
+    !isObjectRecord(raw) ||
+    Object.keys(raw).some((key) => !Object.hasOwn(DEFAULT_JEV_CONTEXT, key))
+  )
+    return undefined;
+  const context = { ...DEFAULT_JEV_CONTEXT, ...raw };
+  if (
+    typeof context.previousTurns !== 'number' ||
+    !Number.isSafeInteger(context.previousTurns) ||
+    context.previousTurns < 0 ||
+    context.previousTurns > MAX_JEV_CONTEXT_TURNS ||
+    typeof context.maxHistoryTokens !== 'number' ||
+    !Number.isInteger(context.maxHistoryTokens) ||
+    context.maxHistoryTokens < 0 ||
+    context.maxHistoryTokens > MAX_JEV_STATE_TOKENS ||
+    typeof context.maxToolTokens !== 'number' ||
+    !Number.isInteger(context.maxToolTokens) ||
+    context.maxToolTokens < 0 ||
+    context.maxToolTokens > MAX_JEV_STATE_TOKENS ||
+    !['none', 'last', 'last-error'].includes(context.toolResults)
+  )
+    return undefined;
+  return context;
+};
+
 export const normalizeJevConfig = (
   raw: unknown,
   warnings: string[],
@@ -416,6 +460,8 @@ export const normalizeJevConfig = (
   };
   if (!isObjectRecord(raw)) return invalid();
   const value: Record<string, unknown> = { ...DEFAULT_JEV_CONFIG, ...raw };
+  const context = normalizeJevContext(value.context);
+  if (!context) return invalid();
   if (
     (value.enabled !== undefined && typeof value.enabled !== 'boolean') ||
     !isJevEndpoint(value.endpoint) ||
@@ -429,10 +475,10 @@ export const normalizeJevConfig = (
     !Number.isFinite(value.confidenceThreshold) ||
     value.confidenceThreshold < 0 ||
     value.confidenceThreshold > 1 ||
-    typeof value.maxStateChars !== 'number' ||
-    !Number.isInteger(value.maxStateChars) ||
-    value.maxStateChars < 1 ||
-    value.maxStateChars > 12000 ||
+    typeof value.maxStateTokens !== 'number' ||
+    !Number.isInteger(value.maxStateTokens) ||
+    value.maxStateTokens < 1 ||
+    value.maxStateTokens > MAX_JEV_STATE_TOKENS ||
     value.mode !== 'advisory' ||
     (value.apiKey !== undefined &&
       (typeof value.apiKey !== 'string' || /[\r\n]/.test(value.apiKey)))
@@ -449,7 +495,8 @@ export const normalizeJevConfig = (
     model: value.model,
     timeoutMs: value.timeoutMs,
     confidenceThreshold: value.confidenceThreshold,
-    maxStateChars: value.maxStateChars,
+    maxStateTokens: value.maxStateTokens,
+    context,
     mode: 'advisory',
   };
 };

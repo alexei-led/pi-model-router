@@ -22,6 +22,59 @@ import {
 } from './config';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
 
+describe('Jev context configuration', () => {
+  it('normalizes partial knobs and supports current-only input', () => {
+    const warnings: string[] = [];
+    const config = normalizeJevConfig(
+      {
+        enabled: true,
+        apiKey: 'synthetic',
+        context: { previousTurns: 0, toolResults: 'none' },
+      },
+      warnings,
+    );
+    expect(warnings).toEqual([]);
+    expect(config?.context).toEqual({
+      previousTurns: 0,
+      maxHistoryTokens: 500,
+      toolResults: 'none',
+      maxToolTokens: 250,
+    });
+  });
+  it.each([
+    null,
+    [],
+    { previousTurns: -1 },
+    { previousTurns: 21 },
+    { previousTurns: 1.5 },
+    { previousTurns: Infinity },
+    { maxHistoryTokens: -1 },
+    { maxHistoryTokens: 24001 },
+    { maxToolTokens: '250' },
+    { toolResults: 'all' },
+    { unknownSecret: 'PRIVATE_VALUE' },
+  ])('rejects malformed context with a value-free warning', (context) => {
+    const warnings: string[] = [];
+    expect(
+      normalizeJevConfig(
+        { enabled: true, apiKey: 'synthetic', context },
+        warnings,
+      ),
+    ).toBeUndefined();
+    expect(warnings).toEqual(['Ignored invalid Jev configuration.']);
+  });
+  it('merges nested knobs without mutating either source', () => {
+    const base = { jev: { context: { previousTurns: 3, maxToolTokens: 200 } } };
+    const override = { jev: { context: { toolResults: 'none' } } };
+    const before = JSON.stringify([base, override]);
+    expect(mergeConfig(base, override).jev).toEqual({
+      context: { previousTurns: 3, maxToolTokens: 200, toolResults: 'none' },
+    });
+    mergeConfig(base, {});
+    expect(JSON.stringify([base, override])).toBe(before);
+  });
+});
+
 describe('status line configuration', () => {
   it.each([undefined, {}, { statusLine: 'compact' }])(
     'defaults to compact for %j',
@@ -783,7 +836,13 @@ describe('config.ts Jev user-config provenance', () => {
       model: 'jev-1.13.0',
       timeoutMs: 1500,
       confidenceThreshold: 0.65,
-      maxStateChars: 12000,
+      maxStateTokens: 3000,
+      context: {
+        previousTurns: 2,
+        maxHistoryTokens: 500,
+        toolResults: 'last-error',
+        maxToolTokens: 250,
+      },
       mode: 'advisory',
     });
     expect(config.profiles.personal?.jev?.enabled).toBe(true);
@@ -794,6 +853,9 @@ describe('config.ts Jev user-config provenance', () => {
     { enabled: false },
     { enabled: true },
     { apiKey: 'synthetic-project-secret' },
+    {
+      context: { previousTurns: 20, toolResults: 'last', maxToolTokens: 12000 },
+    },
     { endpoint: 'https://attacker.invalid/collect' },
     { model: 'attacker-model' },
     {
@@ -893,9 +955,9 @@ describe('config.ts Jev user-config provenance', () => {
     { confidenceThreshold: -1 },
     { confidenceThreshold: 2 },
     { confidenceThreshold: Number.NaN },
-    { maxStateChars: 0 },
-    { maxStateChars: 12001 },
-    { maxStateChars: 1.5 },
+    { maxStateTokens: 0 },
+    { maxStateTokens: 24001 },
+    { maxStateTokens: 1.5 },
     { mode: 'authoritative' },
   ])('rejects malformed Jev config without echoing fields: %j', (value) => {
     const warnings: string[] = [];

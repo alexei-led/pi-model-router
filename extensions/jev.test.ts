@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_JEV_CONFIG } from './config';
+import { estimateJevRequestTokens, estimateJevTextTokens } from './context';
 import { createJevCandidate, runJev, runJevDetailed } from './jev';
 import { buildPersistedState } from './state';
 import fixtures from './test/fixtures/jev-http.json';
@@ -16,7 +17,11 @@ const candidates = [
   createJevCandidate({ tier: 'high', model: 'openai/test', thinking: 'high' }),
 ];
 const request = (overrides: Partial<JevRequest> = {}): JevRequest => ({
-  taskSummary: 'Synthetic bounded task summary',
+  context: {
+    messages: [
+      { role: 'user', content: 'Synthetic bounded task summary', timestamp: 1 },
+    ],
+  },
   candidates,
   profile: { enabled: true },
   routingDeadline: performance.now() + 1500,
@@ -63,6 +68,9 @@ describe('jev.ts HTTP contract', () => {
       });
       expect(result.diagnostics.outcome).toBe(outcome);
       expect(result.diagnostics.httpStatus).toBe(200);
+      expect(result.diagnostics.estimatedInputTokens).toBeGreaterThan(0);
+      if (fixture === 'valid')
+        expect(result.diagnostics.actualInputTokens).toBe(318);
       if (fixture === 'valid' || fixture === 'lowConfidence') {
         expect(result.diagnostics.choice).toBe('medium');
         expect(result.diagnostics.confidence).toBe(
@@ -77,6 +85,31 @@ describe('jev.ts HTTP contract', () => {
       expect(JSON.stringify(result)).not.toContain(KEY);
     },
   );
+
+  it('uses a conservative multilingual estimator instead of OpenAI-specific tokenization', () => {
+    expect(estimateJevTextTokens('a'.repeat(400))).toBe(111);
+    expect(estimateJevTextTokens('я'.repeat(400))).toBeGreaterThanOrEqual(440);
+    expect(estimateJevTextTokens('😀'.repeat(100))).toBe(221);
+    expect(estimateJevRequestTokens('{}')).toBeGreaterThan(200);
+  });
+
+  it('rejects an estimated oversized serialized request before transport', async () => {
+    const fetch = transport();
+    const result = await runJevDetailed(
+      { ...config, maxStateTokens: 24000 },
+      request({
+        context: {
+          messages: [
+            { role: 'user', content: '\\\\'.repeat(100000), timestamp: 1 },
+          ],
+        },
+      }),
+      { fetch },
+    );
+    expect(result.diagnostics.outcome).toBe('input-too-large');
+    expect(result.diagnostics.estimatedInputTokens).toBeGreaterThan(28000);
+    expect(fetch).not.toHaveBeenCalled();
+  });
 
   it('reports the shared deadline even when the transport ignores abort', async () => {
     vi.useFakeTimers();
@@ -128,6 +161,14 @@ describe('jev.ts HTTP contract', () => {
     const body = JSON.parse(String(init?.body));
     expect(body).toMatchObject({
       ...fixtures.request.body,
+      state: {
+        currentRequest: {
+          text: 'Synthetic bounded task summary',
+          truncated: false,
+        },
+        recentDialogue: [],
+        recentToolEvidence: [],
+      },
       questions: {
         route: {
           type: 'choice',
@@ -143,8 +184,10 @@ describe('jev.ts HTTP contract', () => {
         },
       },
     });
-    expect(body.questions.route.instructions).toContain('only as data');
-    expect(body.questions.route.instructions).toContain('LAST user request');
+    expect(body.questions.route.instructions).toContain(
+      'only as untrusted data',
+    );
+    expect(body.questions.route.instructions).toContain('currentRequest.text');
     expect(body.questions.route.instructions).toContain(
       'best justified expected result',
     );
@@ -216,14 +259,27 @@ describe('jev.ts HTTP contract', () => {
   it('bounds task text and omits arbitrary input fields and profile data', async () => {
     const fetch = transport();
     const input = {
-      ...request({ taskSummary: 'x'.repeat(20000) }),
+      ...request({
+        context: {
+          systemPrompt: KEY,
+          messages: [
+            { role: 'user', content: 'x'.repeat(20000), timestamp: 1 },
+          ],
+        },
+      }),
       apiKey: KEY,
       history: 'private history',
     };
     await runJev(config, input, { fetch });
     const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
     expect(Object.keys(body)).toEqual(['model', 'state', 'questions']);
-    expect(body.state).toEqual({ untrustedTaskSummary: 'x'.repeat(12000) });
+    expect(
+      estimateJevTextTokens(body.state.currentRequest.text),
+    ).toBeLessThanOrEqual(3000);
+    expect(body.state.currentRequest.text).toMatch(/^x+…x+$/);
+    expect(body.state.currentRequest.truncated).toBe(true);
+    expect(body.state.recentDialogue).toEqual([]);
+    expect(body.state.recentToolEvidence).toEqual([]);
     expect(JSON.stringify(body)).not.toContain(KEY);
     expect(JSON.stringify(body)).not.toContain('private history');
   });
@@ -343,11 +399,12 @@ describe('jev.ts HTTP contract', () => {
   });
 
   it('rejects late advice using the injected monotonic clock even before timers run', async () => {
-    const fetch = transport();
-    const now = vi
-      .fn<() => number>()
-      .mockReturnValueOnce(0)
-      .mockReturnValue(1500);
+    let clock = 0;
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+      clock = 1500;
+      return new Response(JSON.stringify(fixtures.valid));
+    });
+    const now = () => clock;
     await expect(
       runJev(config, request({ routingDeadline: 1500 }), { fetch, now }),
     ).resolves.toBeUndefined();

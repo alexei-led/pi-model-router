@@ -115,7 +115,6 @@ describe('ui.ts', () => {
         probability: 0.48,
         threshold: 0.65,
         timeoutMs: 5000,
-        contextChars: 113,
       },
     };
     const compact = formatAdvisorFooter(routed);
@@ -133,7 +132,7 @@ describe('ui.ts', () => {
     const widget = JSON.stringify(vi.mocked(ctx.ui.setWidget).mock.calls);
     expect(widget).toContain('confidence=35.0%');
     expect(widget).toContain('budget=5000ms');
-    expect(widget).toContain('context=113 chars');
+    expect(widget).not.toContain('private task text');
   });
 
   it('labels uncertainty once in compact mode', () => {
@@ -172,6 +171,7 @@ describe('ui.ts', () => {
     ['invalid-response', ': invalid response → baseline'],
     ['http-error', ': HTTP 429 → baseline'],
     ['cancelled', ': cancelled'],
+    ['input-too-large', ': estimated request too large → baseline'],
   ] as const)(
     'explains %s without exposing raw error data',
     (outcome, expected) => {
@@ -227,6 +227,32 @@ describe('ui.ts', () => {
     expect(stats).not.toContain('00000000');
     expect(formatJevStats([]).join('\n')).toContain('Median Jev latency: n/a');
     expect(formatJevStats([]).join('\n')).not.toContain('NaN');
+  });
+
+  it('shows context composition without persisting or rendering input text', () => {
+    const detail = formatAdvisorDetail({
+      ...decision,
+      advisor: 'jev',
+      jev: {
+        outcome: 'selected',
+        latencyMs: 100,
+        estimatedInputTokens: 700,
+        actualInputTokens: 640,
+        context: {
+          currentRequestTokens: 20,
+          historyTokens: 225,
+          toolTokens: 50,
+          historyTurns: 2,
+          toolResults: 1,
+          truncatedBlocks: 1,
+        },
+      },
+    });
+    expect(detail).toContain(
+      'state≈295 tokens: 20 current + 225 dialogue/2 turns + 50 tool/1 results; truncated=1',
+    );
+    expect(detail).toContain('request≈700 tokens');
+    expect(detail).toContain('Jev usage=640 input tokens');
   });
 
   it('formats sorted pins and thinking overrides', () => {

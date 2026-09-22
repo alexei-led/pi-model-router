@@ -127,7 +127,7 @@ describe('index.ts (orchestrator)', () => {
         model: 'jev-1.13.0',
         timeoutMs: 750,
         confidenceThreshold: 0.65,
-        maxStateChars: 12000,
+        maxStateTokens: 3000,
         mode: 'advisory',
       },
     };
@@ -247,7 +247,7 @@ describe('index.ts (orchestrator)', () => {
             model: 'jev-1.13.0',
             timeoutMs: 750,
             confidenceThreshold: 0.65,
-            maxStateChars: 12000,
+            maxStateTokens: 3000,
             mode: 'advisory',
           },
         };
@@ -658,7 +658,7 @@ describe('index.ts (orchestrator)', () => {
             model: 'jev-1.13.0',
             timeoutMs: 750,
             confidenceThreshold: 0.65,
-            maxStateChars: 12000,
+            maxStateTokens: 3000,
             mode: 'advisory',
           },
         };

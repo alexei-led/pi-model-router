@@ -19,7 +19,7 @@ import {
   model,
   required,
 } from './test/fixtures';
-import type { JevConfig } from './types';
+import type { JevConfig, JevContextState } from './types';
 
 type State = Parameters<typeof registerRouterProvider>[1];
 type MutableState = { -readonly [K in keyof State]: State[K] };
@@ -563,7 +563,7 @@ const jevConfig: JevConfig = {
   model: 'jev-1.13.0',
   timeoutMs: 750,
   confidenceThreshold: 0.65,
-  maxStateChars: 12000,
+  maxStateTokens: 3000,
   mode: 'advisory',
 };
 const enableAdvisors = (s: ReturnType<typeof setup>) => {
@@ -573,7 +573,7 @@ const enableAdvisors = (s: ReturnType<typeof setup>) => {
   delete s.state.pinnedTierByProfile.balanced;
 };
 type ChoiceRequest = {
-  state: { untrustedTaskSummary: string };
+  state: JevContextState;
   questions: { route: { criteria: Record<string, string> } };
 };
 const choiceResponse = (init: RequestInit | undefined, tier = 'medium') => {
@@ -844,7 +844,13 @@ describe('Jev provider integration', () => {
     async (text) => {
       const s = setup();
       enableAdvisors(s);
-      required(s.state.currentConfig.jev).maxStateChars = 300;
+      required(s.state.currentConfig.jev).maxStateTokens = 75;
+      required(s.state.currentConfig.jev).context = {
+        previousTurns: 2,
+        maxHistoryTokens: 50,
+        toolResults: 'last',
+        maxToolTokens: 25,
+      };
       const fetch = mockChoice();
       const context = toolContext(userContext('前の依頼: improve the parser'));
       context.systemPrompt = 'PRIVATE_SYSTEM';
@@ -853,12 +859,17 @@ describe('Jev provider integration', () => {
       const body = JSON.parse(
         String(fetch.mock.calls[0]?.[1]?.body),
       ) as ChoiceRequest;
-      expect(body.state.untrustedTaskSummary).toContain(`user:\n${text}`);
-      expect(body.state.untrustedTaskSummary).toContain('user:\n前の依頼');
-      expect(body.state.untrustedTaskSummary).toContain(
-        'tool:\nuntrusted tool text',
+      expect(body.state.currentRequest.text).toBe(text);
+      expect(body.state.recentDialogue[0]?.text).toContain('前の依頼');
+      expect(body.state.recentToolEvidence[0]?.text).toBe(
+        'untrusted tool text',
       );
-      expect(body.state.untrustedTaskSummary.length).toBeLessThanOrEqual(300);
+      const metrics = required(s.state.lastDecision?.jev?.context);
+      expect(
+        metrics.currentRequestTokens +
+          metrics.historyTokens +
+          metrics.toolTokens,
+      ).toBeLessThanOrEqual(75);
       expect(JSON.stringify(body)).not.toContain('PRIVATE_SYSTEM');
       expect(JSON.stringify(body)).not.toContain(jevConfig.apiKey);
     },

@@ -114,7 +114,17 @@ describe('state.ts', () => {
         threshold: 0.65,
         timeoutMs: 5000,
         candidateCount: 4,
-        contextChars: 200,
+        estimatedInputTokens: 700,
+        actualInputTokens: 640,
+        context: {
+          currentRequestTokens: 3,
+          historyTokens: 25,
+          toolTokens: 23,
+          historyTurns: 2,
+          toolResults: 1,
+          truncatedBlocks: 1,
+          raw: 'secret-history',
+        },
         httpStatus: 200,
         explanation: 'secret-task',
         apiKey: 'secret-key',
@@ -130,6 +140,16 @@ describe('state.ts', () => {
         choice: 'high',
         confidence: 0.35,
         probability: 0.48,
+        estimatedInputTokens: 700,
+        actualInputTokens: 640,
+        context: {
+          currentRequestTokens: 3,
+          historyTokens: 25,
+          toolTokens: 23,
+          historyTurns: 2,
+          toolResults: 1,
+          truncatedBlocks: 1,
+        },
       },
     });
     expect(JSON.stringify(copy)).not.toContain('secret');
@@ -141,12 +161,14 @@ describe('state.ts', () => {
         requestId: 'secret-key',
         confidence: 2,
         choice: 'remote-text',
+        context: { currentRequestTokens: -1 },
       },
       reuse: 'remote-text',
     } as unknown as RoutingDecision;
     const sanitized = snapshotDecision(invalid);
     expect(sanitized.jev?.model).toBeUndefined();
     expect(sanitized.jev?.requestId).toBeUndefined();
+    expect(sanitized.jev?.context).toBeUndefined();
     expect(sanitized.jev?.confidence).toBeUndefined();
     expect(sanitized.jev?.choice).toBeUndefined();
     expect(sanitized.reuse).toBeUndefined();

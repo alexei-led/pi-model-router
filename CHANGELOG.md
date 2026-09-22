@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.5] - 2026-09-22
+
+- The router now sends structured Jev state for the current request, recent dialogue, and optional tool evidence.
+- Long excerpts keep their beginning and end. The router does not create a summary.
+- The configuration now uses estimated-token budgets only. Character-budget keys are not accepted.
+- The defaults select two prior turns, 500 dialogue tokens, and 250 tokens from the last native-error result.
+- Empty tool-call messages do not consume dialogue slots. A successful result prevents reuse of an older error.
+- A conservative multilingual estimate replaces character limits. Debug output compares local estimates with Jev `usage.input_tokens`.
+- The router rejects a request above 28000 estimated tokens. This value is below Jev's 32k state-and-question limit.
+- The generation context and the Pi classifier are unchanged.
+- All 528 tests pass. The validation report includes live turns, controlled replays, multilingual calibration, and known limits.
+
 ## [0.6.4] - 2026-09-21
 
 - Prefer quality-first Jev advice: use frontier reasoning when it can materially improve correctness or reduce rework, not only when weaker models are incapable. Keep straightforward tasks on micro/low; confidence thresholds and deterministic safeguards are unchanged.

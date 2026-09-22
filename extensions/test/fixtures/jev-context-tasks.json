@@ -1,0 +1,43 @@
+[
+  {
+    "id": "arithmetic",
+    "tiers": ["micro"],
+    "prompt": "Reply only with 10 + 2. No tools."
+  },
+  {
+    "id": "design",
+    "tiers": ["high"],
+    "prompt": "Propose exactly two options to make cancellation and task resume safe against a stale worker committing late. First: lease checking. Second: storage-enforced fencing. Explain the key tradeoff in under 60 words. No tools."
+  },
+  {
+    "id": "followup-ru",
+    "tiers": ["high"],
+    "prompt": "Оцени второй вариант: какое чередование операций нарушит его корректность и как это предотвратить? До 60 слов, без инструментов."
+  },
+  {
+    "id": "long-tail",
+    "tiers": ["micro"],
+    "paddingRepeats": 300,
+    "prompt": "The preceding reference block is unrelated. The current task is only to calculate 2 + 2. Reply only with the number. No tools."
+  },
+  {
+    "id": "tool-error",
+    "tiers": ["micro", "low"],
+    "prompt": "Read src/router-context-probe-does-not-exist.ts once and report the read error in one sentence. This is an intentional missing-file probe; do not search or edit anything."
+  },
+  {
+    "id": "error-followup-ru",
+    "tiers": ["micro", "low"],
+    "prompt": "Что означает эта ошибка и что проверить первым? Одно предложение, без инструментов."
+  },
+  {
+    "id": "tool-heavy",
+    "tiers": ["micro", "low"],
+    "prompt": "Read the first 180 lines of README.md and all of package.json. Give the package name and one documented feature in under 35 words. Read-only; use at most two tools."
+  },
+  {
+    "id": "distant-followup",
+    "tiers": ["high"],
+    "prompt": "Вернёмся к тем двум вариантам. Проверь безопасность второго при падении между проверкой и записью. До 60 слов, без инструментов."
+  }
+]

@@ -202,7 +202,13 @@ profile opt-ins, are ignored with a warning, before merging user credentials.
     "model": "jev-1.13.0",
     "timeoutMs": 1500,
     "confidenceThreshold": 0.65,
-    "maxStateChars": 12000,
+    "maxStateTokens": 3000,
+    "context": {
+      "previousTurns": 2,
+      "maxHistoryTokens": 500,
+      "toolResults": "last-error",
+      "maxToolTokens": 250
+    },
     "mode": "advisory"
   },
   "profiles": {
@@ -224,7 +230,7 @@ be a positive finite number within Node's timer range (at most 2147483647 ms).
 There is no product-level cap: 4000 or 5000 ms are valid if you prefer waiting
 longer before falling back. It sets the total Jev advisory budget, including
 request and response-body time; there is no separate 750 ms cap. Confidence must
-be 0–1, and the context limit must be 1–12000 characters. The separate classifier-only
+be 0–1. `maxStateTokens` is an estimated preflight budget from 1–24000. The separate classifier-only
 path keeps a 10-second bound. Neither path retries or starts generation after
 caller cancellation.
 
@@ -235,11 +241,14 @@ does not lower the confidence threshold or guarantee a different route. After
 upgrading, start a new Pi session; use `/router thinking auto` to clear any
 unwanted effort override in an existing session.
 
-**External data:** Jev receives bounded, role-labelled recent user/assistant/tool
-text, prioritizing the latest user request within `maxStateChars`, plus candidate
-tier/model/thinking identifiers. Truncation is deterministic, with no keyword
-scoring or summarizer call. System prompts, raw config, credentials from config,
-thinking blocks, tool-call arguments and image/binary blocks are not extracted.
+**External data:** Jev receives bounded text in three named JSON fields:
+`currentRequest`, `recentDialogue` and `recentToolEvidence`, plus candidate
+tier/model/thinking identifiers. The default includes up to two prior user turns
+with their last text replies, and at most the last tool result of the immediately
+previous turn **if Pi marks that result as an error**. Selection and head/tail
+truncation are deterministic, with no keyword scoring or summarizer call. System
+prompts, raw config, credentials from config, thinking blocks, tool-call arguments
+and image/binary blocks are not extracted.
 This is not a redaction service: text itself may contain secrets or private data,
 including tool output. Approve this external-data handling before enabling a
 profile, especially work. Short replies, other languages and imperfect sentences
@@ -263,6 +272,65 @@ baseline. Cancelling one waiter does not cancel another; the transport is aborte
 when no waiters remain. Each new user turn can choose a different backend and
 thinking level. Tool continuations keep their validated route. The logical
 `router/<profile>` stays selected throughout; this is not conversation-wide pinning.
+
+### Context selection and tuning
+
+Configure `jev.context` only in user config. Project Jev settings remain ignored;
+profile privacy opt-in is still required. Partial context settings inherit defaults.
+Invalid values or unknown context keys reject the Jev config with a value-free warning.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `maxStateTokens` | `3000` | Estimated selected-state token budget, including excerpt markers. Range 1–24000. |
+| `context.previousTurns` | `2` | Previous user turns, each with its last non-empty assistant text reply. Integer 0–20; not transport-message count. |
+| `context.maxHistoryTokens` | `500` | Shared estimated-token ceiling for prior dialogue, integer 0–24000. |
+| `context.toolResults` | `"last-error"` | `"none"`, `"last"` or `"last-error"`. The latter includes the last result only when its native `isError` flag is true. |
+| `context.maxToolTokens` | `250` | Estimated-token ceiling for that one tool result, integer 0–24000. |
+
+Priority is current request → recent dialogue → tool evidence. Individual ceilings
+never expand the total estimated-token budget. The full current request wins when
+it fits; otherwise its beginning and end are kept. Prior turns also use head/tail
+excerpts when needed, with `truncated: true`. Unused space need not be filled. The
+20-turn cap also bounds JSON metadata overhead.
+
+TypeSafe publishes Jev's post-response `usage.input_tokens`, but no tokenizer or
+preflight count API. OpenAI tokenizers are not compatible substitutes: in a small
+EN/RU/code/emoji calibration, `cl100k`/`o200k` underestimated actual Jev requests by
+26–49%. The router therefore uses a documented conservative estimate: ASCII/4,
+non-ASCII UTF-8 bytes/2, then a 10% margin. The serialized request adds 200 tokens
+of measured envelope headroom. A 28000 estimated-request safety gate leaves room
+below Jev's stricter 32k `state + longest question` limit; its 64k whole-request
+limit is not binding for this single Choice question. See TypeSafe's
+[model limits](https://docs.typesafe.ai/models) and
+[long-context guidance](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
+
+Only the last tool result of the immediately previous user turn is eligible, even
+when more dialogue turns are selected. `last-error` does not parse stdout for words
+such as `ERROR`, search backwards for an old failure, or resurrect a failure after
+a later successful result. A tool can report a meaningful failure as ordinary text
+with `isError: false`; choose `last` when that distinction matters. Tool arguments
+are always excluded. Empty/thinking/tool-call-only assistant messages cannot consume
+dialogue slots. Older intermediate assistant narration is not selected.
+
+Suggested overrides (merge into `jev.context`):
+
+- **Independent tasks:** `{"previousTurns": 0, "toolResults": "none"}`.
+- **Dialogue only:** `{"previousTurns": 2, "toolResults": "none"}`.
+- **Tool-heavy diagnosis:** `{"toolResults": "last", "maxToolTokens": 500}`.
+- **Longer follow-ups:** `{"previousTurns": 4, "maxHistoryTokens": 1000}`.
+
+The default is a conservative data-selection compromise from live experiments,
+not a guarantee of higher confidence. Larger windows did not consistently help;
+the most useful clear improvement was retaining a request at the end of long text.
+Some short/ambiguous follow-ups still use the configured baseline. See
+[context experiments](docs/JEV-CONTEXT-VALIDATION.md) for results and limitations.
+
+`/router status` shows effective settings. Widget/debug show estimated current/
+history/tool tokens, included turns/results, truncated blocks, the estimated full
+request and Jev's actual post-response input usage. Character counts may remain in
+persisted diagnostics for compatibility, but are not configuration budgets. No
+selected text is added to these metrics. This affects **Jev only**: generation still receives
+Pi's normal context. The separate Pi-classifier compatibility path is unchanged.
 
 ### Quality-first fallback
 
@@ -304,7 +372,7 @@ never edits user configuration or privacy opt-ins automatically.
   `🧭 Jev high c35% <65% → baseline · 764ms · p48% @18:34:49`.
   Use this on wide terminals; long model/profile names can truncate a footer.
 - **Widget / status:** `/router widget on` or `/router status` shows full metrics,
-  including the Jev model label, HTTP status, candidate count and context characters.
+  including the Jev model label, HTTP status, candidate count, estimated context/request tokens and actual server input usage.
 - **History:** `/router debug on`, then `/router debug show`. The last 50 decisions
   are saved in branch-safe `router-state` session entries and restored on resume.
   Debug off stops collecting history; the latest decision still persists.

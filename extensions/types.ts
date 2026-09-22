@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { Context } from '@earendil-works/pi-ai';
 
 // Descending routing complexity; all tier iteration and ranking derives here.
 export const ROUTER_TIERS = ['high', 'medium', 'low', 'micro'] as const;
@@ -40,6 +41,30 @@ export interface RoutedTierConfig {
   resolvedThinkingLevels?: ThinkingLevel[] | undefined;
 }
 
+export interface JevContextConfig {
+  previousTurns: number;
+  maxHistoryTokens: number;
+  toolResults: 'none' | 'last' | 'last-error';
+  maxToolTokens: number;
+}
+export interface JevTextExcerpt {
+  text: string;
+  truncated: boolean;
+}
+export interface JevContextState {
+  currentRequest: JevTextExcerpt;
+  recentDialogue: (JevTextExcerpt & { role: 'user' | 'assistant' })[];
+  recentToolEvidence: (JevTextExcerpt & { isError: boolean })[];
+}
+export interface JevContextMetrics {
+  currentRequestTokens: number;
+  historyTokens: number;
+  toolTokens: number;
+  historyTurns: number;
+  toolResults: number;
+  truncatedBlocks: number;
+}
+
 export interface JevConfig {
   enabled: boolean;
   apiKey: string;
@@ -47,7 +72,8 @@ export interface JevConfig {
   model: string;
   timeoutMs: number;
   confidenceThreshold: number;
-  maxStateChars: number;
+  maxStateTokens: number;
+  context?: JevContextConfig | undefined;
   mode: 'advisory';
 }
 
@@ -104,7 +130,7 @@ export interface JevDependencies {
 }
 
 export interface JevRequest {
-  taskSummary: string;
+  context: Context;
   candidates: readonly JevRouteCandidate[];
   profile: JevProfileConfig | undefined;
   /** Absolute monotonic deadline supplied by the routing orchestrator. */
@@ -122,9 +148,11 @@ export const JEV_OUTCOMES = [
   'deadline',
   'cancelled',
   'unavailable',
+  'input-too-large',
 ] as const;
 export type JevOutcome = (typeof JEV_OUTCOMES)[number];
 export interface JevDiagnostics {
+  context?: JevContextMetrics | undefined;
   /** Locally generated per HTTP request, shared by reusers; never supplied by Jev. */
   requestId?: string | undefined;
   outcome: JevOutcome;
@@ -138,7 +166,8 @@ export interface JevDiagnostics {
   threshold?: number | undefined;
   timeoutMs?: number | undefined;
   candidateCount?: number | undefined;
-  contextChars?: number | undefined;
+  estimatedInputTokens?: number | undefined;
+  actualInputTokens?: number | undefined;
   httpStatus?: number | undefined;
 }
 export interface JevResult {

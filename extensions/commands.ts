@@ -15,6 +15,7 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
+import { DEFAULT_JEV_CONTEXT } from './constants';
 import { preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
@@ -170,6 +171,8 @@ export const registerCommands = (
       return;
     }
     const names = profileNames(state.currentConfig).join(', ');
+    const jev = state.currentConfig.jev;
+    const input = jev?.context ?? DEFAULT_JEV_CONTEXT;
     const lines = [
       'Model Router Status:',
       `Router enabled: ${state.routerEnabled ? 'yes' : 'off'}`,
@@ -179,6 +182,9 @@ export const registerCommands = (
       `Thinking overrides: ${formatThinkingSummary(state.thinkingByProfile)}`,
       `Widget: ${state.widgetEnabled ? 'on' : 'off'}`,
       `Status line: ${state.currentConfig.ui?.statusLine ?? 'compact'}`,
+      jev
+        ? `Jev context: ${input.previousTurns} prior turns; history≈${input.maxHistoryTokens} tokens; tools=${input.toolResults}/≈${input.maxToolTokens} tokens; state≈${jev.maxStateTokens} tokens`
+        : 'Jev context: not configured',
       `Jev: ${state.currentConfig.jev?.enabled ? 'enabled' : 'disabled'} · profile opt-in: ${state.selectedProfile && state.currentConfig.profiles[state.selectedProfile]?.jev?.enabled ? 'yes' : 'no'} · timeout: ${state.currentConfig.jev?.timeoutMs ?? 1500}ms`,
       'Jev confidence measures classification certainty, not model success.',
       `Session cost: $${state.accumulatedCost.toFixed(4)}` +
