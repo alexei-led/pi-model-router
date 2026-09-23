@@ -10,7 +10,8 @@ import {
   saveLastRouterProfile,
   snapshotDecision,
 } from './state';
-import type { RoutingDecision } from './types';
+import { required } from './test/fixtures';
+import type { GenerationDiagnostics, RoutingDecision } from './types';
 
 const decision: RoutingDecision = {
   profile: 'p',
@@ -186,6 +187,66 @@ describe('state.ts', () => {
     expect(sanitized.jev?.selectionBasis).toBeUndefined();
     expect(sanitized.jev?.routeProbability).toBeUndefined();
     expect(sanitized.reuse).toBeUndefined();
+  });
+
+  it('persists only allowlisted generation metrics and rejects malformed estimates', () => {
+    const generation: GenerationDiagnostics = {
+      transition: 'model-switch',
+      contextTruncated: false,
+      attempts: 2,
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 0,
+      reportedCostUsd: 0.01,
+      shadow: {
+        previousModel: 'test/old',
+        stayAllReadUsd: 0.1,
+        stayAllNewUsd: 1,
+        switchAllReadUsd: 0.05,
+        switchAllNewUsd: 0.5,
+      },
+    };
+    const tainted = {
+      ...generation,
+      sessionId: 'secret-session',
+      apiKey: 'secret-key',
+      shadow: { ...required(generation.shadow), explanation: 'secret-prompt' },
+    };
+    const copy = snapshotDecision({ ...decision, generation: tainted });
+    expect(copy.generation).toEqual(generation);
+    expect(JSON.stringify(copy)).not.toContain('secret');
+    generation.inputTokens = 200;
+    expect(copy.generation?.inputTokens).toBe(100);
+    for (const invalid of [Number.NaN, -1, Number.POSITIVE_INFINITY, 0.5]) {
+      expect(
+        snapshotDecision({
+          ...decision,
+          generation: { ...generation, inputTokens: invalid },
+        }).generation,
+      ).toBeUndefined();
+      const malformed = {
+        ...generation,
+        shadow: { ...generation.shadow, stayAllReadUsd: invalid },
+      } as GenerationDiagnostics;
+      if (invalid !== 0.5)
+        expect(
+          snapshotDecision({ ...decision, generation: malformed }).generation
+            ?.shadow,
+        ).toBeUndefined();
+    }
+    expect(
+      snapshotDecision({
+        ...decision,
+        generation: { ...generation, contextTruncated: true },
+      }).generation?.shadow,
+    ).toBeUndefined();
+    expect(
+      snapshotDecision({
+        ...decision,
+        generation: { ...generation, transition: 'same-model' },
+      }).generation?.shadow,
+    ).toBeUndefined();
   });
 
   it('does not copy incidental or secret decision fields', () => {

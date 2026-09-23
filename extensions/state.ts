@@ -8,6 +8,8 @@ import {
   parseCanonicalModelRef,
 } from './config';
 import type {
+  CacheCostShadow,
+  GenerationDiagnostics,
   JevContextMetrics,
   JevDiagnostics,
   PersistedStateInput,
@@ -17,6 +19,7 @@ import type {
   RoutingDecision,
 } from './types';
 import {
+  GENERATION_TRANSITIONS,
   isAdvisorOutcome,
   isBypassReason,
   isRoutingReasonCode,
@@ -235,6 +238,68 @@ const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
   return result;
 };
 
+const snapshotGeneration = (
+  value: unknown,
+): GenerationDiagnostics | undefined => {
+  if (!isObjectRecord(value)) return undefined;
+  const transition = GENERATION_TRANSITIONS.find(
+    (entry) => entry === value.transition,
+  );
+  if (!transition || typeof value.contextTruncated !== 'boolean')
+    return undefined;
+  const result: GenerationDiagnostics = {
+    transition,
+    contextTruncated: value.contextTruncated,
+    attempts: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  for (const key of [
+    'attempts',
+    'inputTokens',
+    'outputTokens',
+    'cacheReadTokens',
+    'cacheWriteTokens',
+  ] as const) {
+    const number = value[key];
+    if (!isFiniteNumber(number) || !Number.isSafeInteger(number) || number < 0)
+      return undefined;
+    result[key] = number;
+  }
+  if (result.attempts === 0) return undefined;
+  if (isFiniteNumber(value.reportedCostUsd) && value.reportedCostUsd >= 0)
+    result.reportedCostUsd = value.reportedCostUsd;
+  const shadow = value.shadow;
+  if (
+    isObjectRecord(shadow) &&
+    typeof shadow.previousModel === 'string' &&
+    isModelRef(shadow.previousModel)
+  ) {
+    const copy: CacheCostShadow = {
+      previousModel: shadow.previousModel,
+      stayAllReadUsd: 0,
+      stayAllNewUsd: 0,
+      switchAllReadUsd: 0,
+      switchAllNewUsd: 0,
+    };
+    for (const key of [
+      'stayAllReadUsd',
+      'stayAllNewUsd',
+      'switchAllReadUsd',
+      'switchAllNewUsd',
+    ] as const) {
+      const number = shadow[key];
+      if (!isFiniteNumber(number) || number < 0) return result;
+      copy[key] = number;
+    }
+    if (transition === 'model-switch' && !result.contextTruncated)
+      result.shadow = copy;
+  }
+  return result;
+};
+
 // Copy only the decision contract, never incidental runtime properties.
 export const snapshotDecision = (
   decision: RoutingDecision,
@@ -262,6 +327,7 @@ export const snapshotDecision = (
     ? decision.bypassReason
     : undefined,
   jev: snapshotJev(decision.jev),
+  generation: snapshotGeneration(decision.generation),
   reuse:
     decision.reuse === 'same-turn' ||
     decision.reuse === 'shared' ||

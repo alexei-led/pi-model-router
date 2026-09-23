@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.1] - 2026-09-23
+
+### Fixed
+
+- Count reported generation costs from pre-content errors before trying a fallback, including chains that ultimately fail. Attempts without terminal usage remain unknown rather than claiming a complete request cost.
+- Scope advice, single-flight and continuation keys to the caller's Pi session. Identical transcripts from different sessions no longer share routing advice; the provider's original `sessionId` is preserved.
+- Refresh generation diagnostics after completion without letting a stale UI prevent state persistence. Reusing a route never reuses old generation counters.
+
+### Added
+
+- Status, widget and decision-log diagnostics for input, output, cache-read/cache-write tokens, model transitions, truncation, attempts and reported catalog cost. Detailed footer mode adds cache counters; compact mode is unchanged.
+- Observational stay/switch comparisons using the same measured token workload, including output, under all-cache-read and all-new-input scenarios. Missing/placeholder tariffs and router-truncated contexts suppress estimates. These are list-price scenarios, not predicted savings or billing guarantees; no switching policy changes.
+- Allowlisted, branch-safe persistence of generation metrics. No session IDs, prompt text, credentials, physical cache-warmth claims or extra network calls are added.
+
 ## [0.7.0] - 2026-09-22
 
 ### Behavior change

@@ -26,6 +26,7 @@ import {
   formatAdvisorDetail,
   formatDecision,
   formatDecisionSource,
+  formatGenerationDetail,
   formatJevStats,
   formatModelRef,
   formatPinSummary,
@@ -125,7 +126,7 @@ export const registerCommands = (
     const lines = [
       `Router: ${state.routerEnabled ? 'on' : 'off'} · profile ${profile ?? 'none'} · available: ${profileNames(config).join(', ')}`,
       `Pin: ${formatPinSummary(state.pinnedTierByProfile)} · thinking override: ${formatThinkingSummary(state.thinkingByProfile)}`,
-      `Baseline: ${profile ? (config.profiles[profile]?.baselineTier ?? 'automatic') : 'none'} · cost: ${cost} · widget: ${state.widgetEnabled ? 'on' : 'off'} · log: ${state.debugEnabled ? 'on' : 'off'} (${state.debugHistory.length} decisions)`,
+      `Baseline: ${profile ? (config.profiles[profile]?.baselineTier ?? 'automatic') : 'none'} · estimated cost (catalog): ${cost} · widget: ${state.widgetEnabled ? 'on' : 'off'} · log: ${state.debugEnabled ? 'on' : 'off'} (${state.debugHistory.length} decisions)`,
       jev
         ? `Jev: ${jev.enabled ? 'enabled' : 'disabled'} · profile opt-in: ${profile && config.profiles[profile]?.jev?.enabled ? 'yes' : 'no'} · budget ${jev.timeoutMs}ms · context ${context.previousTurns} turns / ≈${context.maxHistoryTokens} history / ${context.toolResults} ≈${context.maxToolTokens} tool / ≈${jev.maxStateTokens} state tokens`
         : 'Jev: not configured',
@@ -136,9 +137,11 @@ export const registerCommands = (
     if (last) {
       const source = formatDecisionSource(last);
       const advisor = formatAdvisorDetail(last);
+      const generation = formatGenerationDetail(last);
       lines.push(
         `Last: ${last.tier} → ${last.targetProvider}/${last.targetModelId} (${last.thinking})${source ? ` · ${source}` : ''}`,
         ...(advisor ? [advisor] : []),
+        ...(generation ? [generation] : []),
       );
     }
     if (state.lastConfigWarnings.length > 0)

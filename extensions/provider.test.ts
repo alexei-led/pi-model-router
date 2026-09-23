@@ -78,12 +78,16 @@ const setup = () => {
       messages: [{ role: 'user', content: 'implement', timestamp: 1 }],
     },
     signal?: AbortSignal,
+    sessionId?: string,
   ) => {
     registerRouterProvider(api, state, actions);
     const config = register.mock.calls.at(-1)?.[1];
     if (!config?.streamSimple)
       throw new Error('Router provider not registered');
-    const streamOptions = signal ? { signal } : undefined;
+    const streamOptions = {
+      ...(signal ? { signal } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    };
     return config.streamSimple(
       model('balanced', { provider: 'router', contextWindow: 8192 }),
       normalizeContext(context),
@@ -113,6 +117,156 @@ describe('router provider', () => {
     });
     expect(advisorOf(s.state.lastDecision)).toBe('none');
     expect(s.actions.persistState).toHaveBeenCalledOnce();
+  });
+
+  it('accounts for charged pre-content failures before falling back', async () => {
+    const s = setup();
+    s.delegate.mockReturnValueOnce(failure());
+    const { result } = await consume(s.stream());
+    expect(result.stopReason).toBe('stop');
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.state.accumulatedCost).toBe(0.02);
+    expect(s.state.lastDecision?.generation).toMatchObject({
+      attempts: 2,
+      reportedCostUsd: 0.02,
+    });
+  });
+
+  it('accounts for all failed terminal attempts even when the chain fails', async () => {
+    const s = setup();
+    s.delegate.mockImplementation(() => failure());
+    expect((await consume(s.stream())).result.stopReason).toBe('error');
+    expect(s.state.accumulatedCost).toBe(0.02);
+    expect(s.actions.persistState).toHaveBeenCalledOnce();
+  });
+
+  it('marks aggregate cost unknown when an attempt ends without usage', async () => {
+    const s = setup();
+    s.delegate.mockImplementationOnce(() => {
+      throw new Error('no terminal usage');
+    });
+    await consume(s.stream());
+    expect(s.state.accumulatedCost).toBe(0.01);
+    expect(s.state.lastDecision?.generation).toMatchObject({
+      attempts: 2,
+      reportedCostUsd: undefined,
+    });
+  });
+
+  it('does not report a partial chain total as complete when the final attempt has no usage', async () => {
+    const s = setup();
+    s.delegate.mockReturnValueOnce(failure()).mockImplementationOnce(() => {
+      throw new Error('no terminal usage');
+    });
+    expect((await consume(s.stream())).result.stopReason).toBe('error');
+    expect(s.state.accumulatedCost).toBe(0.01);
+    expect(s.state.lastDecision?.generation).toMatchObject({
+      attempts: 2,
+      reportedCostUsd: undefined,
+    });
+  });
+
+  it('keeps shadow economics observational even when switching cold is more expensive', async () => {
+    const s = setup();
+    required(s.models[0]).cost = {
+      input: 10,
+      output: 20,
+      cacheRead: 1,
+      cacheWrite: 12.5,
+    };
+    required(s.models[2]).cost = {
+      input: 2,
+      output: 4,
+      cacheRead: 0.2,
+      cacheWrite: 2.5,
+    };
+    s.state.pinnedTierByProfile.balanced = 'low';
+    const response = message({
+      model: 'small',
+      usage: {
+        input: 100000,
+        output: 2000,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 102000,
+        cost: {
+          input: 0.2,
+          output: 0.008,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0.208,
+        },
+      },
+    });
+    s.delegate.mockReturnValueOnce(
+      events({ type: 'done', reason: 'stop', message: response }),
+    );
+    await consume(
+      s.stream({
+        messages: [message(), { role: 'user', content: 'next', timestamp: 2 }],
+      }),
+    );
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.delegate.mock.calls[0]?.[0].id).toBe('small');
+    expect(s.state.lastDecision).toMatchObject({
+      reasonCode: 'pinned',
+      tier: 'low',
+      generation: {
+        transition: 'model-switch',
+        contextTruncated: false,
+        shadow: {
+          previousModel: 'test/primary',
+          stayAllReadUsd: 0.14,
+          switchAllNewUsd: 0.258,
+        },
+      },
+    });
+  });
+
+  it('suppresses shadow estimates after router-side context truncation', async () => {
+    const s = setup();
+    for (const target of s.models)
+      target.cost = { input: 2, output: 4, cacheRead: 0.2, cacheWrite: 2.5 };
+    s.state.pinnedTierByProfile.balanced = 'low';
+    await consume(
+      s.stream({
+        messages: [
+          { role: 'user', content: 'old'.repeat(2000), timestamp: 1 },
+          message(),
+          { role: 'user', content: 'new', timestamp: 2 },
+        ],
+      }),
+    );
+    expect(s.delegate.mock.calls[0]?.[1].messages).toHaveLength(1);
+    expect(s.state.lastDecision?.generation).toMatchObject({
+      contextTruncated: true,
+      shadow: undefined,
+    });
+  });
+
+  it('uses only the current transcript for the previous model after a branch change', async () => {
+    const s = setup();
+    await consume(s.stream());
+    s.state.pinnedTierByProfile.balanced = 'low';
+    await consume(
+      s.stream({
+        messages: [{ role: 'user', content: 'new branch', timestamp: 2 }],
+      }),
+    );
+    expect(s.state.lastDecision?.generation).toMatchObject({
+      transition: 'initial',
+      shadow: undefined,
+    });
+  });
+
+  it('persists usage even when the final UI update fails', async () => {
+    const s = setup();
+    s.actions.updateStatus.mockImplementation(() => {
+      throw new Error('stale UI');
+    });
+    await consume(s.stream());
+    expect(s.actions.persistState).toHaveBeenCalledOnce();
+    expect(s.state.accumulatedCost).toBe(0.01);
   });
 
   it('does not pass or report thinking for a non-reasoning target', async () => {
@@ -1340,6 +1494,62 @@ describe('Jev provider integration', () => {
       reasonCode: 'jev',
       advisor: 'jev',
     });
+  });
+
+  it('reuses the actual fallback route without reusing its old generation metrics', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    const fetch = mockChoice('medium');
+    s.delegate.mockReturnValueOnce(failure());
+    await consume(s.stream(userContext()));
+    expect(s.state.lastDecision?.generation?.attempts).toBe(2);
+    s.delegate.mockImplementationOnce(() => {
+      expect(s.state.lastDecision?.generation).toBeUndefined();
+      return done();
+    });
+    await consume(s.stream(userContext()));
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+      'primary',
+      'fallback',
+      'fallback',
+    ]);
+    expect(s.state.lastDecision?.generation).toMatchObject({
+      attempts: 1,
+      reportedCostUsd: 0.01,
+    });
+  });
+
+  it('isolates identical transcripts by caller session and preserves cache affinity', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    const fetch = mockChoice('high');
+    for (const session of ['parent', 'child', 'parent'])
+      await consume(s.stream(userContext(), undefined, session));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(s.delegate.mock.calls.map((call) => call[2]?.sessionId)).toEqual([
+      'parent',
+      'child',
+      'parent',
+    ]);
+  });
+
+  it('scopes reuse to the native session when the caller omits a session ID', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    const fetch = mockChoice('high');
+    let sessionId = 'parent';
+    Object.assign(required(s.state.lastExtensionContext).sessionManager, {
+      getSessionId: () => sessionId,
+    });
+    for (const next of ['parent', 'child', 'parent']) {
+      sessionId = next;
+      await consume(s.stream(userContext()));
+    }
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(
+      s.delegate.mock.calls.every((call) => call[2]?.sessionId === undefined),
+    ).toBe(true);
   });
 
   it('shares one in-flight Jev request across concurrent calls for one turn', async () => {

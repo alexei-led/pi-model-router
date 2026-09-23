@@ -273,6 +273,34 @@ export type BypassReason = (typeof BYPASS_REASONS)[number];
 export const isBypassReason = (value: unknown): value is BypassReason =>
   BYPASS_REASONS.some((reason) => reason === value);
 
+export const GENERATION_TRANSITIONS = [
+  'initial',
+  'same-model',
+  'model-switch',
+] as const;
+
+/** Same measured token workload, hypothetical cache extremes; not a savings prediction. */
+export interface CacheCostShadow {
+  previousModel: string;
+  stayAllReadUsd: number;
+  stayAllNewUsd: number;
+  switchAllReadUsd: number;
+  switchAllNewUsd: number;
+}
+
+/** Last terminal attempt's counters; reported cost sums all observed attempts. */
+export interface GenerationDiagnostics {
+  transition: (typeof GENERATION_TRANSITIONS)[number];
+  contextTruncated: boolean;
+  attempts: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reportedCostUsd?: number | undefined;
+  shadow?: CacheCostShadow | undefined;
+}
+
 export interface RoutingDecision {
   profile: string;
   tier: RouterTier;
@@ -286,6 +314,7 @@ export interface RoutingDecision {
   advisor?: AdvisorOutcome | undefined;
   bypassReason?: BypassReason | undefined;
   jev?: JevDiagnostics | undefined;
+  generation?: GenerationDiagnostics | undefined;
   reuse?: 'same-turn' | 'shared' | 'continuation' | undefined;
   thinking: ThinkingLevel;
   timestamp: number;
