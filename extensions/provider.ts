@@ -32,6 +32,7 @@ import {
   MAX_TURN_CACHE_ENTRIES,
 } from './constants';
 import { extractTextFromContent, hasImageAttachment } from './context';
+import { observeGeneration } from './economics';
 import { createJevCandidate, runJevDetailed } from './jev';
 import {
   availableRoutePairs,
@@ -481,9 +482,11 @@ export const registerRouterProvider = (
             user?.role === 'user' && user.timestamp > 0
               ? createHash('sha256')
                   .update(
-                    JSON.stringify(
+                    JSON.stringify([
+                      options?.sessionId ??
+                        state.lastExtensionContext?.sessionManager.getSessionId?.(),
                       context.messages.slice(0, lastUserIndex + 1),
-                    ),
+                    ]),
                   )
                   .digest('hex')
               : undefined;
@@ -801,6 +804,8 @@ export const registerRouterProvider = (
             };
           }
 
+          // A reused route must not carry the previous generation's usage.
+          decision.generation = undefined;
           state.lastDecision = decision;
 
           // Sync pi's thinking level display with the router's effective thinking.
@@ -825,6 +830,8 @@ export const registerRouterProvider = (
           ].filter((ref, i, refs) => refs.indexOf(ref) === i);
           let lastError: unknown;
           let success = false;
+          let attempts = 0;
+          let reportedCostUsd: number | undefined = 0;
 
           for (const [i, modelRef] of modelsToTry.entries()) {
             options?.signal?.throwIfAborted();
@@ -842,6 +849,8 @@ export const registerRouterProvider = (
             }
 
             let contentReceived = false;
+            let usageReceived = false;
+            let attemptStarted = false;
             try {
               // HONESTY CHECK & AUTO-TRUNCATION
               // If the picked model has a smaller context than what we reported, truncate now.
@@ -914,6 +923,8 @@ export const registerRouterProvider = (
                   : {}),
               };
               // Pi owns request-time auth, custom/native providers, URLs and transcript normalization.
+              attempts += 1;
+              attemptStarted = true;
               const delegatedStream = registry.streamSimple(
                 targetModel,
                 effectiveContext,
@@ -935,6 +946,40 @@ export const registerRouterProvider = (
                   decision.reasonCode = 'fallback';
               };
               for await (const event of delegatedStream) {
+                if (event.type === 'done' || event.type === 'error') {
+                  usageReceived = true;
+                  const usage = (
+                    event.type === 'done' ? event.message : event.error
+                  ).usage;
+                  const cost = usage.cost.total;
+                  if (Number.isFinite(cost) && cost >= 0) {
+                    state.accumulatedCost += cost;
+                    if (reportedCostUsd !== undefined) reportedCostUsd += cost;
+                  } else {
+                    reportedCostUsd = undefined;
+                  }
+                  recordTarget();
+                  decision.generation = observeGeneration({
+                    usage,
+                    target: targetModel,
+                    previous:
+                      priorAssistant?.role === 'assistant' &&
+                      priorAssistant.stopReason !== 'error' &&
+                      priorAssistant.stopReason !== 'aborted'
+                        ? registry.find(
+                            priorAssistant.provider,
+                            priorAssistant.model,
+                          )
+                        : undefined,
+                    contextTruncated:
+                      effectiveContext.messages.length <
+                      context.messages.length,
+                    attempts,
+                    reportedCostUsd,
+                  });
+                  if (event.type === 'error' && decision.generation)
+                    decision.generation.shadow = undefined;
+                }
                 if (
                   event.type === 'error' &&
                   event.reason !== 'aborted' &&
@@ -965,9 +1010,6 @@ export const registerRouterProvider = (
                   terminalReceived = true;
                   generationSucceeded = event.type === 'done';
                   recordTarget();
-                  const cost = (
-                    event.type === 'done' ? event.message : event.error
-                  ).usage.cost.total;
                   if (event.type === 'done' && turn) {
                     rememberContinuation({
                       turn,
@@ -982,8 +1024,6 @@ export const registerRouterProvider = (
                       ),
                     });
                   }
-                  if (Number.isFinite(cost) && cost > 0)
-                    state.accumulatedCost += cost;
                 }
                 if (contentReceived || terminalReceived) {
                   for (const pending of pendingEvents.splice(0))
@@ -1002,6 +1042,14 @@ export const registerRouterProvider = (
               success = true;
               break;
             } catch (err) {
+              if (attemptStarted && !usageReceived) {
+                reportedCostUsd = undefined;
+                if (decision.generation) {
+                  decision.generation.attempts = attempts;
+                  decision.generation.reportedCostUsd = undefined;
+                  decision.generation.shadow = undefined;
+                }
+              }
               if (contentReceived || options?.signal?.aborted) throw err;
               lastError = err;
             }
@@ -1035,6 +1083,12 @@ export const registerRouterProvider = (
         } finally {
           if (!generationSucceeded && activeTurn)
             advisedTurns.delete(activeTurn);
+          try {
+            if (state.lastExtensionContext)
+              actions.updateStatus(state.lastExtensionContext);
+          } catch {
+            // UI teardown must not prevent cost and decision persistence.
+          }
           try {
             actions.persistState();
           } catch {

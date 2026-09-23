@@ -265,10 +265,33 @@ export const formatJevStats = (
   ];
 };
 
+export const formatGenerationDetail = (
+  decision: RoutingDecision,
+): string | undefined => {
+  const usage = decision.generation;
+  if (!usage) return undefined;
+  const parts = [
+    `Generation: ${usage.transition}`,
+    `input=${usage.inputTokens} output=${usage.outputTokens} cache-read=${usage.cacheReadTokens} cache-write=${usage.cacheWriteTokens}`,
+    `attempts=${usage.attempts}`,
+    `reported cost=${usage.reportedCostUsd === undefined ? 'unknown' : `$${usage.reportedCostUsd.toFixed(4)}`} (catalog/list-price, not billing)`,
+    'future cache warmth=unknown',
+  ];
+  if (usage.contextTruncated) parts.push('context truncated');
+  const shadow = usage.shadow;
+  parts.push(
+    shadow
+      ? `shadow same-token all-read/all-new: stay ${shadow.previousModel}=$${shadow.stayAllReadUsd.toFixed(4)}/$${shadow.stayAllNewUsd.toFixed(4)}, switch=$${shadow.switchAllReadUsd.toFixed(4)}/$${shadow.switchAllNewUsd.toFixed(4)} (includes output; not predicted savings)`
+      : 'shadow unavailable',
+  );
+  return parts.join(' · ');
+};
+
 export const formatDecision = (decision: RoutingDecision): string => {
   const source = formatDecisionSource(decision);
   const advisor = formatAdvisorDetail(decision);
-  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}`;
+  const generation = formatGenerationDetail(decision);
+  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}${generation ? ` [${generation}]` : ''}`;
 };
 
 export const formatPinSummary = (
@@ -330,7 +353,12 @@ export const updateStatus = (
         state.statusLine === 'detailed'
           ? `router:${activeRouterProfile}${pinLabel} -> ${lastDecision.tier} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`
           : `${activeRouterProfile}${pinLabel} · ${lastDecision.tier} → ${lastDecision.targetModelId}/${lastDecision.thinking}`;
-      statusText = `${route}${lastDecision.isFallback ? ' [fallback]' : ''}${formatAdvisorFooter(lastDecision, state.statusLine)}`;
+      const generation = lastDecision.generation;
+      const cache =
+        state.statusLine === 'detailed' && generation
+          ? ` · cache r${generation.cacheReadTokens}/w${generation.cacheWriteTokens} · ${generation.transition}`
+          : '';
+      statusText = `${route}${lastDecision.isFallback ? ' [fallback]' : ''}${formatAdvisorFooter(lastDecision, state.statusLine)}${cache}`;
     } else {
       statusText = `router:${activeRouterProfile}${pinLabel} -> waiting`;
     }
@@ -348,18 +376,20 @@ export const updateStatus = (
     `Router: ${routerEnabled ? 'enabled' : 'disabled'}`,
     `Profile: ${statusProfile}${activeRouterProfile ? ' (active)' : ''}`,
     `Pin: ${activePin ?? 'auto'}`,
-    `Cost: $${accumulatedCost.toFixed(4)}` +
+    `Estimated cost (catalog): $${accumulatedCost.toFixed(4)}` +
       (maxSessionBudget ? ` / $${maxSessionBudget.toFixed(2)}` : ''),
   ];
   if (lastDecision && lastDecision.profile === statusProfile) {
     const flags = getDecisionFlags(lastDecision);
     const flagsStr = flags.length > 0 ? ` [${flags.join(',')}]` : '';
     const advisorDetail = formatAdvisorDetail(lastDecision);
+    const generationDetail = formatGenerationDetail(lastDecision);
 
     widgetLines.push(
       `Route: ${lastDecision.tier}${flagsStr} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`,
       `Source: ${formatDecisionSource(lastDecision) || 'unknown'}`,
       ...(advisorDetail ? [advisorDetail] : []),
+      ...(generationDetail ? [generationDetail] : []),
     );
   } else if (!routerEnabled && lastNonRouterModel) {
     widgetLines.push(`Fallback: ${lastNonRouterModel}`);

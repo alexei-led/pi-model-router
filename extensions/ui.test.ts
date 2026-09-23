@@ -1,10 +1,12 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
+import { required } from './test/fixtures';
 import type { RouterStatusState, RoutingDecision } from './types';
 import {
   formatAdvisorDetail,
   formatAdvisorFooter,
   formatDecision,
+  formatGenerationDetail,
   formatJevStats,
   formatModelRef,
   formatPinSummary,
@@ -62,6 +64,59 @@ describe('ui.ts', () => {
     ).toContain('[🧭 Jev ✓]');
     expect(formatModelRef('openai/gpt-4o')).toBe('openai/gpt-4o');
     expect(formatModelRef(undefined)).toBe('none');
+  });
+
+  it('shows observed cache usage and explicitly hypothetical costs without changing the compact footer', () => {
+    const routed: RoutingDecision = {
+      ...decision,
+      generation: {
+        transition: 'model-switch',
+        contextTruncated: false,
+        attempts: 1,
+        inputTokens: 200,
+        outputTokens: 20,
+        cacheReadTokens: 800,
+        cacheWriteTokens: 0,
+        shadow: {
+          previousModel: 'test/old',
+          stayAllReadUsd: 0.1,
+          stayAllNewUsd: 1,
+          switchAllReadUsd: 0.05,
+          switchAllNewUsd: 0.5,
+        },
+      },
+    };
+    const detail = formatGenerationDetail(routed);
+    expect(detail).toContain('cache-read=800');
+    expect(detail).toContain('reported cost=unknown');
+    expect(detail).toContain('catalog/list-price, not billing');
+    expect(detail).toContain('future cache warmth=unknown');
+    expect(detail).toContain('stay test/old=$0.1000/$1.0000');
+    expect(detail).toContain('includes output; not predicted savings');
+    expect(formatDecision(routed)).toContain(detail);
+    const compact = context();
+    render(compact, { lastDecision: routed });
+    expect(vi.mocked(compact.ui.setStatus).mock.calls[0]?.[1]).not.toContain(
+      'cache',
+    );
+    expect(
+      JSON.stringify(vi.mocked(compact.ui.setWidget).mock.calls),
+    ).toContain('cache-read=800');
+    const detailed = context();
+    render(detailed, { lastDecision: routed, statusLine: 'detailed' });
+    expect(vi.mocked(detailed.ui.setStatus).mock.calls[0]?.[1]).toContain(
+      'cache r800/w0',
+    );
+    expect(
+      formatGenerationDetail({
+        ...routed,
+        generation: {
+          ...required(routed.generation),
+          contextTruncated: true,
+          shadow: undefined,
+        },
+      }),
+    ).toContain('shadow unavailable');
   });
 
   it.each([

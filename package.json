@@ -1,6 +1,6 @@
 {
   "name": "@alexeiled/pi-model-router",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "files": [
     "extensions",

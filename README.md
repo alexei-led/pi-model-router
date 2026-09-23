@@ -25,7 +25,8 @@ This fork is maintained at [alexei-led/pi-model-router](https://github.com/alexe
   - **LLM Intent Classifier**: Optional Pi-based semantic tier advice when Jev is not active. Jev failure goes directly to baseline, never to a second advisor.
   - **Cost Budgeting**: Prefer eligible medium-or-lower tiers above a soft generation-cost threshold; explicit pins take precedence.
   - **Fallback Chains**: Retry only explicit configured alternatives, before visible content.
-- **Stable Tool Continuations**: Reuse a validated per-turn route without asking advisors again.
+- **Stable Tool Continuations**: Reuse a validated per-turn route without asking advisors again. Reuse is scoped to the caller's Pi session.
+- **Cache Diagnostics**: Observe generation/cache tokens and compare hypothetical stay/switch costs without changing routing.
 - **Thinking Control**: Full control over reasoning/thinking levels per tier and profile. Changing pi's thinking level (e.g. via `shift+tab`) automatically applies as an all-tier override for the active router profile. Overrides that leave no eligible route are rejected atomically (including Pi's selection); otherwise unsupported tiers are skipped.
 - **Persistent State**: Pins, costs, and debug history are remembered across agent restarts and conversation branches. When Pi starts on the router provider, new sessions use the last selected router profile if it is still configured. An explicit `--model` selection takes precedence.
 
@@ -210,8 +211,29 @@ advisor is not asked, the footer says why: `advice skipped: pinned high`,
 `over budget`, `only high eligible`, `tool turn`. `/router` and
 `/router widget` show full metrics; `/router log on` keeps the last 50
 decisions in branch-safe session state and `/router log` summarizes them.
-Field meanings, outcome codes and fixes are in
+Advisor field meanings, outcome codes and fixes are in
 [docs/jev-advisor.md](docs/jev-advisor.md#diagnostics).
+
+After generation, status/widget/log also show the last terminal attempt's input,
+output, cache-read and cache-write tokens, model transition and attempt count.
+Reported cost sums observed terminal attempts, including errors before fallback.
+An attempt without terminal usage leaves that request's aggregate cost unknown;
+the session total still includes its known charges. Detailed footer mode adds cache
+counters; compact mode stays unchanged.
+
+On a model change, `shadow same-token all-read/all-new` compares current registry
+prices for the previous and selected models using the completed response's token
+counts, including output. These are hypothetical cache extremes, **not predicted
+savings**: the previous model could produce different tokens or quality. Unknown
+or zero placeholder tariffs, missing previous models and router-truncated contexts
+suppress the comparison. Prices are catalog/list-price estimates, not subscription
+charges or a billing guarantee. A zero reported cost with placeholder tariffs is
+shown as unknown.
+
+Future cache warmth remains unknown. Same-model effort changes are not assumed
+cache-preserving; branch restore does not restore a server cache. No extra requests,
+cache-warming calls, price-based holds or advisor-threshold changes are added.
+See [generation economics](docs/architecture.md#generation-economics) for the formulas.
 
 ## Commands
 

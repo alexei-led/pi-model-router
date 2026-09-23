@@ -66,7 +66,11 @@ not a security or tool-permission boundary.
 
 The bounded runtime-only continuation map retains up to `MAX_TURN_CACHE_ENTRIES` interleaved turns and records a hash of active-turn context, policy,
 config identity, branch ancestry, actual successful decision and generated tool
-call IDs. Reuse requires matching user-turn identity, profile, pin/effort/policy,
+call IDs. The turn hash includes `options.sessionId`, falling back to Pi's native
+session-manager ID when absent; identical transcripts in different caller sessions
+do not share advice or continuation records. The original `sessionId` is forwarded
+to the concrete provider unchanged. It is not an authentication claim and is never
+persisted in router diagnostics. Reuse requires matching user-turn identity, profile, pin/effort/policy,
 unchanged config, compatible known branch ancestry, matching assistant
 provider/model and tool result IDs, and a still-eligible concrete route.
 Reloads, branch switches/rewinds, profile changes, new user turns and stale
@@ -144,6 +148,42 @@ Credential rendering is operator-owned (see
 rendered user JSON, never runs secret lookup commands and does not require an
 environment variable.
 
+### Generation economics
+
+`economics.ts` is observational and never feeds route selection. Each terminal
+attempt is accounted before retry decisions, so a billed pre-content error is not
+lost when falling back. Unreported usage is not invented. Per-decision counters
+refer to the last terminal attempt; its attempt count and reported cost span the
+delegation chain. Cached routing decisions clear old generation metrics before a
+new request. Final UI refresh cannot prevent persistence if the UI has torn down.
+
+For a successful cross-model response with valid positive input/output/read rates,
+the shadow compares the current registry models on an identical measured workload:
+
+```text
+I = usage.input + usage.cacheRead + usage.cacheWrite
+O = usage.output
+allRead(model) = (I * cacheReadRate + O * outputRate) / 1e6
+allNew(model)  = (I * max(inputRate, cacheWriteRate) + O * outputRate) / 1e6
+```
+
+Pi's three input counters are disjoint. The `max` handles catalogs with zero
+separate cache-write pricing. These are scenarios, not a forecast, break-even
+horizon, billing cap or quality comparison. They omit provider-specific retention,
+long-context pricing and different output lengths on alternative models. Invalid,
+missing and zero placeholder rates suppress shadow estimates. Costs from terminal
+usage are reported catalog/list-price values, not verified subscription charges.
+
+The previous model comes from the current transcript, not a restored last-decision
+snapshot. No physical warmth state or TTL is guessed or persisted. Router-side
+truncation suppresses shadow comparison; compaction and branch changes cannot
+resurrect a cached-prefix claim because none is stored. Same-model transitions may
+include effort changes and do not assert cache preservation. Pi owns wire-level
+effort updates, cache keys and provider-specific transcript conversion. The router
+still strips logical-provider credentials/headers instead of forwarding arbitrary
+hint headers. Native classifier and external Jev usage remain separate from these
+generation metrics; no request class is inferred from prompt text.
+
 ## Module Architecture
 
 The extension is modularized for maintainability:
@@ -151,6 +191,7 @@ The extension is modularized for maintainability:
 - `extensions/index.ts`: Orchestrator. Manages state, hooks into `pi` events, and wires modules together.
 - `extensions/provider.ts`: Implements the `router` provider and the delegation/retry loop.
 - `extensions/routing.ts`: Eligible baseline, pin/budget policy and live model/input/effort capability validation.
+- `extensions/economics.ts`: Validated generation counters and hypothetical catalog-cost comparisons; no routing policy or cache warmth state.
 - `extensions/classifier.ts`: Isolated, bounded classifier request and response parsing.
 - `extensions/jev.ts`: Bounded external Choice transport, collision-safe candidate IDs and strict safe-advice parsing; no provider or session knowledge.
 - `extensions/context.ts`: Bounded recent advisor context and generation text/input extraction helpers.
@@ -188,7 +229,10 @@ rejected. Continuations clear per-call advisor latency/error/classifier fields b
 retain the original nested Jev metrics, including request-start time, with an explicit
 reuse marker. Debug mode persists the last 50 decisions through the existing
 branch-safe state snapshots; no extra transcript message or external log is needed.
-Nested metrics are copied field-by-field on save/restore. Context metrics include
+Nested metrics, including generation counters and shadow costs, are copied
+field-by-field on save/restore. Generation diagnostics contain only local transition
+codes, truncation flags, numeric counters/costs and the previous canonical model
+reference. Context metrics include
 only numeric current/history/tool sizes, included turns/results and truncation
 counts; selected text is never persisted as router diagnostics. A local UUID is generated
 only when an HTTP request is attempted; it is shared across waiters and route reuse.
