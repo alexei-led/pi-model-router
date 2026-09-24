@@ -459,7 +459,9 @@ export const registerRouterProvider = (
               'Router provider initialization timed out. session_start may not have fired.',
             );
           }
-          const profile = state.currentConfig.profiles[model.id];
+          const profile = Object.hasOwn(state.currentConfig.profiles, model.id)
+            ? state.currentConfig.profiles[model.id]
+            : undefined;
           if (!profile) {
             throw new Error(`Unknown router profile: ${model.id}`);
           }
@@ -468,7 +470,9 @@ export const registerRouterProvider = (
           state.selectedProfile = model.id;
           state.routerEnabled = true;
 
-          const pinnedTier = state.pinnedTierByProfile[model.id];
+          const pinnedTier = Object.hasOwn(state.pinnedTierByProfile, model.id)
+            ? state.pinnedTierByProfile[model.id]
+            : undefined;
           const isBudgetExceeded =
             state.currentConfig.maxSessionBudget !== undefined &&
             state.accumulatedCost >= state.currentConfig.maxSessionBudget;
@@ -476,7 +480,12 @@ export const registerRouterProvider = (
           const imageAttached = hasImageAttachment(context);
           const findModel = (provider: string, id: string) =>
             registry.find(provider, id);
-          const thinkingOverrides = state.thinkingByProfile[model.id];
+          const thinkingOverrides = Object.hasOwn(
+            state.thinkingByProfile,
+            model.id,
+          )
+            ? state.thinkingByProfile[model.id]
+            : undefined;
           const available = () =>
             availableRoutePairs(
               profile,

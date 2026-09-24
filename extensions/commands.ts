@@ -182,10 +182,10 @@ export const registerCommands = (
     if (!profile) return;
     const value = args[0]?.toLowerCase();
     if (args.length === 0) {
-      ctx.ui.notify(
-        `Pin: ${state.pinnedTierByProfile[profile] ?? 'auto'} (profile ${profile})`,
-        'info',
-      );
+      const pin = Object.hasOwn(state.pinnedTierByProfile, profile)
+        ? state.pinnedTierByProfile[profile]
+        : undefined;
+      ctx.ui.notify(`Pin: ${pin ?? 'auto'} (profile ${profile})`, 'info');
       return;
     }
     if (args.length > 1 || !isRouterPinValue(value)) {
@@ -438,7 +438,9 @@ export const registerCommands = (
         if (noArgs(`/router ${verb}`)) await handleProfile(verb, ctx);
         return;
       }
-      const replacement = RETIRED_VERBS[verb];
+      const replacement = Object.hasOwn(RETIRED_VERBS, verb)
+        ? RETIRED_VERBS[verb]
+        : undefined;
       ctx.ui.notify(
         replacement
           ? `/router ${verb} was removed; use ${replacement}`

@@ -52,6 +52,20 @@ const render = (
   });
 
 describe('ui.ts', () => {
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'renders prototype-like profile %s without an inherited pin',
+    (profile) => {
+      const ctx = context();
+      render(ctx, {
+        selectedProfile: profile,
+        lastDecision: { ...decision, profile },
+      });
+      const status = vi.mocked(ctx.ui.setStatus).mock.calls[0]?.[1];
+      expect(status).toContain('medium');
+      expect(status).not.toContain('pin:');
+    },
+  );
+
   it('formats only fixed local decision metadata', () => {
     expect(formatDecision(decision)).toBe(
       'p: medium -> test/model [medium] (baseline)',

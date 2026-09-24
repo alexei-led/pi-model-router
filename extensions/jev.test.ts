@@ -131,6 +131,81 @@ describe('jev.ts HTTP contract', () => {
     });
   });
 
+  it.each([
+    {
+      tiers: ['low', 'medium'],
+      baseline: 'high',
+      mass: [0.2, 0.45, 0.35],
+      selected: undefined,
+    },
+    {
+      tiers: ['low', 'medium'],
+      baseline: 'high',
+      mass: [0.85, 0.05, 0.1],
+      selected: 'low',
+    },
+    {
+      tiers: ['low', 'medium'],
+      baseline: 'micro',
+      mass: [0.45, 0.2, 0.35],
+      selected: 'low',
+    },
+    {
+      tiers: ['low', 'high'],
+      baseline: 'medium',
+      mass: [0.2, 0.45, 0.35],
+      selected: 'high',
+    },
+    {
+      tiers: ['low', 'high'],
+      baseline: 'medium',
+      mass: [0.45, 0.2, 0.35],
+      selected: undefined,
+    },
+    {
+      tiers: ['low', 'medium'],
+      baseline: 'high',
+      mass: [0.33, 0.33, 0.33],
+      selected: undefined,
+      threshold: 1,
+    },
+  ] as const)(
+    'keeps abstention at absent baseline $baseline for $tiers and $mass',
+    async ({ tiers, baseline, mass, selected, ...options }) => {
+      const routes = tiers.map((tier) =>
+        createJevCandidate({ tier, model: 'test/model', thinking: 'medium' }),
+      );
+      const result = await runJevDetailed(
+        {
+          ...config,
+          probabilityThreshold:
+            'threshold' in options ? options.threshold : 0.8,
+        },
+        request({ candidates: routes, baselineTier: baseline }),
+        {
+          fetch: transport({
+            answers: {
+              route: {
+                type: 'choice',
+                choice: routes[mass[0] >= mass[1] ? 0 : 1]?.id,
+                confidence: 0.1,
+                probabilities: {
+                  [routes[0]?.id ?? '']: mass[0],
+                  [routes[1]?.id ?? '']: mass[1],
+                  uncertain: mass[2],
+                },
+              },
+            },
+          }),
+        },
+      );
+      expect(result.diagnostics.selectedTier).toBe(selected);
+      expect(result.diagnostics.outcome).toBe(
+        selected ? 'selected' : 'uncertain',
+      );
+    },
+  );
+
   it('uses a conservative multilingual estimator instead of OpenAI-specific tokenization', () => {
     expect(estimateJevTextTokens('a'.repeat(400))).toBe(111);
     expect(estimateJevTextTokens('я'.repeat(400))).toBeGreaterThanOrEqual(440);
