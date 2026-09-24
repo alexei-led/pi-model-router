@@ -131,6 +131,81 @@ describe('jev.ts HTTP contract', () => {
     });
   });
 
+  it.each([
+    {
+      tiers: ['low', 'medium'],
+      baseline: 'high',
+      mass: [0.2, 0.45, 0.35],
+      selected: undefined,
+    },
+    {
+      tiers: ['low', 'medium'],
+      baseline: 'high',
+      mass: [0.85, 0.05, 0.1],
+      selected: 'low',
+    },
+    {
+      tiers: ['low', 'medium'],
+      baseline: 'micro',
+      mass: [0.45, 0.2, 0.35],
+      selected: 'low',
+    },
+    {
+      tiers: ['low', 'high'],
+      baseline: 'medium',
+      mass: [0.2, 0.45, 0.35],
+      selected: 'high',
+    },
+    {
+      tiers: ['low', 'high'],
+      baseline: 'medium',
+      mass: [0.45, 0.2, 0.35],
+      selected: undefined,
+    },
+    {
+      tiers: ['low', 'medium'],
+      baseline: 'high',
+      mass: [0.33, 0.33, 0.33],
+      selected: undefined,
+      threshold: 1,
+    },
+  ] as const)(
+    'keeps abstention at absent baseline $baseline for $tiers and $mass',
+    async ({ tiers, baseline, mass, selected, ...options }) => {
+      const routes = tiers.map((tier) =>
+        createJevCandidate({ tier, model: 'test/model', thinking: 'medium' }),
+      );
+      const result = await runJevDetailed(
+        {
+          ...config,
+          probabilityThreshold:
+            'threshold' in options ? options.threshold : 0.8,
+        },
+        request({ candidates: routes, baselineTier: baseline }),
+        {
+          fetch: transport({
+            answers: {
+              route: {
+                type: 'choice',
+                choice: routes[mass[0] >= mass[1] ? 0 : 1]?.id,
+                confidence: 0.1,
+                probabilities: {
+                  [routes[0]?.id ?? '']: mass[0],
+                  [routes[1]?.id ?? '']: mass[1],
+                  uncertain: mass[2],
+                },
+              },
+            },
+          }),
+        },
+      );
+      expect(result.diagnostics.selectedTier).toBe(selected);
+      expect(result.diagnostics.outcome).toBe(
+        selected ? 'selected' : 'uncertain',
+      );
+    },
+  );
+
   it('uses a conservative multilingual estimator instead of OpenAI-specific tokenization', () => {
     expect(estimateJevTextTokens('a'.repeat(400))).toBe(111);
     expect(estimateJevTextTokens('я'.repeat(400))).toBeGreaterThanOrEqual(440);
@@ -229,6 +304,56 @@ describe('jev.ts HTTP contract', () => {
       httpStatus: 529,
     });
   });
+
+  it.each([
+    { 'retry-after': '2' },
+    { 'retry-after': 'Thu, 01 Jan 2026 00:00:02 GMT' },
+    { 'retry-after-ms': 'invalid', 'retry-after': '2' },
+    { 'retry-after-ms': '-1', 'retry-after': '2' },
+  ])('honors standard Retry-After hints: %j', async (headers) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 429, headers }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(fixtures.valid)));
+    const pending = runJevDetailed(
+      { ...config, timeoutMs: 5000 },
+      request({ routingDeadline: performance.now() + 5000 }),
+      { fetch },
+    );
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).diagnostics.outcome).toBe('selected');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['60', 'Thu, 01 Jan 2026 00:01:00 GMT'])(
+    'does not retry when Retry-After %s exceeds the advisory budget',
+    async (retryAfter) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+        new Response('', {
+          status: 429,
+          headers: { 'retry-after': retryAfter },
+        }),
+      );
+      const pending = runJevDetailed(
+        { ...config, timeoutMs: 1000 },
+        request({ routingDeadline: performance.now() + 1000 }),
+        { fetch },
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      expect((await pending).diagnostics).toMatchObject({
+        outcome: 'http-error',
+        attempts: 1,
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 
   it('honors jev.retry: maxAttempts 1 disables retries and backoffMs sets the delay', async () => {
     vi.useFakeTimers();

@@ -6,7 +6,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import routerExtension from './index';
-import { done, model } from './test/fixtures';
+import { done, events, message, model } from './test/fixtures';
 import type { RouterConfig } from './types';
 import * as ui from './ui';
 
@@ -198,6 +198,75 @@ describe('index.ts (orchestrator)', () => {
       debugHistory: [],
       lastDecision: expect.any(Object),
     });
+  });
+
+  it('persists and restores the newest identical zero-cost decisions after history fills', async () => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      Object.assign(ctx.modelRegistry, {
+        streamSimple: () =>
+          events({
+            type: 'done',
+            reason: 'stop',
+            message: message({
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  total: 0,
+                },
+              },
+            }),
+          }),
+      });
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'new' }, ctx);
+      const command = mockPi.registerCommand.mock.calls.find(
+        ([name]) => name === 'router',
+      )?.[1];
+      await command?.handler(
+        'log on',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+      for (let turn = 1; turn <= 55; turn++) {
+        now.mockReturnValue(turn * 1000);
+        const stream = provider?.streamSimple?.(
+          model('balanced', { provider: 'router' }),
+          normalizeContext({
+            messages: [{ role: 'user', content: 'task', timestamp: turn }],
+          }),
+        );
+        if (!stream) throw new Error('Missing router stream');
+        for await (const _event of stream) {
+          /* Drain generation. */
+        }
+        expect((await stream.result()).stopReason).toBe('stop');
+      }
+      const snapshot = mockPi.appendEntry.mock.calls.at(-1)?.[1];
+      expect(snapshot.debugHistory).toHaveLength(50);
+      expect(snapshot.debugHistory[0].timestamp).toBe(6000);
+      expect(snapshot.debugHistory.at(-1).timestamp).toBe(55000);
+      ctx.sessionManager.getBranch = () => [
+        { type: 'custom', customType: 'router-state', data: snapshot },
+      ];
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'resume' }, ctx);
+      expect(mockPi.appendEntry.mock.calls.at(-1)?.[1].debugHistory).toEqual(
+        snapshot.debugHistory,
+      );
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('restores micro pins and thinking overrides without migration', async () => {

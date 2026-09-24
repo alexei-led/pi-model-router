@@ -105,6 +105,68 @@ const consume = async (stream: AssistantMessageEventStream) => {
 };
 
 describe('router provider', () => {
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'routes prototype-like profile %s using only explicit pins and overrides',
+    async (name) => {
+      const s = setup();
+      s.state.currentConfig = normalizeConfig({
+        profiles: {
+          [name]: {
+            medium: { model: 'test/primary' },
+            low: { model: 'test/small' },
+          },
+        },
+      }).config;
+      s.state.pinnedTierByProfile = {};
+      s.state.thinkingByProfile = {};
+      registerRouterProvider(s.api, s.state, s.actions);
+      const config = s.register.mock.calls.at(-1)?.[1];
+      if (!config?.streamSimple) throw new Error('Missing router stream');
+      const generate = config.streamSimple;
+      const run = () =>
+        consume(
+          generate(
+            model(name, { provider: 'router' }),
+            normalizeContext(userContext()),
+            {},
+          ),
+        );
+      expect((await run()).result.stopReason).toBe('stop');
+      expect(s.state.lastDecision?.reasonCode).toBe('baseline');
+      s.state.pinnedTierByProfile[name] = 'low';
+      s.state.thinkingByProfile[name] = { low: 'off' };
+      expect((await run()).result.stopReason).toBe('stop');
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'low',
+        thinking: 'off',
+      });
+      delete s.state.pinnedTierByProfile[name];
+      delete s.state.thinkingByProfile[name];
+      expect((await run()).result.stopReason).toBe('stop');
+      expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+        'primary',
+        'small',
+        'primary',
+      ]);
+    },
+  );
+
+  it('rejects inherited profile names that are not configured', async () => {
+    const s = setup();
+    registerRouterProvider(s.api, s.state, s.actions);
+    const config = s.register.mock.calls.at(-1)?.[1];
+    if (!config?.streamSimple) throw new Error('Missing router stream');
+    const { result } = await consume(
+      config.streamSimple(
+        model('toString', { provider: 'router' }),
+        normalizeContext(userContext()),
+        {},
+      ),
+    );
+    expect(result.errorMessage).toBe('Unknown router profile: toString');
+    expect(s.delegate).not.toHaveBeenCalled();
+  });
+
   it('delegates through the registry and accounts for completed work', async () => {
     const s = setup();
     const { result } = await consume(s.stream());
@@ -804,6 +866,7 @@ const astraSetup = () => {
 };
 const toolMessage = (provider = 'test', id = 'primary') =>
   message({
+    api: provider === 'google' ? 'google-generative-ai' : 'openai-completions',
     provider,
     model: id,
     timestamp: 2,
@@ -1520,6 +1583,75 @@ describe('Jev provider integration', () => {
     });
   });
 
+  it('keeps a fallback-only baseline when low-confidence advice needs its abstention mass', async () => {
+    const s = setup();
+    s.state.currentConfig = normalizeConfig({
+      profiles: {
+        balanced: {
+          baselineTier: 'high',
+          high: { model: 'test/unavailable', fallbacks: ['test/fallback'] },
+          medium: { model: 'test/primary' },
+          low: { model: 'test/small' },
+        },
+      },
+    }).config;
+    enableAdvisors(s);
+    const transport = vi.fn<typeof fetch>(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as ChoiceRequest;
+      const ids = Object.keys(body.questions.route.criteria);
+      expect(ids.some((id) => id.startsWith('high|'))).toBe(false);
+      return Response.json({
+        answers: {
+          route: {
+            type: 'choice',
+            choice: ids.find((id) => id.startsWith('medium|')),
+            confidence: 0.1,
+            probabilities: Object.fromEntries(
+              ids.map((id) => [
+                id,
+                id === 'uncertain'
+                  ? 0.35
+                  : id.startsWith('medium|')
+                    ? 0.45
+                    : 0.2,
+              ]),
+            ),
+          },
+        },
+      });
+    });
+    vi.stubGlobal('fetch', transport);
+    expect((await consume(s.stream(userContext()))).result.stopReason).toBe(
+      'stop',
+    );
+    expect(transport).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      targetLabel: 'test/fallback',
+      advisor: 'jev-fallback',
+    });
+    expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
+  });
+
+  it('updates the cached target when a reused decision falls back', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    const fetch = mockChoice('medium');
+    await consume(s.stream(userContext()));
+    s.delegate.mockReturnValueOnce(failure());
+    await consume(s.stream(userContext()));
+    expect(s.state.lastDecision?.targetLabel).toBe('test/fallback');
+    await consume(s.stream(userContext()));
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+      'primary',
+      'primary',
+      'fallback',
+      'fallback',
+    ]);
+    expect(s.state.lastDecision?.generation?.attempts).toBe(1);
+  });
+
   it('isolates identical transcripts by caller session and preserves cache affinity', async () => {
     const s = setup();
     enableAdvisors(s);
@@ -1931,6 +2063,71 @@ describe('Jev provider integration', () => {
           id: 'primary',
         });
         expect(s.state.lastDecision?.reasonCode).toBe('pinned');
+      }
+    },
+  );
+
+  it.each([
+    ['google', 'google-generative-ai'],
+    ['google-vertex', 'google-vertex'],
+    ['google-work', 'google-generative-ai'],
+    ['google-gemini-cli', 'google-gemini-cli'],
+  ] as const)(
+    'preserves signed continuations for %s using %s and forbids cross-model fallbacks',
+    async (provider, api) => {
+      for (const signature of ['toolCall', 'text', 'thinking'] as const) {
+        const s = setup();
+        s.state.pinnedTierByProfile = {};
+        s.state.currentConfig = normalizeConfig({
+          profiles: {
+            balanced: {
+              high: { model: `${provider}/primary`, fallbacks: ['test/small'] },
+              medium: { model: 'test/fallback' },
+            },
+          },
+        }).config;
+        Object.assign(required(s.models[0]), { provider, api });
+        const assistant = toolMessage(provider);
+        assistant.api = api;
+        assistant.content = [
+          { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
+        ];
+        if (signature === 'toolCall') {
+          assistant.content = [
+            {
+              type: 'toolCall',
+              id: 'call-1',
+              name: 'read',
+              arguments: {},
+              thoughtSignature: 'opaque-signature',
+            },
+          ];
+        } else {
+          assistant.content.unshift(
+            signature === 'text'
+              ? {
+                  type: 'text',
+                  text: 'Reading',
+                  textSignature: 'opaque-signature',
+                }
+              : {
+                  type: 'thinking',
+                  thinking: 'Reading',
+                  thinkingSignature: 'opaque-signature',
+                },
+          );
+        }
+        const context = toolContext(userContext(), assistant);
+        await consume(s.stream(context));
+        expect(s.delegate.mock.calls[0]?.[0]).toMatchObject({
+          provider,
+          api,
+          id: 'primary',
+        });
+        s.delegate.mockReturnValueOnce(failure());
+        const { result } = await consume(s.stream(context));
+        expect(result.stopReason).toBe('error');
+        expect(s.delegate).toHaveBeenCalledTimes(2);
       }
     },
   );

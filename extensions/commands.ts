@@ -14,7 +14,7 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
-import { DEFAULT_JEV_CONTEXT } from './constants';
+import { DEFAULT_JEV_CONTEXT, ROUTER_COMMANDS as VERBS } from './constants';
 import { preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
@@ -32,17 +32,6 @@ import {
   formatPinSummary,
   formatThinkingSummary,
 } from './ui';
-
-/** One verb per concern; state is shown by the verb that changes it. */
-const VERBS = [
-  { name: 'pin', desc: 'Pin the active profile to a tier, or auto' },
-  { name: 'thinking', desc: 'Override thinking for every tier, or auto' },
-  { name: 'log', desc: 'Recent decisions and Jev stats; on, off or clear' },
-  { name: 'widget', desc: 'Toggle the status widget' },
-  { name: 'off', desc: 'Leave the router and restore the previous model' },
-  { name: 'reload', desc: 'Reload model-router.json' },
-  { name: 'help', desc: 'Show usage' },
-] as const;
 
 /** Removed verbs answer with the replacement instead of acting. */
 const RETIRED_VERBS: Record<string, string> = {
@@ -193,10 +182,10 @@ export const registerCommands = (
     if (!profile) return;
     const value = args[0]?.toLowerCase();
     if (args.length === 0) {
-      ctx.ui.notify(
-        `Pin: ${state.pinnedTierByProfile[profile] ?? 'auto'} (profile ${profile})`,
-        'info',
-      );
+      const pin = Object.hasOwn(state.pinnedTierByProfile, profile)
+        ? state.pinnedTierByProfile[profile]
+        : undefined;
+      ctx.ui.notify(`Pin: ${pin ?? 'auto'} (profile ${profile})`, 'info');
       return;
     }
     if (args.length > 1 || !isRouterPinValue(value)) {
@@ -449,7 +438,9 @@ export const registerCommands = (
         if (noArgs(`/router ${verb}`)) await handleProfile(verb, ctx);
         return;
       }
-      const replacement = RETIRED_VERBS[verb];
+      const replacement = Object.hasOwn(RETIRED_VERBS, verb)
+        ? RETIRED_VERBS[verb]
+        : undefined;
       ctx.ui.notify(
         replacement
           ? `/router ${verb} was removed; use ${replacement}`

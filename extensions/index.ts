@@ -178,7 +178,9 @@ const routerExtension = (pi: ExtensionAPI) => {
   };
 
   const getThinkingOverride = (profileName: string, tier: RouterTier) => {
-    return thinkingByProfile[profileName]?.[tier];
+    return Object.hasOwn(thinkingByProfile, profileName)
+      ? thinkingByProfile[profileName]?.[tier]
+      : undefined;
   };
 
   const persistState = () => {
@@ -200,10 +202,6 @@ const routerExtension = (pi: ExtensionAPI) => {
       lastDecision: state.lastDecision
         ? { ...state.lastDecision, timestamp: 0 }
         : undefined,
-      debugHistory: state.debugHistory?.map((decision) => ({
-        ...decision,
-        timestamp: 0,
-      })),
     });
     if (snapshot === lastPersistedSnapshot) {
       return;
@@ -260,7 +258,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       if (ctx.model?.provider !== 'router') {
         return;
       }
-      if (currentConfig.profiles[ctx.model.id]) {
+      if (Object.hasOwn(currentConfig.profiles, ctx.model.id)) {
         selectedProfile = ctx.model.id;
         routerEnabled = true;
         return;
@@ -279,7 +277,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       ctx: ExtensionContext,
       strict = true,
     ) => {
-      if (!currentConfig.profiles[profileName]) {
+      if (!Object.hasOwn(currentConfig.profiles, profileName)) {
         if (strict) {
           ctx.ui.notify(`Unknown router profile: ${profileName}`, 'error');
         }
@@ -555,7 +553,9 @@ const routerExtension = (pi: ExtensionAPI) => {
 
     // User changed pi's thinking level (e.g. via shift+tab).
     // Apply as an all-tier thinking override for the active router profile.
-    const overrides = { ...thinkingByProfile[selectedProfile] };
+    const overrides = Object.hasOwn(thinkingByProfile, selectedProfile)
+      ? { ...thinkingByProfile[selectedProfile] }
+      : {};
     for (const t of ROUTER_TIERS) {
       overrides[t] = event.level;
     }

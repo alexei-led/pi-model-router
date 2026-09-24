@@ -117,6 +117,25 @@ const setup = (mutate?: (state: MutableCommandState) => void) => {
 };
 
 describe('/router surface', () => {
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'shows auto pin for unpinned prototype-like profile %s',
+    async (profile) => {
+      const s = setup((state) => {
+        state.selectedProfile = profile;
+        state.currentConfig = normalizeConfig({
+          profiles: { [profile]: { medium: { model: 'openai/gpt-4o' } } },
+        }).config;
+      });
+      s.ctx.model.id = profile;
+      await s.run('pin');
+      expect(s.lastNotice()[0]).toBe(`Pin: auto (profile ${profile})`);
+      await s.run('pin low');
+      await s.run('pin auto');
+      await s.run('pin');
+      expect(s.lastNotice()[0]).toBe(`Pin: auto (profile ${profile})`);
+    },
+  );
+
   it('offers exactly the eight verbs plus profile names at the top level', () => {
     const { cmd } = setup();
     expect(cmd.complete('')).toEqual([

@@ -153,6 +153,84 @@ vi.mock('node:fs', () => ({
 }));
 
 describe('config.ts', () => {
+  it.each([
+    'help',
+    'off',
+    'pin',
+    'thinking',
+    'log',
+    'widget',
+    'reload',
+    '',
+    'two words',
+    ' leading',
+  ])(
+    'rejects profile names that cannot be selected by the command: %j',
+    (name) => {
+      const { config, warnings } = normalizeConfig({
+        profiles: {
+          [name]: { medium: { model: 'test/primary' } },
+          valid: { medium: { model: 'test/primary' } },
+        },
+      });
+      expect(Object.keys(config.profiles)).toEqual(['valid']);
+      expect(warnings).toContain(
+        'Ignored router profile with an invalid or reserved name.',
+      );
+    },
+  );
+
+  it.each(['status', 'profile', 'disable', 'fix', 'debug', '?', 'constructor'])(
+    'preserves selectable profile names even when they match retired verbs: %s',
+    (name) => {
+      const { config, warnings } = normalizeConfig({
+        profiles: { [name]: { medium: { model: 'test/primary' } } },
+      });
+      expect(Object.keys(config.profiles)).toEqual([name]);
+      expect(warnings).toEqual([]);
+    },
+  );
+
+  it.each([Infinity, -Infinity, NaN, 0, -1, '100'])(
+    'does not accept invalid budgets or model capacities: %s',
+    (value) => {
+      const { config, warnings } = normalizeConfig({
+        maxSessionBudget: value,
+        models: {
+          target: {
+            model: 'test/primary',
+            contextWindow: value,
+            maxTokens: value,
+          },
+        },
+        profiles: {
+          valid: {
+            medium: { model: 'target', contextWindow: value, maxTokens: value },
+          },
+        },
+      });
+      expect(config.maxSessionBudget).toBeUndefined();
+      expect(config.models?.target?.contextWindow).toBeUndefined();
+      expect(config.models?.target?.maxTokens).toBeUndefined();
+      expect(config.profiles.valid?.medium?.contextWindow).toBeUndefined();
+      expect(config.profiles.valid?.medium?.maxTokens).toBeUndefined();
+      expect(config.profiles.valid?.medium?.resolvedContextWindow).toBe(128000);
+      expect(config.profiles.valid?.medium?.resolvedMaxTokens).toBe(16384);
+      expect(warnings).toContain('Invalid maxSessionBudget. Ignored.');
+    },
+  );
+
+  it('rejects overflow numbers parsed from valid JSON', () => {
+    const { config, warnings } = normalizeConfig(
+      JSON.parse(
+        '{"maxSessionBudget":1e999,"profiles":{"valid":{"medium":{"model":"test/primary","contextWindow":1e999,"maxTokens":1e999}}}}',
+      ),
+    );
+    expect(config.maxSessionBudget).toBeUndefined();
+    expect(config.profiles.valid?.medium?.resolvedContextWindow).toBe(128000);
+    expect(config.profiles.valid?.medium?.resolvedMaxTokens).toBe(16384);
+    expect(warnings.length).toBeGreaterThan(0);
+  });
   describe('type guards', () => {
     it('isObjectRecord should validate objects', () => {
       expect(isObjectRecord({})).toBe(true);
