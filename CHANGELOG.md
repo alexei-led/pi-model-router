@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.0] - 2026-09-24
+
+### Upgrade requirements
+
+- An unsupported thinking effort now runs at the nearest supported level, as in Pi: the next higher level, else the next lower level. Before, the router skipped that model and used its fallback, or found no route. For example, `/router thinking off` now runs `gpt-6-astra` at `minimal` and `claude-opus-5-5` at `low`.
+- Only `thinkingLevels` declared on a tier or its model alias limit effort. Undeclared tiers are no longer limited to `low`, `medium`, and `high`, so `xhigh` and `max` run on models that support them.
+- A tier whose primary model is ineligible now offers its first eligible fallback to Jev and the Pi classifier. Some profiles that bypassed advice with a single candidate now request advice.
+
+### Changed
+
+- `/router thinking` and Pi's thinking selector name each tier that runs another level, for example `high runs at minimal`.
+- Pi's footer and thinking selector show the level that runs, including after a fallback. The router model lists `xhigh` and `max` only when a route runs them.
+
+### Fixed
+
+- Keep `jev`, `classifier`, or `pinned` as the decision source when routing chooses a fallback model on the first attempt. Only a mid-stream fallback reports `fallback`.
+- Record a fully failed generation chain in `/router log` with a `[failed]` flag. `/router log` now shows the `[fallback]`, `[budget-limit]`, and `[failed]` flags.
+- Keep the base profile, with a warning, when a project configuration overrides it with a non-object value.
+- Warn on a `fallbacks` value that is not an array and on fallback entries that are not strings.
+- Report Jev probability selection of a fallback-served baseline as a Jev choice. This removes the 0.8.0 known limitation.
+
 ## [0.8.0] - 2026-09-24
 
 ### Upgrade requirements
