@@ -14,7 +14,7 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
-import { DEFAULT_JEV_CONTEXT } from './constants';
+import { DEFAULT_JEV_CONTEXT, ROUTER_VERB_NAMES } from './constants';
 import { preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
@@ -34,15 +34,19 @@ import {
 } from './ui';
 
 /** One verb per concern; state is shown by the verb that changes it. */
-const VERBS = [
-  { name: 'pin', desc: 'Pin the active profile to a tier, or auto' },
-  { name: 'thinking', desc: 'Override thinking for every tier, or auto' },
-  { name: 'log', desc: 'Recent decisions and Jev stats; on, off or clear' },
-  { name: 'widget', desc: 'Toggle the status widget' },
-  { name: 'off', desc: 'Leave the router and restore the previous model' },
-  { name: 'reload', desc: 'Reload model-router.json' },
-  { name: 'help', desc: 'Show usage' },
-] as const;
+const VERB_DESCRIPTIONS: Record<(typeof ROUTER_VERB_NAMES)[number], string> = {
+  pin: 'Pin the active profile to a tier, or auto',
+  thinking: 'Override thinking for every tier, or auto',
+  log: 'Recent decisions and Jev stats; on, off or clear',
+  widget: 'Toggle the status widget',
+  off: 'Leave the router and restore the previous model',
+  reload: 'Reload model-router.json',
+  help: 'Show usage',
+};
+const VERBS = ROUTER_VERB_NAMES.map((name) => ({
+  name,
+  desc: VERB_DESCRIPTIONS[name],
+}));
 
 /** Removed verbs answer with the replacement instead of acting. */
 const RETIRED_VERBS: Record<string, string> = {

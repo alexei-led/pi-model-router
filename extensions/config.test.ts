@@ -20,6 +20,7 @@ import {
   resolveModelRef,
   resolveProfileName,
 } from './config';
+import { DEFAULT_MAX_TOKENS } from './constants';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
 
 describe('Jev context configuration', () => {
@@ -265,6 +266,45 @@ describe('config.ts', () => {
       expect(merged.models?.gpt4?.model).toBe('openai/gpt-4o');
       expect(merged.models?.claude?.model).toBe('anthropic/claude-3.5-sonnet');
     });
+
+    it('keeps the base profile and warns when an override profile value is invalid', () => {
+      const base: RouterConfig = {
+        profiles: {
+          balanced: {
+            high: { model: 'openai/gpt-4o' },
+            medium: { model: 'openai/gpt-4o-mini' },
+          },
+        },
+      };
+      const override = {
+        profiles: { balanced: 'not-an-object' },
+      } as unknown as Partial<RouterConfig>;
+
+      const warnings: string[] = [];
+      const merged = mergeConfig(base, override, warnings);
+
+      expect(
+        (merged.profiles as Record<string, unknown> | undefined)?.balanced,
+      ).toEqual(base.profiles.balanced);
+      expect(warnings).toEqual([
+        'Ignored invalid override for profile "balanced": expected an object. Keeping base profile.',
+      ]);
+    });
+
+    it('drops an invalid override profile with no base to keep, using neutral wording', () => {
+      const warnings: string[] = [];
+      const merged = mergeConfig(
+        { profiles: {} },
+        { profiles: { x: null } } as unknown as Partial<RouterConfig>,
+        warnings,
+      );
+      expect((merged.profiles as Record<string, unknown> | undefined)?.x).toBe(
+        undefined,
+      );
+      expect(warnings).toEqual([
+        'Ignored invalid override for profile "x": expected an object.',
+      ]);
+    });
   });
 
   describe('parseCanonicalModelRef', () => {
@@ -352,6 +392,62 @@ describe('config.ts', () => {
       expect(warnings.length).toBe(1);
       expect(warnings[0]).toContain('Invalid fallback model');
     });
+
+    it('warns on a non-string fallback entry instead of dropping it silently', () => {
+      const warnings: string[] = [];
+      const raw = {
+        model: 'gpt4',
+        fallbacks: ['google/gemini-1.5-flash', { secret: 'leaked' }, 42, null],
+      };
+      const result = normalizeTierConfig(raw, 'p', 'high', warnings, models);
+      expect(result?.fallbacks).toEqual(['google/gemini-1.5-flash']);
+      expect(warnings).toHaveLength(3);
+      for (const warning of warnings) {
+        expect(warning).toContain('non-string fallback entry');
+        expect(warning).not.toContain('leaked');
+      }
+    });
+
+    it.each([
+      ['a bare string', 'test/fallback'],
+      ['an object', { secret: 'leaked' }],
+    ])(
+      'warns on a non-array fallbacks value (%s) instead of dropping it silently',
+      (_label, fallbacks) => {
+        const warnings: string[] = [];
+        const result = normalizeTierConfig(
+          { model: 'gpt4', fallbacks },
+          'p',
+          'high',
+          warnings,
+          models,
+        );
+        expect(result?.fallbacks).toBeUndefined();
+        expect(warnings).toEqual([
+          'Profile "p" high tier has invalid fallbacks; expected an array. Ignored.',
+        ]);
+        expect(JSON.stringify(warnings)).not.toContain('leaked');
+      },
+    );
+
+    it('warns on invalid tier contextWindow and maxTokens instead of dropping them silently', () => {
+      const warnings: string[] = [];
+      const result = normalizeTierConfig(
+        { model: 'gpt4', contextWindow: -1, maxTokens: 'lots' },
+        'p',
+        'high',
+        warnings,
+        models,
+      );
+      // Falls through to the alias's contextWindow (80000) and the hardcoded
+      // maxTokens default, rather than silently accepting the invalid values.
+      expect(result?.resolvedContextWindow).toBe(80000);
+      expect(result?.resolvedMaxTokens).toBe(DEFAULT_MAX_TOKENS);
+      expect(warnings).toEqual([
+        'Profile "p" high tier has invalid contextWindow. Ignored.',
+        'Profile "p" high tier has invalid maxTokens. Ignored.',
+      ]);
+    });
   });
 
   describe('normalizeConfig', () => {
@@ -425,6 +521,36 @@ describe('config.ts', () => {
       expect(config.profiles.balanced?.high?.model).toBe(
         'google/gemini-2.5-pro',
       );
+    });
+
+    it('warns and ignores an invalid maxSessionBudget instead of dropping it silently', () => {
+      const { config, warnings } = normalizeConfig({
+        maxSessionBudget: -5,
+        profiles: { p: { medium: { model: 'test/primary' } } },
+      });
+      expect(config.maxSessionBudget).toBeUndefined();
+      expect(warnings).toContain(
+        'Invalid maxSessionBudget; must be a positive number. Ignored.',
+      );
+    });
+
+    it('warns when a profile name collides with a reserved /router verb', () => {
+      const { config, warnings } = normalizeConfig({
+        profiles: {
+          pin: { medium: { model: 'test/primary' } },
+          balanced: { medium: { model: 'test/primary' } },
+        },
+      });
+      // The profile still normalizes; only "/router pin" can't reach it.
+      expect(config.profiles.pin?.medium?.model).toBe('test/primary');
+      expect(warnings).toContain(
+        'Profile "pin" collides with the reserved "/router pin" command and is unreachable via "/router pin".',
+      );
+      expect(
+        warnings.some(
+          (w) => w.includes('"balanced"') && w.includes('reserved'),
+        ),
+      ).toBe(false);
     });
   });
 

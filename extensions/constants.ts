@@ -18,3 +18,13 @@ export const DEFAULT_CLASSIFIER_TIMEOUT_MS = 10_000;
 export const MAX_TURN_CACHE_ENTRIES = 16;
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_MAX_TOKENS = 16_384;
+/** `/router <verb>` dispatches these before profile lookup, so a same-named profile is unreachable. */
+export const ROUTER_VERB_NAMES = [
+  'pin',
+  'thinking',
+  'log',
+  'widget',
+  'off',
+  'reload',
+  'help',
+] as const;

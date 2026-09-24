@@ -140,6 +140,7 @@ Removed commands such as `status`, `profile`, `fix`, and `debug` show their repl
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
 
 A profile needs at least one tier. A partial profile is valid.
+A profile named after a `/router` verb produces a warning. `/router <name>` runs the verb, not the profile.
 The router filters unavailable models, unsupported input, and unsupported effort before selection.
 `baselineTier` prefers a configured tier. Without it, the preference is `medium`, `high`, `low`, then `micro`.
 The [complete example](../model-router.example.json) shows aliases, all four tiers, and explicit fallbacks.

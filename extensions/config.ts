@@ -12,6 +12,7 @@ import {
   MAX_JEV_BACKOFF_MS,
   MAX_JEV_CONTEXT_TURNS,
   MAX_JEV_STATE_TOKENS,
+  ROUTER_VERB_NAMES,
 } from './constants';
 import type {
   ClassifierConfig,
@@ -117,6 +118,7 @@ const mergeRawValue = (existing: unknown, next: unknown): unknown => {
 export const mergeConfig = (
   base: RawRouterConfig,
   override: RawRouterConfig,
+  warnings: string[] = [],
 ): RawRouterConfig => {
   const baseProfiles = isObjectRecord(base.profiles) ? base.profiles : {};
   const overrideProfiles = isObjectRecord(override.profiles)
@@ -126,7 +128,13 @@ export const mergeConfig = (
   for (const [name, profile] of Object.entries(overrideProfiles)) {
     if (name === '__proto__') continue;
     if (!isObjectRecord(profile)) {
-      mergedProfiles[name] = profile;
+      if (profile !== undefined) {
+        warnings.push(
+          Object.hasOwn(baseProfiles, name)
+            ? `Ignored invalid override for profile "${name}": expected an object. Keeping base profile.`
+            : `Ignored invalid override for profile "${name}": expected an object.`,
+        );
+      }
       continue;
     }
     const existing = isObjectRecord(mergedProfiles[name])
@@ -331,8 +339,16 @@ export const normalizeTierConfig = (
             `Invalid fallback model in profile "${profileName}" ${tier} tier. Ignored.`,
           );
         }
+      } else {
+        warnings.push(
+          `Profile "${profileName}" ${tier} tier has a non-string fallback entry. Ignored.`,
+        );
       }
     }
+  } else if (value.fallbacks !== undefined) {
+    warnings.push(
+      `Profile "${profileName}" ${tier} tier has invalid fallbacks; expected an array. Ignored.`,
+    );
   }
 
   // Resolve contextWindow: tier config > alias > hardcoded default
@@ -340,6 +356,11 @@ export const normalizeTierConfig = (
     typeof value.contextWindow === 'number' && value.contextWindow > 0
       ? value.contextWindow
       : undefined;
+  if (value.contextWindow !== undefined && tierContextWindow === undefined) {
+    warnings.push(
+      `Profile "${profileName}" ${tier} tier has invalid contextWindow. Ignored.`,
+    );
+  }
   const resolvedContextWindow =
     tierContextWindow ??
     aliasDefinition?.contextWindow ??
@@ -350,6 +371,11 @@ export const normalizeTierConfig = (
     typeof value.maxTokens === 'number' && value.maxTokens > 0
       ? value.maxTokens
       : undefined;
+  if (value.maxTokens !== undefined && tierMaxTokens === undefined) {
+    warnings.push(
+      `Profile "${profileName}" ${tier} tier has invalid maxTokens. Ignored.`,
+    );
+  }
   const resolvedMaxTokens =
     tierMaxTokens ?? aliasDefinition?.maxTokens ?? DEFAULT_MAX_TOKENS;
 
@@ -608,6 +634,12 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       continue;
     }
 
+    if (ROUTER_VERB_NAMES.some((verb) => verb === name)) {
+      warnings.push(
+        `Profile "${name}" collides with the reserved "/router ${name}" command and is unreachable via "/router ${name}".`,
+      );
+    }
+
     let baselineTier: RouterTier | undefined;
     if (profileRecord.baselineTier !== undefined) {
       const candidate = profileRecord.baselineTier;
@@ -645,6 +677,11 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     typeof raw.maxSessionBudget === 'number' && raw.maxSessionBudget > 0
       ? raw.maxSessionBudget
       : undefined;
+  if (raw.maxSessionBudget !== undefined && maxSessionBudget === undefined) {
+    warnings.push(
+      'Invalid maxSessionBudget; must be a positive number. Ignored.',
+    );
+  }
 
   // Resolve classifierModel — accepts string or { model, thinking } object
   let classifierModel: ClassifierConfig | undefined;
@@ -729,9 +766,11 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
   const globalResult = parseConfigFile(globalPath);
   const projectResult = parseConfigFile(projectPath);
   const baseConfig: RawRouterConfig = { profiles: {} };
+  const mergeWarnings: string[] = [];
   const merged = mergeConfig(
-    mergeConfig(baseConfig, globalResult.config),
+    mergeConfig(baseConfig, globalResult.config, mergeWarnings),
     stripProjectJevConfig(projectResult.config, projectResult.warnings),
+    mergeWarnings,
   );
   const normalized = normalizeConfig(merged);
   return {
@@ -739,6 +778,7 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
     warnings: [
       ...globalResult.warnings,
       ...projectResult.warnings,
+      ...mergeWarnings,
       ...normalized.warnings,
     ],
   };
