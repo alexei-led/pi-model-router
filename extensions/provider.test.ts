@@ -140,6 +140,31 @@ describe('router provider', () => {
     expect(s.actions.persistState).toHaveBeenCalledOnce();
   });
 
+  it('records the decision, flagged as failed, when every fallback in the chain fails', async () => {
+    const s = setup();
+    s.delegate.mockImplementation(() => failure());
+    expect((await consume(s.stream())).result.stopReason).toBe('error');
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ tier: 'medium', isGenerationFailed: true }),
+    );
+    // The thrown error's message (the delegate's remote text) must not leak
+    // into the persisted decision sink.
+    const recorded = JSON.stringify(
+      s.actions.recordDebugDecision.mock.calls[0],
+    );
+    expect(recorded).not.toContain('request failed');
+  });
+
+  it('does not flag a successful generation as failed', async () => {
+    const s = setup();
+    expect((await consume(s.stream())).result.stopReason).toBe('stop');
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
+    expect(
+      s.actions.recordDebugDecision.mock.calls[0]?.[0].isGenerationFailed,
+    ).toBeUndefined();
+  });
+
   it('marks aggregate cost unknown when an attempt ends without usage', async () => {
     const s = setup();
     s.delegate.mockImplementationOnce(() => {
@@ -482,9 +507,10 @@ describe('router provider', () => {
     expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
       expect.objectContaining({ reasonCode: 'classifier' }),
     );
-    expect(
-      s.actions.recordDebugDecision.mock.calls[0]?.[0].reasonCode,
-    ).not.toContain('do not persist');
+    const recorded = JSON.stringify(
+      s.actions.recordDebugDecision.mock.calls[0],
+    );
+    expect(recorded).not.toContain('do not persist');
   });
 
   it('routes images to a capable model and errors when none exists', async () => {

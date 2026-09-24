@@ -321,6 +321,8 @@ export interface RoutingDecision {
   isClassifier?: boolean | undefined;
   isFallback?: boolean | undefined;
   isBudgetForced?: boolean | undefined;
+  /** Every model in the generation chain failed; no content was produced. */
+  isGenerationFailed?: boolean | undefined;
 }
 
 export interface RouterLastProfileState {

@@ -1064,6 +1064,14 @@ export const registerRouterProvider = (
           }
 
           if (!success) {
+            // Record the exhausted decision before it is lost to the thrown
+            // error below. `decision` is shared with state.lastDecision (and
+            // may be cached for reuse), so record a flagged copy rather than
+            // mutating it.
+            actions.recordDebugDecision({
+              ...decision,
+              isGenerationFailed: true,
+            });
             throw lastError instanceof Error
               ? lastError
               : new Error(

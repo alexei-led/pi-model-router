@@ -66,6 +66,12 @@ describe('ui.ts', () => {
     expect(formatModelRef(undefined)).toBe('none');
   });
 
+  it('renders a [failed] marker for a debugHistory entry flagged as a total generation failure', () => {
+    expect(formatDecision({ ...decision, isGenerationFailed: true })).toBe(
+      'p: medium -> test/model [medium] [failed] (baseline)',
+    );
+  });
+
   it('shows observed cache usage and explicitly hypothetical costs without changing the compact footer', () => {
     const routed: RoutingDecision = {
       ...decision,
