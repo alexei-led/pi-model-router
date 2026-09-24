@@ -879,10 +879,9 @@ describe('index.ts (orchestrator)', () => {
             },
           }),
         );
+        const runs = level === 'max' ? 'high' : 'low';
         expect(ctx.ui.notify).toHaveBeenCalledWith(
-          expect.stringContaining(
-            `set to ${level}; high as ${level === 'max' ? 'high' : 'low'}`,
-          ),
+          `Router thinking (all) set to ${level}; high runs at ${runs}, medium runs at ${runs}, micro runs at ${runs}`,
           'info',
         );
       },

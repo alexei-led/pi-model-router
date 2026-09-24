@@ -334,8 +334,8 @@ describe('route capability validation', () => {
   });
 
   it.each([
-    ['off', ['high as minimal', 'medium as low']],
-    ['max', ['micro as high']],
+    ['off', ['high runs at minimal', 'medium runs at low']],
+    ['max', ['micro runs at high']],
     ['medium', []],
   ] as const)(
     'names tiers that run a %s override at another level',

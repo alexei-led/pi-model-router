@@ -435,7 +435,7 @@ describe('/router thinking', () => {
     await run('thinking max');
     expect(state.thinkingByProfile.balanced?.high).toBe('max');
     expect(lastNotice()).toEqual([
-      'Router thinking set to max; medium as medium',
+      'Router thinking set to max; medium runs at medium',
       'info',
     ]);
   });

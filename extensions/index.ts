@@ -576,7 +576,7 @@ const routerExtension = (pi: ExtensionAPI) => {
     );
     if (adjusted.length > 0)
       ctx.ui.notify(
-        `Router thinking (all) set to ${event.level}; ${adjusted.join(', ')}.`,
+        `Router thinking (all) set to ${event.level}; ${adjusted.join(', ')}`,
         'info',
       );
   });
