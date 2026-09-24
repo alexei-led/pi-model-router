@@ -804,6 +804,7 @@ const astraSetup = () => {
 };
 const toolMessage = (provider = 'test', id = 'primary') =>
   message({
+    api: provider === 'google' ? 'google-generative-ai' : 'openai-completions',
     provider,
     model: id,
     timestamp: 2,
@@ -1520,6 +1521,25 @@ describe('Jev provider integration', () => {
     });
   });
 
+  it('updates the cached target when a reused decision falls back', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    const fetch = mockChoice('medium');
+    await consume(s.stream(userContext()));
+    s.delegate.mockReturnValueOnce(failure());
+    await consume(s.stream(userContext()));
+    expect(s.state.lastDecision?.targetLabel).toBe('test/fallback');
+    await consume(s.stream(userContext()));
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+      'primary',
+      'primary',
+      'fallback',
+      'fallback',
+    ]);
+    expect(s.state.lastDecision?.generation?.attempts).toBe(1);
+  });
+
   it('isolates identical transcripts by caller session and preserves cache affinity', async () => {
     const s = setup();
     enableAdvisors(s);
@@ -1931,6 +1951,71 @@ describe('Jev provider integration', () => {
           id: 'primary',
         });
         expect(s.state.lastDecision?.reasonCode).toBe('pinned');
+      }
+    },
+  );
+
+  it.each([
+    ['google', 'google-generative-ai'],
+    ['google-vertex', 'google-vertex'],
+    ['google-work', 'google-generative-ai'],
+    ['google-gemini-cli', 'google-gemini-cli'],
+  ] as const)(
+    'preserves signed continuations for %s using %s and forbids cross-model fallbacks',
+    async (provider, api) => {
+      for (const signature of ['toolCall', 'text', 'thinking'] as const) {
+        const s = setup();
+        s.state.pinnedTierByProfile = {};
+        s.state.currentConfig = normalizeConfig({
+          profiles: {
+            balanced: {
+              high: { model: `${provider}/primary`, fallbacks: ['test/small'] },
+              medium: { model: 'test/fallback' },
+            },
+          },
+        }).config;
+        Object.assign(required(s.models[0]), { provider, api });
+        const assistant = toolMessage(provider);
+        assistant.api = api;
+        assistant.content = [
+          { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
+        ];
+        if (signature === 'toolCall') {
+          assistant.content = [
+            {
+              type: 'toolCall',
+              id: 'call-1',
+              name: 'read',
+              arguments: {},
+              thoughtSignature: 'opaque-signature',
+            },
+          ];
+        } else {
+          assistant.content.unshift(
+            signature === 'text'
+              ? {
+                  type: 'text',
+                  text: 'Reading',
+                  textSignature: 'opaque-signature',
+                }
+              : {
+                  type: 'thinking',
+                  thinking: 'Reading',
+                  thinkingSignature: 'opaque-signature',
+                },
+          );
+        }
+        const context = toolContext(userContext(), assistant);
+        await consume(s.stream(context));
+        expect(s.delegate.mock.calls[0]?.[0]).toMatchObject({
+          provider,
+          api,
+          id: 'primary',
+        });
+        s.delegate.mockReturnValueOnce(failure());
+        const { result } = await consume(s.stream(context));
+        expect(result.stopReason).toBe('error');
+        expect(s.delegate).toHaveBeenCalledTimes(2);
       }
     },
   );

@@ -59,6 +59,17 @@ const REGISTRY_WAIT_TIMEOUT_MS = 5000;
 const REGISTRY_WAIT_INITIAL_DELAY_MS = 50;
 const REGISTRY_WAIT_MAX_DELAY_MS = 500;
 
+const requiresGoogleContinuation = (message: AssistantMessage): boolean =>
+  (message.api === 'google-generative-ai' ||
+    message.api === 'google-vertex' ||
+    message.api === 'google-gemini-cli') &&
+  message.content.some(
+    (entry) =>
+      entry.type === 'thinking' ||
+      (entry.type === 'toolCall' && !!entry.thoughtSignature) ||
+      (entry.type === 'text' && !!entry.textSignature),
+  );
+
 const createJevFlightKey = (
   turn: string,
   profile: string,
@@ -772,12 +783,7 @@ export const registerRouterProvider = (
           if (
             toolContinuation &&
             priorAssistant?.role === 'assistant' &&
-            priorAssistant.provider === 'google' &&
-            priorAssistant.content.some(
-              (entry) =>
-                entry.type === 'thinking' ||
-                (entry.type === 'toolCall' && entry.thoughtSignature),
-            ) &&
+            requiresGoogleContinuation(priorAssistant) &&
             (decision.targetProvider !== priorAssistant.provider ||
               decision.targetModelId !== priorAssistant.model)
           ) {
@@ -877,12 +883,7 @@ export const registerRouterProvider = (
               if (
                 toolContinuation &&
                 priorAssistant?.role === 'assistant' &&
-                priorAssistant.provider === 'google' &&
-                priorAssistant.content.some(
-                  (entry) =>
-                    entry.type === 'thinking' ||
-                    (entry.type === 'toolCall' && entry.thoughtSignature),
-                ) &&
+                requiresGoogleContinuation(priorAssistant) &&
                 (targetProvider !== priorAssistant.provider ||
                   targetModelId !== priorAssistant.model)
               ) {
@@ -1011,6 +1012,14 @@ export const registerRouterProvider = (
                   generationSucceeded = event.type === 'done';
                   recordTarget();
                   if (event.type === 'done' && turn) {
+                    if (!toolContinuation && advisedTurns.has(turn)) {
+                      rememberAdvisedDecision(
+                        turn,
+                        decision,
+                        policy,
+                        state.currentConfig,
+                      );
+                    }
                     rememberContinuation({
                       turn,
                       policy,

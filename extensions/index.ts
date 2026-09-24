@@ -200,10 +200,6 @@ const routerExtension = (pi: ExtensionAPI) => {
       lastDecision: state.lastDecision
         ? { ...state.lastDecision, timestamp: 0 }
         : undefined,
-      debugHistory: state.debugHistory?.map((decision) => ({
-        ...decision,
-        timestamp: 0,
-      })),
     });
     if (snapshot === lastPersistedSnapshot) {
       return;

@@ -230,6 +230,56 @@ describe('jev.ts HTTP contract', () => {
     });
   });
 
+  it.each([
+    { 'retry-after': '2' },
+    { 'retry-after': 'Thu, 01 Jan 2026 00:00:02 GMT' },
+    { 'retry-after-ms': 'invalid', 'retry-after': '2' },
+    { 'retry-after-ms': '-1', 'retry-after': '2' },
+  ])('honors standard Retry-After hints: %j', async (headers) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 429, headers }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(fixtures.valid)));
+    const pending = runJevDetailed(
+      { ...config, timeoutMs: 5000 },
+      request({ routingDeadline: performance.now() + 5000 }),
+      { fetch },
+    );
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).diagnostics.outcome).toBe('selected');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['60', 'Thu, 01 Jan 2026 00:01:00 GMT'])(
+    'does not retry when Retry-After %s exceeds the advisory budget',
+    async (retryAfter) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+        new Response('', {
+          status: 429,
+          headers: { 'retry-after': retryAfter },
+        }),
+      );
+      const pending = runJevDetailed(
+        { ...config, timeoutMs: 1000 },
+        request({ routingDeadline: performance.now() + 1000 }),
+        { fetch },
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      expect((await pending).diagnostics).toMatchObject({
+        outcome: 'http-error',
+        attempts: 1,
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it('honors jev.retry: maxAttempts 1 disables retries and backoffMs sets the delay', async () => {
     vi.useFakeTimers();
     const overloaded = () => new Response('', { status: 529 });

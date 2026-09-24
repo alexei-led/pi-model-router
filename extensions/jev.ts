@@ -316,10 +316,15 @@ const isTransientStatus = (status: number): boolean =>
   status === 408 || status === 429 || status >= 500;
 
 const serverRetryDelayMs = (response: Response): number | undefined => {
-  const milliseconds = Number(response.headers.get('retry-after-ms'));
-  if (Number.isFinite(milliseconds) && milliseconds >= 0) return milliseconds;
-  const seconds = Number(response.headers.get('retry-after'));
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+  const msHeader = response.headers.get('retry-after-ms')?.trim();
+  const milliseconds = Number(msHeader);
+  if (msHeader && Number.isFinite(milliseconds) && milliseconds >= 0)
+    return milliseconds;
+  const retryAfter = response.headers.get('retry-after')?.trim();
+  if (!retryAfter) return undefined;
+  if (/^\d+$/.test(retryAfter)) return Number(retryAfter) * 1000;
+  const date = Date.parse(retryAfter);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 };
 
 const retryDelayMs = (
