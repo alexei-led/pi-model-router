@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.8.0] - 2026-09-24
+
+### Upgrade requirements
+
+- Rename profiles that contain whitespace, have an empty name, or match `pin`, `thinking`, `log`, `widget`, `off`, `reload`, or `help`. These names are now ignored with a warning. Retired command names remain valid profile names.
+- Budgets and model capacities must be positive, finite numbers. Invalid values are ignored with a warning.
+
+### Fixed
+
+- Preserve signed Google-family tool continuations by API, including Vertex, Gemini CLI, provider aliases, and text signatures. Do not replay them on another model during fallback.
+- Remember the successful fallback when a reused same-turn route fails. Later reuse no longer returns to the failed primary.
+- Honor standard `Retry-After` seconds and HTTP dates. Skip retries whose required delay exceeds the remaining advisory budget.
+- Keep Jev abstention mass at the actual baseline tier, including when only an explicit generation fallback is eligible in that tier.
+- Use own-property lookups for profile state. Profiles such as `constructor`, `toString`, and `hasOwnProperty` no longer inherit false pins or overrides.
+- Persist the newest 50 debug decisions when otherwise-identical, zero-cost decisions rotate the history buffer.
+
+### Documentation and release process
+
+- Refresh the README, user guide, architecture, release procedure, and dated usage evidence.
+- Clarify that user and project configuration can select the optional Pi classifier. It sends bounded recent text through Pi, separately from Jev approval.
+- Generate GitHub release titles from the exact version tag.
+
+### Known limitation
+
+- Diagnostics can label probability-based selection of a fallback-only baseline as abstention and display the selected candidate's probability. Generation still uses the correct baseline.
+
 ## [0.7.1] - 2026-09-23
 
 ### Fixed
@@ -18,9 +44,9 @@
 
 ### Behavior change
 
-- A Choice below `confidenceThreshold` is not discarded. The router selects the lowest tier whose cumulative probability reaches `probabilityThreshold` (default 0.8). Abstention mass counts for the baseline tier.
+- A Choice below `confidenceThreshold` is not discarded. The router selects the lowest tier whose cumulative probability reaches `probabilityThreshold` (default 0.8). Abstention mass counts for the baseline tier when that tier has a primary candidate. Version 0.8.0 corrects fallback-only baseline handling.
 - Each Jev tier is a structured Choice option with `covers`, `notFor` and `examples`. The instructions are a structured object that names the state fields.
-- The router retries one transient Jev status (`408`, `429`, `5xx`) inside the existing total budget. The backoff honors `Retry-After`. Permanent statuses and cancellation are not retried.
+- The router retries one transient Jev status (`408`, `429`, `5xx`) inside the existing total budget. This version handles `retry-after-ms`; standard `Retry-After` seconds and HTTP dates are corrected in 0.8.0. Permanent statuses and cancellation are not retried.
 - The response validator accepts omitted zero-mass options and two-decimal rounding.
 - The request token estimate adds 400 tokens of headroom instead of 200.
 
