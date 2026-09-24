@@ -9,7 +9,7 @@ The `pi-model-router` is an extension-first model router for the `pi` coding age
 - **Modularized Design**: Strictly follow the modular structure defined in Phase 3:
   - `extensions/types.ts`: All interfaces and type definitions.
   - `extensions/config.ts`: Configuration loading, normalization, and merging.
-  - `extensions/routing.ts`: Eligible baseline, pin/budget policy and model/input/effort validation.
+  - `extensions/routing.ts`: Eligible baseline, pin/budget policy, model/input validation and effort mapping.
   - `extensions/context.ts`: Bounded recent text extraction, without intent scoring.
   - `extensions/classifier.ts`: Optional Pi semantic classifier compatibility path.
   - `extensions/jev.ts`: Bounded external Choice transport and strict candidate validation.
@@ -24,12 +24,12 @@ Four tiers (`micro`, `low`, `medium`, `high`) are model/effort choices, not secu
 
 1. Validate config, live capabilities and caller cancellation. Reuse a validated same-turn tool route, or select a compatible local route without advisors for an invalid continuation.
 2. Honor an explicit pin within its configured tier; reject an ineligible pin. Otherwise, above the soft generation budget, skip advisors and prefer an eligible baseline among medium-or-lower tiers if any. Advisor costs are excluded.
-3. Build eligible primary candidates; one candidate bypasses advisors. Explicit ordered generation fallbacks are not extra Jev candidates.
+3. Build one eligible candidate per tier: its primary, or its first eligible fallback when the primary is ineligible. One candidate bypasses advisors. Other generation fallbacks are not extra Jev candidates.
 4. User-level Jev enablement, active-profile privacy opt-in and a key authorize one bounded recent-context request. Accept only a validated current candidate: the top option at or above `confidenceThreshold`, otherwise the lowest tier whose cumulative probability reaches `probabilityThreshold` (abstention mass counts for the baseline tier). Abstention, invalid advice or transport failure goes directly to baseline, never a second advisor. `jev.timeoutMs` sets Jev's total advisory budget (default 1500 ms, positive and within Node's timer range, with no product-level cap); the request, one retry of a documented transient status and the body reader share that budget.
 5. When Jev is not active, the optional Pi classifier may advise any of the four tiers under its separate `classifierModel.timeoutMs` bound (default 10 s). Failure or no advisor means baseline. Caller abort never starts baseline generation.
 6. Revalidate the actual generation/fallback target and delegate through Pi. Retry only explicit fallbacks before visible content, never on cancellation.
 
-`profiles.<name>.baselineTier` optionally names a configured tier. Filter availability/input/effort first, then prefer that baseline followed by `medium`, `high`, `low`, `micro`. Partial profiles are valid; only no eligible route is an error. Deprecated `rules` and `phaseBias` load with a value-free warning but have no routing effect. Do not restore keyword floors, mechanical detectors, phase inference or a hidden legacy mode.
+`profiles.<name>.baselineTier` optionally names a configured tier. Filter availability and input first; an unsupported effort runs at the nearest supported level, as in Pi, and only declared `thinkingLevels` narrow it. Then prefer that baseline followed by `medium`, `high`, `low`, `micro`. Partial profiles are valid; only no eligible route is an error. Deprecated `rules` and `phaseBias` load with a value-free warning but have no routing effect. Do not restore keyword floors, mechanical detectors, phase inference or a hidden legacy mode.
 
 Bounded advisor text can include recent tool output and private data. Exclude system prompts, raw config, config credentials, thinking/tool arguments and binary blocks; never claim transcript-text redaction. All project-level Jev settings are ignored. Work-profile privacy opt-in is operator-owned, not an implementation step.
 
@@ -38,7 +38,7 @@ Bounded advisor text can include recent tool output and private data. Exclude sy
 - **Functions**: Always use arrow functions (`const myFunc = () => ...`) instead of function statements (`function myFunc() ...`) for consistency and lexical scoping.
 - **Imports**: Use top-level static imports over inline `import()` or `require()` calls for consistency and cleaner ESM code.
 - **State Management**: Persist router state via `pi.appendEntry` with a custom `router-state` entry type to ensure branch-safe behavior.
-- **Error Handling**: Preserve explicit fallback order, capability/effort validation, cancellation and no retry after visible content. Never persist remote explanations or secret-bearing configuration; retain only allowlisted local reason codes and diagnostics.
+- **Error Handling**: Preserve explicit fallback order, capability validation, nearest-level effort mapping, cancellation and no retry after visible content. Never persist remote explanations or secret-bearing configuration; retain only allowlisted local reason codes and diagnostics.
 
 ## Documentation Reference
 - `docs/user-guide.md`: Profiles, commands, diagnostics and migration.
