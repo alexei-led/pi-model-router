@@ -50,12 +50,6 @@ export type RouterPinValue = (typeof ROUTER_PIN_VALUES)[number];
 export const isRouterPinValue = (value: unknown): value is RouterPinValue =>
   ROUTER_PIN_VALUES.some((candidate) => candidate === value);
 
-export const DEFAULT_THINKING_LEVELS: readonly ThinkingLevel[] = [
-  'high',
-  'medium',
-  'low',
-] as const;
-
 export const isObjectRecord = (
   value: unknown,
 ): value is Record<string, unknown> =>
@@ -118,6 +112,7 @@ const mergeRawValue = (existing: unknown, next: unknown): unknown => {
 export const mergeConfig = (
   base: RawRouterConfig,
   override: RawRouterConfig,
+  warnings: string[] = [],
 ): RawRouterConfig => {
   const baseProfiles = isObjectRecord(base.profiles) ? base.profiles : {};
   const overrideProfiles = isObjectRecord(override.profiles)
@@ -127,7 +122,13 @@ export const mergeConfig = (
   for (const [name, profile] of Object.entries(overrideProfiles)) {
     if (name === '__proto__') continue;
     if (!isObjectRecord(profile)) {
-      mergedProfiles[name] = profile;
+      if (profile !== undefined) {
+        warnings.push(
+          Object.hasOwn(baseProfiles, name)
+            ? `Ignored invalid override for profile "${name}": expected an object. Keeping base profile.`
+            : `Ignored invalid override for profile "${name}": expected an object.`,
+        );
+      }
       continue;
     }
     const existing = isObjectRecord(mergedProfiles[name])
@@ -336,8 +337,16 @@ export const normalizeTierConfig = (
             `Invalid fallback model in profile "${profileName}" ${tier} tier. Ignored.`,
           );
         }
+      } else {
+        warnings.push(
+          `Profile "${profileName}" ${tier} tier has a non-string fallback entry. Ignored.`,
+        );
       }
     }
+  } else if (value.fallbacks !== undefined) {
+    warnings.push(
+      `Profile "${profileName}" ${tier} tier has invalid fallbacks; expected an array. Ignored.`,
+    );
   }
 
   // Resolve contextWindow: tier config > alias > hardcoded default
@@ -370,7 +379,7 @@ export const normalizeTierConfig = (
   const resolvedMaxTokens =
     tierMaxTokens ?? aliasDefinition?.maxTokens ?? DEFAULT_MAX_TOKENS;
 
-  // Resolve thinkingLevels: tier config > alias > default
+  // Declared thinkingLevels: tier config > alias
   // Validate tier-level thinkingLevels array
   let tierThinkingLevels: ThinkingLevel[] | undefined;
   if (Array.isArray(value.thinkingLevels)) {
@@ -382,22 +391,6 @@ export const normalizeTierConfig = (
 
   const explicitThinkingLevels =
     tierThinkingLevels ?? aliasDefinition?.thinkingLevels;
-  const baseThinkingLevels: ThinkingLevel[] =
-    explicitThinkingLevels ??
-    (effectiveReasoning === false ? [] : [...DEFAULT_THINKING_LEVELS]);
-
-  // Auto-add the tier's thinking value if it's not 'off' and not already present,
-  // but only if the user didn't explicitly constrain the thinkingLevels array.
-  const resolvedThinkingLevels: ThinkingLevel[] = [...baseThinkingLevels];
-  if (
-    !explicitThinkingLevels &&
-    effectiveReasoning !== false &&
-    thinking !== 'off' &&
-    !resolvedThinkingLevels.includes(thinking)
-  ) {
-    resolvedThinkingLevels.push(thinking);
-  }
-
   return {
     model: parsedModel,
     thinkingExplicit: isThinkingLevel(value.thinking),
@@ -407,10 +400,9 @@ export const normalizeTierConfig = (
     contextWindow: tierContextWindow,
     maxTokens: tierMaxTokens,
     reasoning: effectiveReasoning,
-    thinkingLevels: tierThinkingLevels,
+    thinkingLevels: explicitThinkingLevels,
     resolvedContextWindow,
     resolvedMaxTokens,
-    resolvedThinkingLevels,
   };
 };
 
@@ -758,9 +750,11 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
   const globalResult = parseConfigFile(globalPath);
   const projectResult = parseConfigFile(projectPath);
   const baseConfig: RawRouterConfig = { profiles: {} };
+  const mergeWarnings: string[] = [];
   const merged = mergeConfig(
-    mergeConfig(baseConfig, globalResult.config),
+    mergeConfig(baseConfig, globalResult.config, mergeWarnings),
     stripProjectJevConfig(projectResult.config, projectResult.warnings),
+    mergeWarnings,
   );
   const normalized = normalizeConfig(merged);
   return {
@@ -768,6 +762,7 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
     warnings: [
       ...globalResult.warnings,
       ...projectResult.warnings,
+      ...mergeWarnings,
       ...normalized.warnings,
     ],
   };
@@ -843,41 +838,4 @@ export const resolveMaxTokens = (
 
   // 2-4. Pre-resolved during config normalization (tier > alias > hardcoded)
   return tierConfig.resolvedMaxTokens ?? DEFAULT_MAX_TOKENS;
-};
-
-/**
- * Collect the union of all tier models' resolved thinking levels for a profile.
- * Returns a Set of ThinkingLevel values.
- */
-export const collectProfileThinkingLevels = (
-  profile: RouterProfile,
-): Set<ThinkingLevel> => {
-  const levels = new Set<ThinkingLevel>();
-  for (const tier of ROUTER_TIERS) {
-    const tierConfig = profile[tier];
-    if (!tierConfig?.resolvedThinkingLevels) continue;
-    for (const level of tierConfig.resolvedThinkingLevels) {
-      levels.add(level);
-    }
-  }
-  return levels;
-};
-
-/**
- * Returns tier names whose models don't include the given thinking level
- * in their resolvedThinkingLevels.
- */
-export const getUnsupportedTiers = (
-  profile: RouterProfile,
-  level: ThinkingLevel,
-): string[] => {
-  const unsupported: string[] = [];
-  for (const tier of ROUTER_TIERS) {
-    const tierConfig = profile[tier];
-    if (!tierConfig) continue;
-    if (!tierConfig.resolvedThinkingLevels?.includes(level)) {
-      unsupported.push(tier);
-    }
-  }
-  return unsupported;
 };

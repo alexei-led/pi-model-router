@@ -1,8 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  collectProfileThinkingLevels,
-  getUnsupportedTiers,
   isObjectRecord,
   isRouterTier,
   isThinkingLevel,
@@ -217,6 +215,12 @@ describe('config.ts', () => {
       expect(config.profiles.valid?.medium?.resolvedContextWindow).toBe(128000);
       expect(config.profiles.valid?.medium?.resolvedMaxTokens).toBe(16384);
       expect(warnings).toContain('Invalid maxSessionBudget. Ignored.');
+      expect(warnings).toContain(
+        'Profile "valid" tier "medium" has invalid contextWindow. Ignored.',
+      );
+      expect(warnings).toContain(
+        'Profile "valid" tier "medium" has invalid maxTokens. Ignored.',
+      );
     },
   );
 
@@ -343,6 +347,45 @@ describe('config.ts', () => {
       expect(merged.models?.gpt4?.model).toBe('openai/gpt-4o');
       expect(merged.models?.claude?.model).toBe('anthropic/claude-3.5-sonnet');
     });
+
+    it('keeps the base profile and warns when an override profile value is invalid', () => {
+      const base: RouterConfig = {
+        profiles: {
+          balanced: {
+            high: { model: 'openai/gpt-4o' },
+            medium: { model: 'openai/gpt-4o-mini' },
+          },
+        },
+      };
+      const override = {
+        profiles: { balanced: 'not-an-object' },
+      } as unknown as Partial<RouterConfig>;
+
+      const warnings: string[] = [];
+      const merged = mergeConfig(base, override, warnings);
+
+      expect(
+        (merged.profiles as Record<string, unknown> | undefined)?.balanced,
+      ).toEqual(base.profiles.balanced);
+      expect(warnings).toEqual([
+        'Ignored invalid override for profile "balanced": expected an object. Keeping base profile.',
+      ]);
+    });
+
+    it('drops an invalid override profile with no base to keep, using neutral wording', () => {
+      const warnings: string[] = [];
+      const merged = mergeConfig(
+        { profiles: {} },
+        { profiles: { x: null } } as unknown as Partial<RouterConfig>,
+        warnings,
+      );
+      expect((merged.profiles as Record<string, unknown> | undefined)?.x).toBe(
+        undefined,
+      );
+      expect(warnings).toEqual([
+        'Ignored invalid override for profile "x": expected an object.',
+      ]);
+    });
   });
 
   describe('parseCanonicalModelRef', () => {
@@ -430,6 +473,43 @@ describe('config.ts', () => {
       expect(warnings.length).toBe(1);
       expect(warnings[0]).toContain('Invalid fallback model');
     });
+
+    it('warns on a non-string fallback entry instead of dropping it silently', () => {
+      const warnings: string[] = [];
+      const raw = {
+        model: 'gpt4',
+        fallbacks: ['google/gemini-1.5-flash', { secret: 'leaked' }, 42, null],
+      };
+      const result = normalizeTierConfig(raw, 'p', 'high', warnings, models);
+      expect(result?.fallbacks).toEqual(['google/gemini-1.5-flash']);
+      expect(warnings).toHaveLength(3);
+      for (const warning of warnings) {
+        expect(warning).toContain('non-string fallback entry');
+        expect(warning).not.toContain('leaked');
+      }
+    });
+
+    it.each([
+      ['a bare string', 'test/fallback'],
+      ['an object', { secret: 'leaked' }],
+    ])(
+      'warns on a non-array fallbacks value (%s) instead of dropping it silently',
+      (_label, fallbacks) => {
+        const warnings: string[] = [];
+        const result = normalizeTierConfig(
+          { model: 'gpt4', fallbacks },
+          'p',
+          'high',
+          warnings,
+          models,
+        );
+        expect(result?.fallbacks).toBeUndefined();
+        expect(warnings).toEqual([
+          'Profile "p" high tier has invalid fallbacks; expected an array. Ignored.',
+        ]);
+        expect(JSON.stringify(warnings)).not.toContain('leaked');
+      },
+    );
   });
 
   describe('normalizeConfig', () => {
@@ -646,96 +726,6 @@ describe('config.ts', () => {
     });
   });
 
-  describe('collectProfileThinkingLevels', () => {
-    it('collect thinking levels from all tiers', () => {
-      const profile: RouterProfile = {
-        high: {
-          model: 'openai/gpt-4o',
-          resolvedThinkingLevels: ['high', 'xhigh'],
-        },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['medium', 'low'],
-        },
-      };
-      const levels = collectProfileThinkingLevels(profile);
-      expect(levels.has('high')).toBe(true);
-      expect(levels.has('xhigh')).toBe(true);
-      expect(levels.has('medium')).toBe(true);
-      expect(levels.has('low')).toBe(true);
-      expect(levels.size).toBe(4);
-    });
-
-    it('return empty set for profile with no tiers', () => {
-      const profile: RouterProfile = {};
-      const levels = collectProfileThinkingLevels(profile);
-      expect(levels.size).toBe(0);
-    });
-
-    it('skip tiers without resolvedThinkingLevels', () => {
-      const profile: RouterProfile = {
-        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high'] },
-        medium: { model: 'openai/gpt-4o-mini' },
-      };
-      const levels = collectProfileThinkingLevels(profile);
-      expect(levels.size).toBe(1);
-      expect(levels.has('high')).toBe(true);
-    });
-  });
-
-  describe('getUnsupportedTiers', () => {
-    it('return tiers that do not include the requested thinking level', () => {
-      const profile: RouterProfile = {
-        high: {
-          model: 'openai/gpt-4o',
-          resolvedThinkingLevels: ['high', 'xhigh'],
-        },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['medium', 'low'],
-        },
-        low: { model: 'openai/gpt-4o-micro', resolvedThinkingLevels: ['low'] },
-      };
-      const unsupported = getUnsupportedTiers(profile, 'xhigh');
-      expect(unsupported).toEqual(['medium', 'low']);
-    });
-
-    it('return empty array if all tiers support the level', () => {
-      const profile: RouterProfile = {
-        high: {
-          model: 'openai/gpt-4o',
-          resolvedThinkingLevels: ['high', 'medium'],
-        },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['medium'],
-        },
-      };
-      const unsupported = getUnsupportedTiers(profile, 'medium');
-      expect(unsupported).toEqual([]);
-    });
-
-    it('skip missing tiers (undefined tier config)', () => {
-      const profile: RouterProfile = {
-        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high'] },
-      };
-      const unsupported = getUnsupportedTiers(profile, 'low');
-      expect(unsupported).toEqual(['high']);
-    });
-
-    it('treat tiers with undefined resolvedThinkingLevels as unsupported', () => {
-      const profile: RouterProfile = {
-        high: { model: 'openai/gpt-4o' },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['medium'],
-        },
-      };
-      const unsupported = getUnsupportedTiers(profile, 'medium');
-      expect(unsupported).toEqual(['high']);
-    });
-  });
-
   describe('normalizeConfig – classifier config variants', () => {
     it('normalize classifierModel as object with valid thinking', () => {
       const raw = {
@@ -849,7 +839,6 @@ describe('micro config compatibility', () => {
       model: 'test/tiny',
       thinking: 'off',
       fallbacks: ['test/backup'],
-      resolvedThinkingLevels: [],
     });
     const old = normalizeConfig({
       profiles: {

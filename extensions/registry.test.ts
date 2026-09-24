@@ -87,7 +87,6 @@ describe('Pi registry integration', () => {
         {
           persistState: () => {},
           recordDebugDecision: () => {},
-          getThinkingOverride: () => undefined,
           updateStatus: () => {},
           syncPiThinkingLevel: () => {},
         },

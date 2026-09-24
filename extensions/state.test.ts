@@ -310,6 +310,27 @@ describe('state.ts', () => {
     ).toMatchObject({ advisor: 'bypassed', bypassReason: 'single-candidate' });
   });
 
+  it('round-trips the all-fallbacks-failed flag through the persisted-state validator', () => {
+    const failed = snapshotDecision({ ...decision, isGenerationFailed: true });
+    expect(failed.isGenerationFailed).toBe(true);
+    expect(
+      isRouterPersistedState({
+        enabled: true,
+        selectedProfile: 'p',
+        timestamp: 1,
+        lastDecision: failed,
+      }),
+    ).toBe(true);
+    expect(
+      isRouterPersistedState({
+        enabled: true,
+        selectedProfile: 'p',
+        timestamp: 1,
+        lastDecision: { ...decision, isGenerationFailed: 'yes' },
+      }),
+    ).toBe(false);
+  });
+
   it('maps obsolete prompt-derived sources from old snapshots to legacy', () => {
     const restored = {
       enabled: true,

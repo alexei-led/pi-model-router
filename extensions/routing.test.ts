@@ -1,17 +1,25 @@
-import type { Context, Message, UserMessage } from '@earendil-works/pi-ai';
+import {
+  type Context,
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+  type Message,
+  type UserMessage,
+} from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
-import { normalizeConfig } from './config';
+import { normalizeConfig, THINKING_LEVELS } from './config';
 import { extractTextFromContent, hasImageAttachment } from './context';
 import {
   availableRoutePairs,
   BASELINE_TIER_ORDER,
+  clampEffort,
   decisionForPair,
+  effortAdjustments,
   phaseForTier,
   preservesRouteCoverage,
   primaryRoutePairs,
   resolveRoutePair,
+  routeThinking,
   selectBaselineRoute,
-  validateRoutePair,
 } from './routing';
 import { model, required } from './test/fixtures';
 import type { RouterProfile, RouterTier } from './types';
@@ -172,7 +180,7 @@ describe('eligible baseline routing', () => {
 });
 
 describe('route capability validation', () => {
-  it('filters input capabilities and effort before baseline selection', () => {
+  it('filters input capabilities and maps unsupported effort before baseline selection', () => {
     const imageOnly = {
       high: { model: 'test/image', thinking: 'off' as const },
     };
@@ -192,10 +200,10 @@ describe('route capability validation', () => {
         () => model('worker', { thinkingLevelMap: { high: null } }),
         false,
       ),
-    ).toEqual([]);
+    ).toEqual([{ tier: 'medium', model: 'test/worker', thinking: 'medium' }]);
   });
 
-  it('defaults non-reasoning routes to off and rejects explicit effort', () => {
+  it('defaults non-reasoning routes to off and maps explicit effort to off', () => {
     const profile: RouterProfile = {
       medium: { model: 'test/worker' },
     };
@@ -207,13 +215,146 @@ describe('route capability validation', () => {
       ),
     ).toEqual([{ tier: 'medium', model: 'test/worker', thinking: 'off' }]);
     expect(
-      validateRoutePair(
+      routeThinking(
         { tier: 'medium', model: 'test/worker', thinking: 'medium' },
         () => model('worker', { reasoning: false }),
         false,
       ),
-    ).toBe(false);
+    ).toBe('off');
   });
+
+  // Level maps copied from the live pi registry (2026-09-24).
+  const astra = model('astra', {
+    thinkingLevelMap: {
+      off: null,
+      minimal: 'low',
+      low: 'low',
+      medium: 'medium',
+      high: 'high',
+      xhigh: 'xhigh',
+      max: 'max',
+    },
+  });
+  const opus = model('opus', {
+    thinkingLevelMap: {
+      off: null,
+      minimal: null,
+      low: 'low',
+      medium: 'medium',
+      high: 'high',
+      xhigh: 'xhigh',
+      max: 'max',
+    },
+  });
+  const haiku = model('haiku');
+
+  it.each([
+    [astra, 'off', 'minimal'],
+    [opus, 'off', 'low'],
+    [opus, 'minimal', 'low'],
+    [haiku, 'max', 'high'],
+    [haiku, 'xhigh', 'high'],
+    [astra, 'high', 'high'],
+  ] as const)(
+    'runs %s at pi’s equivalent of %s: %s',
+    (target, requested, expected) => {
+      expect(
+        availableRoutePairs(
+          { high: { model: `test/${target.id}` } },
+          () => target,
+          false,
+          {
+            high: requested,
+          },
+        ),
+      ).toEqual([
+        { tier: 'high', model: `test/${target.id}`, thinking: expected },
+      ]);
+    },
+  );
+
+  it.each([astra, opus, haiku, model('plain', { reasoning: false })])(
+    'matches pi’s clampThinkingLevel for every level: %s',
+    (target) => {
+      for (const level of THINKING_LEVELS)
+        expect(clampEffort(level, getSupportedThinkingLevels(target))).toBe(
+          clampThinkingLevel(target, level),
+        );
+    },
+  );
+
+  it('keeps declared effort restrictive and rejects routes with no allowed level', () => {
+    expect(
+      availableRoutePairs(
+        {
+          high: {
+            model: 'test/haiku',
+            thinking: 'high',
+            thinkingLevels: ['low'],
+          },
+        },
+        () => haiku,
+        false,
+      ),
+    ).toEqual([{ tier: 'high', model: 'test/haiku', thinking: 'low' }]);
+    expect(
+      availableRoutePairs(
+        { high: { model: 'test/opus', reasoning: false } },
+        () => opus,
+        false,
+      ),
+    ).toEqual([]);
+  });
+
+  it('narrows normalized routes only by declared levels, never by the router defaults', () => {
+    const { config } = normalizeConfig({
+      models: {
+        frontier: { model: 'test/astra' },
+        capped: { model: 'test/opus', thinkingLevels: ['low', 'medium'] },
+      },
+      profiles: {
+        p: {
+          high: { model: 'frontier', thinking: 'high' },
+          low: { model: 'capped', thinking: 'low' },
+        },
+      },
+    });
+    const profile = required(config.profiles.p);
+    const find = (_provider: string, id: string) =>
+      id === 'astra' ? astra : opus;
+    expect(
+      availableRoutePairs(profile, find, false, { high: 'off', low: 'max' }),
+    ).toEqual([
+      { tier: 'high', model: 'test/astra', thinking: 'minimal' },
+      { tier: 'low', model: 'test/opus', thinking: 'medium' },
+    ]);
+    expect(
+      availableRoutePairs(profile, find, false, { high: 'max' })[0]?.thinking,
+    ).toBe('max');
+  });
+
+  it.each([
+    ['off', ['high runs at minimal', 'medium runs at low']],
+    ['max', ['micro runs at high']],
+    ['medium', []],
+  ] as const)(
+    'names tiers that run a %s override at another level',
+    (level, expected) => {
+      const models = { astra, opus, haiku };
+      const profile: RouterProfile = {
+        high: { model: 'test/astra' },
+        medium: { model: 'test/opus' },
+        micro: { model: 'test/haiku' },
+      };
+      expect(
+        effortAdjustments(
+          profile,
+          (_provider, id) => models[id as keyof typeof models],
+          level,
+        ),
+      ).toEqual(expected);
+    },
+  );
 
   it('retains each configured tier in thinking coverage checks', () => {
     const profile = allTierProfile();
@@ -225,21 +366,20 @@ describe('route capability validation', () => {
     ).toBe(true);
   });
 
-  it('accepts a corrective thinking override when the default has no eligible route', () => {
+  it('keeps a route when its configured or overridden effort is unsupported', () => {
     const profile: RouterProfile = {
       medium: { model: 'test/worker', thinking: 'high' },
     };
     const findModel = () => model('worker', { reasoning: false });
-    expect(availableRoutePairs(profile, findModel, false)).toEqual([]);
-    expect(preservesRouteCoverage(profile, findModel, { medium: 'off' })).toBe(
-      true,
-    );
+    expect(availableRoutePairs(profile, findModel, false)).toEqual([
+      { tier: 'medium', model: 'test/worker', thinking: 'off' },
+    ]);
     expect(preservesRouteCoverage(profile, findModel, { medium: 'low' })).toBe(
-      false,
+      true,
     );
   });
 
-  it('preserves existing input coverage when applying thinking overrides', () => {
+  it('accepts an unsupported override by clamping instead of dropping input coverage', () => {
     const profile: RouterProfile = {
       medium: { model: 'test/text' },
       low: { model: 'test/image', thinking: 'off' },
@@ -249,6 +389,36 @@ describe('route capability validation', () => {
         input: id === 'image' ? ['image'] : ['text'],
         reasoning: id !== 'image',
       });
+    // 'low' has no allowed level but 'off' (reasoning:false), so overriding
+    // its tier to 'high' clamps back down to 'off' instead of dropping the
+    // route: image coverage survives the override.
+    expect(preservesRouteCoverage(profile, findModel, { low: 'high' })).toBe(
+      true,
+    );
+    expect(
+      availableRoutePairs(profile, findModel, true, { low: 'high' }),
+    ).toEqual([{ tier: 'low', model: 'test/image', thinking: 'off' }]);
+  });
+
+  it('empties coverage only when a declared reasoning:false excludes every level the live model allows', () => {
+    // The route declares reasoning:false (only 'off' is ever permitted), but
+    // the live model never exposes 'off' (an always-thinking model): no
+    // allowed level exists, independent of any override.
+    const alwaysThinks = model('image', {
+      input: ['image'],
+      reasoning: true,
+      thinkingLevelMap: {
+        off: null,
+        low: 'low',
+        medium: 'medium',
+        high: 'high',
+      },
+    });
+    const profile: RouterProfile = {
+      low: { model: 'test/image', reasoning: false },
+    };
+    const findModel = () => alwaysThinks;
+    expect(availableRoutePairs(profile, findModel, true)).toEqual([]);
     expect(preservesRouteCoverage(profile, findModel, { low: 'high' })).toBe(
       false,
     );
@@ -285,6 +455,24 @@ describe('route capability validation', () => {
     ]);
   });
 
+  it('offers a tier via its eligible fallback instead of dropping it when the primary is ineligible', () => {
+    const profile: RouterProfile = {
+      medium: { model: 'test/gone', fallbacks: ['test/present'] },
+      low: { model: 'test/low' },
+    };
+    const findModel = (_provider: string, id: string) =>
+      id === 'present' || id === 'low' ? model(id) : undefined;
+    const pairs = availableRoutePairs(profile, findModel, false);
+    expect(pairs).toEqual([
+      { tier: 'medium', model: 'test/present', thinking: 'medium' },
+      { tier: 'low', model: 'test/low', thinking: 'low' },
+    ]);
+    expect(primaryRoutePairs(profile, pairs)).toEqual([
+      { tier: 'medium', model: 'test/present', thinking: 'medium' },
+      { tier: 'low', model: 'test/low', thinking: 'low' },
+    ]);
+  });
+
   it('parses normalized canonical refs directly and keeps fallback alias metadata', () => {
     const config = normalizeConfig({
       models: {
@@ -304,9 +492,12 @@ describe('route capability validation', () => {
     }).config;
     const profile = required(config.profiles.p);
     const pairs = availableRoutePairs(profile, findFixtureModel, false);
+    // 'restricted' (declared thinkingLevels: ['high']) now clamps the tier's
+    // 'medium' request up to 'high' instead of being dropped, so it wins the
+    // per-model dedup ahead of 'backup' (declared ['medium']).
     expect(pairs).toEqual([
       { tier: 'medium', model: 'test/model-a', thinking: 'medium' },
-      { tier: 'medium', model: 'test/fallback', thinking: 'medium' },
+      { tier: 'medium', model: 'test/fallback', thinking: 'high' },
     ]);
     expect(profile.medium?.resolvedFallbacks).toEqual([
       { model: 'test/fallback', thinkingLevels: ['high'] },

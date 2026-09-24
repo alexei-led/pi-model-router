@@ -380,14 +380,15 @@ describe('/router thinking', () => {
   });
 
   it.each(['max', 'minimal'])(
-    'rejects %s when no route would remain, without mutating state',
+    'rejects %s when the profile has no eligible route, without mutating state',
     async (level) => {
       const { run, state, actions, ctx, lastNotice } = setup((s) => {
         s.thinkingByProfile.balanced = { high: 'high' };
       });
-      ctx.modelRegistry.find.mockImplementation((provider, id) =>
-        model(id, { provider, thinkingLevelMap: { max: null, minimal: null } }),
-      );
+      // No model resolves at all, so every tier is ineligible regardless of
+      // the requested level (clamping only saves a route that has a live
+      // model to clamp against).
+      ctx.modelRegistry.find.mockReturnValue(undefined);
       await run(`thinking ${level}`);
       expect(state.thinkingByProfile.balanced).toEqual({ high: 'high' });
       expect(actions.persistState).not.toHaveBeenCalled();
@@ -397,11 +398,35 @@ describe('/router thinking', () => {
     },
   );
 
-  it('warns about tiers that may skip an unsupported level but still applies it', async () => {
+  it.each(['max', 'minimal'])(
+    'accepts %s by clamping to the nearest level each live model supports',
+    async (level) => {
+      const { run, state, actions, ctx } = setup((s) => {
+        s.thinkingByProfile.balanced = { high: 'high' };
+      });
+      ctx.modelRegistry.find.mockImplementation((provider, id) =>
+        model(id, { provider, thinkingLevelMap: { max: null, minimal: null } }),
+      );
+      await run(`thinking ${level}`);
+      expect(state.thinkingByProfile.balanced).toEqual({
+        high: level,
+        medium: level,
+        low: level,
+        micro: level,
+      });
+      expect(actions.persistState).toHaveBeenCalledOnce();
+      expect(actions.syncPiThinkingLevel).toHaveBeenLastCalledWith(level);
+    },
+  );
+
+  it('names tiers that run the override at another level and still applies it', async () => {
     const { run, state, ctx, lastNotice } = setup((s) => {
       s.currentConfig.profiles.balanced = {
         high: { model: 'openai/gpt-4o', thinkingLevels: ['max'] },
-        medium: { model: 'openai/gpt-4o-mini', thinkingLevels: ['off'] },
+        medium: {
+          model: 'openai/gpt-4o-mini',
+          thinkingLevels: ['low', 'medium'],
+        },
       };
     });
     ctx.modelRegistry.find.mockImplementation((provider, id) =>
@@ -409,8 +434,10 @@ describe('/router thinking', () => {
     );
     await run('thinking max');
     expect(state.thinkingByProfile.balanced?.high).toBe('max');
-    expect(lastNotice()[0]).toContain('medium may not support it');
-    expect(lastNotice()[1]).toBe('warning');
+    expect(lastNotice()).toEqual([
+      'Router thinking set to max; medium runs at medium',
+      'info',
+    ]);
   });
 
   it.each(['thinking high max', 'thinking ultra'])(

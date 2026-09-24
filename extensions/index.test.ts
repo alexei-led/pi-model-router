@@ -827,15 +827,14 @@ describe('index.ts (orchestrator)', () => {
       },
     );
     it.each(['max', 'minimal'])(
-      'rejects unsupported %s selection atomically and restores Pi display',
+      'rejects an %s override atomically when the profile has no eligible route, restoring Pi display',
       async (level) => {
         routerExtension(mockPi);
         const ctx = buildMockCtx();
+        // Router pseudo-model resolves (session_start needs it to stay enabled);
+        // every backing model is missing, so no tier has a live route at all.
         ctx.modelRegistry.find.mockImplementation((provider, id) =>
-          model(id, {
-            provider,
-            thinkingLevelMap: { max: null, minimal: null },
-          }),
+          provider === 'router' ? model(id, { provider }) : undefined,
         );
         for (const handler of handlersFor('session_start'))
           await handler({}, ctx);
@@ -851,8 +850,45 @@ describe('index.ts (orchestrator)', () => {
       },
     );
 
+    it.each(['max', 'minimal'] as const)(
+      'accepts an unsupported %s override by running the clamped equivalent level',
+      async (level) => {
+        routerExtension(mockPi);
+        const ctx = buildMockCtx();
+        ctx.modelRegistry.find.mockImplementation((provider, id) =>
+          model(id, {
+            provider,
+            thinkingLevelMap: { max: null, minimal: null },
+          }),
+        );
+        for (const handler of handlersFor('session_start'))
+          await handler({}, ctx);
+        mockPi.appendEntry.mockClear();
+        for (const handler of handlersFor('thinking_level_select'))
+          handler({ level, previousLevel: 'medium' }, ctx);
+        expect(mockPi.appendEntry).toHaveBeenCalledWith(
+          'router-state',
+          expect.objectContaining({
+            thinkingByProfile: {
+              balanced: {
+                high: level,
+                medium: level,
+                low: level,
+                micro: level,
+              },
+            },
+          }),
+        );
+        const runs = level === 'max' ? 'high' : 'low';
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          `Router thinking (all) set to ${level}; high runs at ${runs}, medium runs at ${runs}, micro runs at ${runs}`,
+          'info',
+        );
+      },
+    );
+
     it.each(['thinking', 'image'] as const)(
-      'preserves configured %s coverage when selecting thinking',
+      'preserves configured %s coverage by clamping an unsupported thinking override',
       async (capability) => {
         routerExtension(mockPi);
         const ctx = buildMockCtx();
@@ -871,9 +907,23 @@ describe('index.ts (orchestrator)', () => {
         mockPi.appendEntry.mockClear();
         for (const handler of handlersFor('thinking_level_select'))
           handler({ level: 'low', previousLevel: 'medium' }, ctx);
-        expect(mockPi.appendEntry).not.toHaveBeenCalled();
-        expect(mockPi.setThinkingLevel).toHaveBeenLastCalledWith('medium');
-        expect(ctx.ui.notify).toHaveBeenCalledWith(
+        // 'low' is unsupported everywhere but clamps up to 'medium', so every
+        // tier (and both text/image inputs) keeps a route instead of being
+        // dropped: the override is accepted, not rejected.
+        expect(mockPi.appendEntry).toHaveBeenCalledWith(
+          'router-state',
+          expect.objectContaining({
+            thinkingByProfile: {
+              balanced: {
+                high: 'low',
+                medium: 'low',
+                low: 'low',
+                micro: 'low',
+              },
+            },
+          }),
+        );
+        expect(ctx.ui.notify).not.toHaveBeenCalledWith(
           expect.stringContaining('unchanged'),
           'warning',
         );

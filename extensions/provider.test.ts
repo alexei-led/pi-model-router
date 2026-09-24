@@ -69,7 +69,6 @@ const setup = () => {
   const actions = {
     persistState: vi.fn(),
     recordDebugDecision: vi.fn(),
-    getThinkingOverride: vi.fn(),
     updateStatus: vi.fn(),
     syncPiThinkingLevel: vi.fn(),
   };
@@ -200,6 +199,31 @@ describe('router provider', () => {
     expect((await consume(s.stream())).result.stopReason).toBe('error');
     expect(s.state.accumulatedCost).toBe(0.02);
     expect(s.actions.persistState).toHaveBeenCalledOnce();
+  });
+
+  it('records the decision, flagged as failed, when every fallback in the chain fails', async () => {
+    const s = setup();
+    s.delegate.mockImplementation(() => failure());
+    expect((await consume(s.stream())).result.stopReason).toBe('error');
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
+      expect.objectContaining({ tier: 'medium', isGenerationFailed: true }),
+    );
+    // The thrown error's message (the delegate's remote text) must not leak
+    // into the persisted decision sink.
+    const recorded = JSON.stringify(
+      s.actions.recordDebugDecision.mock.calls[0],
+    );
+    expect(recorded).not.toContain('request failed');
+  });
+
+  it('does not flag a successful generation as failed', async () => {
+    const s = setup();
+    expect((await consume(s.stream())).result.stopReason).toBe('stop');
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
+    expect(
+      s.actions.recordDebugDecision.mock.calls[0]?.[0].isGenerationFailed,
+    ).toBeUndefined();
   });
 
   it('marks aggregate cost unknown when an attempt ends without usage', async () => {
@@ -396,11 +420,7 @@ describe('router provider', () => {
     });
     registerRouterProvider(s.api, s.state, s.actions);
     expect(s.register).toHaveBeenCalledTimes(1);
-    const balanced = required(s.state.currentConfig.profiles.balanced);
-    balanced.high = {
-      model: 'test/primary',
-      resolvedThinkingLevels: ['xhigh'],
-    };
+    required(s.models[0]).thinkingLevelMap = { xhigh: 'xhigh' };
     registerRouterProvider(s.api, s.state, s.actions);
     expect(s.register).toHaveBeenCalledTimes(2);
   });
@@ -544,9 +564,10 @@ describe('router provider', () => {
     expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
       expect.objectContaining({ reasonCode: 'classifier' }),
     );
-    expect(
-      s.actions.recordDebugDecision.mock.calls[0]?.[0].reasonCode,
-    ).not.toContain('do not persist');
+    const recorded = JSON.stringify(
+      s.actions.recordDebugDecision.mock.calls[0],
+    );
+    expect(recorded).not.toContain('do not persist');
   });
 
   it('routes images to a capable model and errors when none exists', async () => {
@@ -1366,7 +1387,7 @@ describe('Jev provider integration', () => {
   );
 
   it.each(['none', 'jev', 'classifier'] as const)(
-    'preserves a fallback-only baseline with one eligible primary (%s)',
+    "keeps routing through a tier's eligible fallback once the advisor treats it as a real candidate (%s)",
     async (advisor) => {
       for (const unavailable of ['missing', 'image'] as const) {
         const s = setup();
@@ -1384,9 +1405,16 @@ describe('Jev provider integration', () => {
         }).config;
         delete s.state.pinnedTierByProfile.balanced;
         if (advisor === 'jev') enableAdvisors(s);
-        if (advisor === 'classifier')
+        if (advisor === 'classifier') {
           s.state.currentConfig.classifierModel = { model: 'test/small' };
-        const fetch = mockChoice('high');
+          // First delegate call answers the classifier's own query.
+          s.delegate.mockReturnValueOnce(
+            done('Tier: medium\nReasoning: keep baseline'),
+          );
+        }
+        // Both tiers now offer a real candidate (high's primary, medium's
+        // eligible fallback), so the advisor picks between them explicitly.
+        const fetch = mockChoice('medium');
         const context = userContext();
         if (unavailable === 'missing') s.models.shift();
         else {
@@ -1402,16 +1430,29 @@ describe('Jev provider integration', () => {
         expect((await consume(s.stream(context))).result.stopReason).toBe(
           'stop',
         );
-        expect(fetch).not.toHaveBeenCalled();
-        expect(s.delegate).toHaveBeenCalledOnce();
-        expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
+        if (advisor === 'none') {
+          expect(fetch).not.toHaveBeenCalled();
+          expect(s.delegate).toHaveBeenCalledOnce();
+        } else if (advisor === 'jev') {
+          expect(fetch).toHaveBeenCalledOnce();
+          expect(s.delegate).toHaveBeenCalledOnce();
+        } else {
+          expect(fetch).not.toHaveBeenCalled();
+          expect(s.delegate).toHaveBeenCalledTimes(2);
+        }
+        expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('fallback');
+        // The fallback ref is the tier's only eligible candidate here, so it
+        // is what routing actually chose (isFallback), not a mid-stream
+        // fallback from a failed primary attempt — provenance stays the
+        // advisor's, not 'fallback'.
         expect(s.state.lastDecision).toMatchObject({
           tier: 'medium',
           targetLabel: 'test/fallback',
-          reasonCode: 'fallback',
+          isFallback: true,
+          reasonCode: advisor === 'none' ? 'baseline' : advisor,
         });
         expect(advisorOf(s.state.lastDecision)).toBe(
-          advisor === 'none' ? 'none' : 'bypassed',
+          advisor === 'none' ? 'none' : advisor,
         );
       }
     },
@@ -1583,8 +1624,9 @@ describe('Jev provider integration', () => {
     });
   });
 
-  it('keeps a fallback-only baseline when low-confidence advice needs its abstention mass', async () => {
+  it('offers a fallback-only baseline tier to Jev and gives it the abstention mass', async () => {
     const s = setup();
+    let offered: string[] = [];
     s.state.currentConfig = normalizeConfig({
       profiles: {
         balanced: {
@@ -1599,21 +1641,23 @@ describe('Jev provider integration', () => {
     const transport = vi.fn<typeof fetch>(async (_url, init) => {
       const body = JSON.parse(String(init?.body)) as ChoiceRequest;
       const ids = Object.keys(body.questions.route.criteria);
-      expect(ids.some((id) => id.startsWith('high|'))).toBe(false);
+      offered = ids;
+      const high = ids.find((id) => id.startsWith('high|'));
+      // Below confidenceThreshold, so selection falls to cumulative
+      // probability: low+medium (0.2) stays under probabilityThreshold
+      // (0.8); only once high's own mass (0.45) plus the abstained
+      // 'uncertain' mass (credited to baselineTier 'high') is added does
+      // cumulative (1.0) clear the threshold.
       return Response.json({
         answers: {
           route: {
             type: 'choice',
-            choice: ids.find((id) => id.startsWith('medium|')),
+            choice: high,
             confidence: 0.1,
             probabilities: Object.fromEntries(
               ids.map((id) => [
                 id,
-                id === 'uncertain'
-                  ? 0.35
-                  : id.startsWith('medium|')
-                    ? 0.45
-                    : 0.2,
+                id === 'uncertain' ? 0.35 : id === high ? 0.45 : 0.1,
               ]),
             ),
           },
@@ -1625,10 +1669,13 @@ describe('Jev provider integration', () => {
       'stop',
     );
     expect(transport).toHaveBeenCalledOnce();
+    expect(offered).toContain('high|test%2Ffallback|medium');
     expect(s.state.lastDecision).toMatchObject({
       tier: 'high',
       targetLabel: 'test/fallback',
-      advisor: 'jev-fallback',
+      advisor: 'jev',
+      reasonCode: 'jev',
+      isFallback: true,
     });
     expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
   });
@@ -2145,11 +2192,15 @@ describe('Jev provider integration', () => {
     expect(s.delegate).not.toHaveBeenCalled();
   });
 
-  it('filters unsupported efforts and vision before Jev and never offers fallback-chain entries', async () => {
+  it('maps an unsupported effort to its clamped level before Jev, offering at most one candidate per tier', async () => {
     const s = setup();
     enableAdvisors(s);
     required(required(s.state.currentConfig.profiles.balanced).high).thinking =
       'high';
+    // Disables medium thinking on the shared "primary" model. The medium
+    // tier's primary ref no longer drops (and falls through to its
+    // configured fallback "test/fallback"); it clamps up to 'high' and
+    // stays the sole medium candidate.
     required(s.models[0]).thinkingLevelMap = { medium: null };
     const fetch = mockChoice('high');
     await consume(s.stream(userContext()));
@@ -2157,9 +2208,10 @@ describe('Jev provider integration', () => {
       String(fetch.mock.calls[0]?.[1]?.body),
     ) as ChoiceRequest;
     const ids = Object.keys(body.questions.route.criteria);
-    expect(ids).toHaveLength(3); // high, low plus uncertain; fallbacks remain local
-    expect(ids.join(' ')).not.toContain('fallback');
-    expect(ids.join(' ')).not.toContain('medium|');
+    // high, medium (clamped to 'high' on its own primary), low, plus uncertain
+    expect(ids).toHaveLength(4);
+    expect(ids).toContain('medium|test%2Fprimary|high');
+    expect(ids).not.toContain('medium|test%2Ffallback|medium');
     expect(s.state.lastDecision?.tier).toBe('high');
   });
 
@@ -2343,13 +2395,71 @@ describe('Jev provider integration', () => {
     ]);
   });
 
-  it('validates fallback effort against its own live model, never clamps the request', async () => {
+  it('validates fallback effort against its own live model, clamping to its equivalent level', async () => {
     const s = setup();
+    // The primary supports 'medium' fine; only the fallback lacks it, so a
+    // clamp driven by the primary's capabilities would wrongly keep 'medium'.
     required(s.models[1]).thinkingLevelMap = { medium: null };
     s.delegate.mockReturnValueOnce(failure());
     const { result } = await consume(s.stream());
-    expect(result.stopReason).toBe('error');
-    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(result.stopReason).toBe('stop');
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.delegate.mock.calls[0]?.[0].id).toBe('primary');
     expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('medium');
+    // 'medium' clamps up to 'high' on the fallback's own live model.
+    expect(s.delegate.mock.calls[1]?.[0].id).toBe('fallback');
+    expect(s.delegate.mock.calls[1]?.[2]?.reasoning).toBe('high');
+    expect(s.state.lastDecision).toMatchObject({
+      targetLabel: 'test/fallback',
+      thinking: 'high',
+    });
+    // Pi's footer follows the attempt that runs, not the first choice.
+    expect(
+      s.actions.syncPiThinkingLevel.mock.calls.map(([level]) => level),
+    ).toEqual(['medium', 'high']);
   });
+
+  it('shows the level an override runs at, not the requested level', async () => {
+    const s = setup();
+    required(s.models[0]).thinkingLevelMap = { off: null };
+    s.state.thinkingByProfile = {
+      balanced: { high: 'off', medium: 'off', low: 'off', micro: 'off' },
+    };
+    await consume(s.stream());
+    expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('minimal');
+    expect(s.actions.syncPiThinkingLevel).toHaveBeenCalledWith('minimal');
+    expect(s.actions.syncPiThinkingLevel).not.toHaveBeenCalledWith('off');
+  });
+
+  it.each([
+    [
+      'an undeclared route runs xhigh',
+      { xhigh: 'xhigh' },
+      undefined,
+      { xhigh: 'xhigh' },
+    ],
+    ['a tier asks for max its model lacks', undefined, 'max', undefined],
+    ['a route runs max', { max: 'max' }, undefined, { max: 'max' }],
+  ] as const)(
+    'lists router xhigh and max only when %s',
+    (_label, primaryLevels, highThinking, expected) => {
+      const s = setup();
+      if (primaryLevels)
+        required(s.models[0]).thinkingLevelMap = { ...primaryLevels };
+      if (highThinking)
+        s.state.currentConfig = normalizeConfig({
+          profiles: {
+            balanced: {
+              high: { model: 'test/primary', thinking: highThinking },
+              low: { model: 'test/small' },
+            },
+          },
+        }).config;
+      registerRouterProvider(s.api, s.state, s.actions);
+      const router = s.register.mock.calls
+        .at(-1)?.[1]
+        .models?.find((entry) => entry.id === 'balanced');
+      expect(router?.thinkingLevelMap).toEqual(expected);
+    },
+  );
 });

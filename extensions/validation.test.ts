@@ -19,9 +19,10 @@ describe('configuration boundaries', () => {
         local: { medium: { model: 'test/local', reasoning: false } },
       },
     });
-    expect(
-      result.config.profiles.local?.medium?.resolvedThinkingLevels,
-    ).toEqual([]);
+    expect(result.config.profiles.local?.medium).toMatchObject({
+      reasoning: false,
+      thinking: 'off',
+    });
   });
   it.each([null, [], 'wrong'])(
     'ignores malformed profile entries %j while preserving valid config',

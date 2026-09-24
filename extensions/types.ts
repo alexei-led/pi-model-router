@@ -40,7 +40,6 @@ export interface RoutedTierConfig {
   thinkingLevels?: ThinkingLevel[] | undefined;
   resolvedContextWindow?: number | undefined;
   resolvedMaxTokens?: number | undefined;
-  resolvedThinkingLevels?: ThinkingLevel[] | undefined;
 }
 
 export interface JevContextConfig {
@@ -321,6 +320,8 @@ export interface RoutingDecision {
   isClassifier?: boolean | undefined;
   isFallback?: boolean | undefined;
   isBudgetForced?: boolean | undefined;
+  /** Every model in the generation chain failed; no content was produced. */
+  isGenerationFailed?: boolean | undefined;
 }
 
 export interface RouterLastProfileState {

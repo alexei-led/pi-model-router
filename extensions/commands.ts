@@ -5,7 +5,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { AutocompleteItem } from '@earendil-works/pi-tui';
 import {
-  getUnsupportedTiers,
   isRouterPinValue,
   isThinkingLevel,
   parseCanonicalModelRef,
@@ -15,7 +14,7 @@ import {
   THINKING_LEVELS,
 } from './config';
 import { DEFAULT_JEV_CONTEXT, ROUTER_COMMANDS as VERBS } from './constants';
-import { preservesRouteCoverage } from './routing';
+import { effortAdjustments, preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
   RouterPinByProfile,
@@ -250,15 +249,19 @@ export const registerCommands = (
     if (level) actions.syncPiThinkingLevel(level);
     else if (state.lastDecision)
       actions.syncPiThinkingLevel(state.lastDecision.thinking);
-    const unsupported =
-      level && level !== 'off' && config
-        ? getUnsupportedTiers(config, level)
+    const adjusted =
+      level && config
+        ? effortAdjustments(
+            config,
+            (provider, id) => ctx.modelRegistry.find(provider, id),
+            level,
+          )
         : [];
     ctx.ui.notify(
       level
-        ? `Router thinking set to ${level}${unsupported.length > 0 ? `; ${unsupported.join(', ')} may not support it and will be skipped when unsupported` : ''}`
+        ? `Router thinking set to ${level}${adjusted.length > 0 ? `; ${adjusted.join(', ')}` : ''}`
         : 'Router thinking override cleared',
-      unsupported.length > 0 ? 'warning' : 'info',
+      'info',
     );
   };
 

@@ -17,7 +17,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { runClassifier } from './classifier';
 import {
-  collectProfileThinkingLevels,
   MAX_THINKING_LEVEL,
   parseCanonicalModelRef,
   profileNames,
@@ -51,7 +50,6 @@ import type {
   RouterConfig,
   RouterPinByProfile,
   RouterThinkingByProfile,
-  RouterTier,
   RoutingDecision,
 } from './types';
 
@@ -306,10 +304,6 @@ export const registerRouterProvider = (
   actions: {
     persistState: () => void;
     recordDebugDecision: (decision: RoutingDecision) => void;
-    getThinkingOverride: (
-      profileName: string,
-      tier: RouterTier,
-    ) => ThinkingLevel | undefined;
     updateStatus: (ctx: ExtensionContext) => void;
     syncPiThinkingLevel: (level: ThinkingLevel) => void;
   },
@@ -343,14 +337,24 @@ export const registerRouterProvider = (
     }
 
     const hasReasoning = supportsReasoning(profile, state.currentModelRegistry);
-    const profileLevels = collectProfileThinkingLevels(profile);
-    // Build thinkingLevelMap from the union of all tier models' declared levels.
-    // Only needed if xhigh or max are in the set (pi supports all others by default).
+    const registry = state.currentModelRegistry;
+    // Pi clamps the footer and picker to these levels, so list a level only when
+    // some route runs it exactly.
+    const runsLevel = (level: ThinkingLevel): boolean =>
+      [false, true].some((imageAttached) =>
+        availableRoutePairs(
+          profile,
+          (provider, id) => registry?.find(provider, id),
+          imageAttached,
+          Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
+        ).some((pair) => pair.thinking === level),
+      );
+    // Only xhigh and max need a map entry; pi supports the others by default.
     let thinkingLevelMap: Record<string, string> | undefined;
     if (hasReasoning) {
       const map: Record<string, string> = {};
-      if (profileLevels.has('xhigh')) map.xhigh = 'xhigh';
-      if (profileLevels.has(MAX_THINKING_LEVEL)) map.max = MAX_THINKING_LEVEL;
+      if (runsLevel('xhigh')) map.xhigh = 'xhigh';
+      if (runsLevel(MAX_THINKING_LEVEL)) map.max = MAX_THINKING_LEVEL;
       if (Object.keys(map).length > 0) thinkingLevelMap = map;
     }
 
@@ -656,7 +660,8 @@ export const registerRouterProvider = (
             const candidates = primaryRoutePairs(profile, pairs).map(
               createJevCandidate,
             );
-            // A single primary bypasses advice, not a baseline's eligible fallback.
+            // A single per-tier candidate (primary, or its first eligible
+            // fallback when the primary itself is ineligible) bypasses advice.
             if (candidates.length <= 1) {
               decision.advisor = 'bypassed';
               decision.bypassReason = 'single-candidate';
@@ -826,17 +831,21 @@ export const registerRouterProvider = (
           // Sync pi's thinking level display with the router's effective thinking.
           // Wrapped in try/catch: in subagent contexts the extension runtime
           // may be invalidated (stale) after session teardown.
-          const effectiveThinking =
-            actions.getThinkingOverride(model.id, decision.tier) ??
-            decision.thinking;
+          // The route's thinking already includes any override, mapped to a
+          // level the target supports.
+          let shownThinking = decision.thinking;
           try {
-            actions.syncPiThinkingLevel(effectiveThinking);
+            actions.syncPiThinkingLevel(shownThinking);
             if (state.lastExtensionContext) {
               actions.updateStatus(state.lastExtensionContext);
             }
           } catch {
             // Stale extension context — skip non-critical UI updates.
           }
+
+          // What routing actually chose, captured before the loop below
+          // overwrites decision.targetLabel with each attempted ref.
+          const routedTargetLabel = decision.targetLabel;
 
           // Explicit fallback refs authorize provider changes; never discover other accounts.
           const modelsToTry = [
@@ -904,6 +913,11 @@ export const registerRouterProvider = (
                 pair.thinking !== 'off' ? pair.thinking : undefined;
 
               try {
+                // A fallback can run at another level than the one shown.
+                if (pair.thinking !== shownThinking) {
+                  actions.syncPiThinkingLevel(pair.thinking);
+                  shownThinking = pair.thinking;
+                }
                 if (state.lastExtensionContext) {
                   if (delegatedReasoning) {
                     state.lastExtensionContext.ui.setHiddenThinkingLabel?.(
@@ -949,8 +963,11 @@ export const registerRouterProvider = (
                 decision.thinking = delegatedReasoning ?? 'off';
                 decision.isFallback =
                   i > 0 || modelRef !== profile[decision.tier]?.model;
+                // A Jev/classifier pick that already targets a fallback ref
+                // (the tier's only eligible candidate) is not a mid-stream
+                // fallback; only compare against what routing actually chose.
                 if (
-                  decision.isFallback &&
+                  modelRef !== routedTargetLabel &&
                   decision.reasonCode !== 'continuation'
                 )
                   decision.reasonCode = 'fallback';
@@ -1074,6 +1091,14 @@ export const registerRouterProvider = (
           }
 
           if (!success) {
+            // Record the exhausted decision before it is lost to the thrown
+            // error below. `decision` is shared with state.lastDecision (and
+            // may be cached for reuse), so record a flagged copy rather than
+            // mutating it.
+            actions.recordDebugDecision({
+              ...decision,
+              isGenerationFailed: true,
+            });
             throw lastError instanceof Error
               ? lastError
               : new Error(

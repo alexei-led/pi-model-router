@@ -70,7 +70,7 @@ const isDecision = (value: unknown): value is RoutingDecision =>
     ? typeof value.reasoning === 'string'
     : isPersistedReasonCode(value.reasonCode)) &&
   (value.advisor === undefined || isAdvisorOutcome(value.advisor)) &&
-  ['isClassifier', 'isFallback', 'isBudgetForced'].every(
+  ['isClassifier', 'isFallback', 'isBudgetForced', 'isGenerationFailed'].every(
     (key) => value[key] === undefined || typeof value[key] === 'boolean',
   );
 const isMap = (value: unknown, validate: (entry: unknown) => boolean) =>
@@ -339,6 +339,7 @@ export const snapshotDecision = (
   isClassifier: decision.isClassifier,
   isFallback: decision.isFallback,
   isBudgetForced: decision.isBudgetForced,
+  isGenerationFailed: decision.isGenerationFailed,
 });
 
 export const buildPersistedState = ({

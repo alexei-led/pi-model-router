@@ -97,6 +97,7 @@ Here, `auto` is a profile name. The argument in `pin auto` clears a pin instead.
 An ineligible pin produces an error. The router does not substitute another tier.
 
 An effort override applies to every tier in the active profile.
+Each model runs the override at its nearest supported level. For example, `off` runs as `minimal` on a model without `off`. The confirmation names each tier that runs another level, such as `high runs at minimal`.
 Pi's thinking selector, such as Shift+Tab, sets the same override.
 An override that removes every eligible route produces an error without a partial configuration change.
 Use `/router thinking auto` to clear the override.
@@ -105,8 +106,7 @@ Use `/router thinking auto` to clear the override.
 
 | Symptom | Action |
 | --- | --- |
-| No eligible route | Make sure that the model exists in `/model` and supports the input and effort. |
-| Only high remains eligible | Run `/router thinking auto`, or choose models that support the override. |
+| No eligible route | Make sure that the model exists in `/model` and supports the input. Check `reasoning` and `thinkingLevels` in the configuration. |
 | The baseline handles every request | Inspect `/router`. Enable an advisor for semantic selection, or clear a pin. |
 | Jev does not run | Inspect the bypass reason and the [Jev diagnostics](jev-advisor.md#diagnostics). |
 | Old behavior after an extension change | Start a new Pi session. |
@@ -141,7 +141,7 @@ CAUTION: Keep credentials out of Git. Selected conversation text can contain sec
 
 A profile needs at least one tier. A partial profile is valid.
 Profile names must be nonempty, contain no whitespace, and not match an active command: `pin`, `thinking`, `log`, `widget`, `off`, `reload`, or `help`. Invalid names are ignored with a warning; rename these profiles before reloading.
-The router filters unavailable models, unsupported input, and unsupported effort before selection.
+The router filters unavailable models and unsupported input before selection. An unsupported effort runs at the nearest supported level.
 `baselineTier` prefers a configured tier. Without it, the preference is `medium`, `high`, `low`, then `micro`.
 The [complete example](../model-router.example.json) shows aliases, all four tiers, and explicit fallbacks.
 

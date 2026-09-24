@@ -17,6 +17,7 @@ const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
   if (decision.isFallback) flags.push('fallback');
   if (decision.isBudgetForced) flags.push('budget-limit');
+  if (decision.isGenerationFailed) flags.push('failed');
   return flags;
 };
 
@@ -289,9 +290,11 @@ export const formatGenerationDetail = (
 
 export const formatDecision = (decision: RoutingDecision): string => {
   const source = formatDecisionSource(decision);
+  const flags = getDecisionFlags(decision);
+  const flagsStr = flags.length > 0 ? ` [${flags.join(',')}]` : '';
   const advisor = formatAdvisorDetail(decision);
   const generation = formatGenerationDetail(decision);
-  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}${generation ? ` [${generation}]` : ''}`;
+  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}${generation ? ` [${generation}]` : ''}`;
 };
 
 export const formatPinSummary = (

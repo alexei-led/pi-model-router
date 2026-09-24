@@ -39,7 +39,7 @@ Node labels identify each role without color.
 | --- | --- |
 | Router | Profile policy, eligible routes, advisor calls, explicit fallbacks, and diagnostics. |
 | Pi | Authentication, credential-specific URLs, provider dispatch, transcript conversion, and tool permissions. |
-| Jev | Advice among eligible primary model/effort pairs. It cannot add models or authorize tools. |
+| Jev | Advice among eligible tier candidates. It cannot add models or authorize tools. |
 | Operator | Model configuration, provider access, and per-profile approval for external context. |
 
 The router never reads private authentication storage or claims to identify the provider account behind a login.
@@ -68,14 +68,16 @@ flowchart TD
 ```
 
 A valid continuation reuses its actual route. An invalid continuation selects a compatible local route without advice.
-Pins, budget policy, and a single eligible primary candidate also bypass advisors.
+Pins, budget policy, and only one eligible candidate also bypass advisors.
 The budget is a soft generation-cost policy, not a billing cap.
 
-Eligibility requires provider availability, input support, and exact effort support.
+Eligibility requires provider availability, input support, and at least one allowed effort level.
 Local declarations can restrict registry capabilities but cannot grant capabilities.
-The router never reduces an explicit unsupported effort level silently.
+An unsupported effort runs at the nearest allowed level, as in Pi: the next higher level, else the next lower level.
+The route, status line, log, and Pi's footer show the level that runs.
 
 An eligible `baselineTier` takes priority. The remaining preference is `medium`, `high`, `low`, then `micro`.
+Each tier offers at most one advisor candidate: its primary, or its first eligible fallback when the primary is ineligible.
 Explicit fallback models retain their configured order. They are not extra Jev candidates.
 Prompt words, language, length, and inferred task phase never select a local tier.
 

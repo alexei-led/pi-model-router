@@ -1,9 +1,10 @@
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   type Api,
   getSupportedThinkingLevels,
   type Model,
 } from '@earendil-works/pi-ai';
-import { parseCanonicalModelRef } from './config';
+import { parseCanonicalModelRef, THINKING_LEVELS } from './config';
 import type {
   ModelDefinition,
   RoutePair,
@@ -50,29 +51,48 @@ export const resolveRoutePair = (
 };
 
 /**
- * Revalidate the actual target against the live registry. A configured effort
- * declaration is restrictive: it can reject a route, but never grants a
- * capability the live model does not expose.
+ * Pi's clampThinkingLevel over the levels a route may use: the requested
+ * effort, else the nearest higher one, else the nearest lower one.
  */
-export const validateRoutePair = (
+export const clampEffort = (
+  requested: ThinkingLevel,
+  allowed: readonly ThinkingLevel[],
+): ThinkingLevel | undefined => {
+  if (allowed.includes(requested)) return requested;
+  const index = THINKING_LEVELS.indexOf(requested);
+  return (
+    THINKING_LEVELS.slice(index + 1).find((level) => allowed.includes(level)) ??
+    THINKING_LEVELS.slice(0, index)
+      .reverse()
+      .find((level) => allowed.includes(level))
+  );
+};
+
+/**
+ * Resolve the effort a route runs at against the live registry, or undefined
+ * when the model cannot serve the input. An unsupported effort maps to its
+ * nearest supported level, as pi does. A configured effort declaration only
+ * narrows the levels; it never grants one the live model does not expose.
+ */
+export const routeThinking = (
   pair: RoutePair,
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   imageAttached: boolean,
   declaredLevels?: ModelDefinition['thinkingLevels'],
-): boolean => {
+): ThinkingLevel | undefined => {
   try {
     const { provider, modelId } = parseCanonicalModelRef(pair.model);
-    if (provider === 'router') return false;
+    if (provider === 'router') return undefined;
     const model = findModel(provider, modelId);
-    return Boolean(
-      model?.input.includes(imageAttached ? 'image' : 'text') &&
-        getSupportedThinkingLevels(model).includes(pair.thinking) &&
-        (!declaredLevels ||
-          pair.thinking === 'off' ||
-          declaredLevels.includes(pair.thinking)),
+    if (!model?.input.includes(imageAttached ? 'image' : 'text'))
+      return undefined;
+    const allowed = getSupportedThinkingLevels(model).filter(
+      (level) =>
+        !declaredLevels || level === 'off' || declaredLevels.includes(level),
     );
+    return clampEffort(pair.thinking, allowed);
   } catch {
-    return false;
+    return undefined;
   }
 };
 
@@ -109,28 +129,24 @@ export const availableRoutePairs = (
           const model = findModel(provider, modelId);
           const ownConfig =
             index === 0 ? config : config.resolvedFallbacks?.[index - 1];
-          // A non-reasoning model defaults to off, but explicit unsupported
-          // effort remains ineligible.
-          const thinking =
+          // A non-reasoning model defaults to off; any other unsupported
+          // effort runs at its nearest supported level.
+          const requested =
             thinkingOverrides?.[tier] ??
             ((config.thinkingExplicit ?? config.thinking !== undefined)
               ? primary.thinking
               : ownConfig?.reasoning === false || !model?.reasoning
                 ? 'off'
                 : primary.thinking);
-          const pair = { tier, model: `${provider}/${modelId}`, thinking };
-          return validateRoutePair(
-            pair,
+          const target = `${provider}/${modelId}`;
+          const thinking = routeThinking(
+            { tier, model: target, thinking: requested },
             findModel,
             imageAttached,
-            ownConfig?.reasoning === false
-              ? []
-              : index === 0
-                ? (config.thinkingLevels ?? config.resolvedThinkingLevels)
-                : ownConfig?.thinkingLevels,
-          )
-            ? [pair]
-            : [];
+            // Only declared levels narrow a route; undeclared means the registry's.
+            ownConfig?.reasoning === false ? [] : ownConfig?.thinkingLevels,
+          );
+          return thinking ? [{ tier, model: target, thinking }] : [];
         } catch {
           return [];
         }
@@ -167,6 +183,26 @@ export const preservesRouteCoverage = (
       availableRoutePairs(profile, findModel, imageAttached, thinkingOverrides)
         .length > 0,
   );
+};
+
+/** Tiers whose text route runs an effort override at another level, as "tier runs at level". */
+export const effortAdjustments = (
+  profile: RouterProfile,
+  findModel: (provider: string, modelId: string) => Model<Api> | undefined,
+  level: ThinkingLevel,
+): string[] => {
+  const pairs = availableRoutePairs(
+    profile,
+    findModel,
+    false,
+    Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
+  );
+  return ROUTER_TIERS.flatMap((tier) => {
+    const pair = pairs.find((entry) => entry.tier === tier);
+    return pair && pair.thinking !== level
+      ? [`${tier} runs at ${pair.thinking}`]
+      : [];
+  });
 };
 
 export interface BaselineSelection {
@@ -255,7 +291,10 @@ export const primaryRoutePairs = (
     const primary = pairs.find(
       (pair) => pair.tier === tier && pair.model === profile[tier]?.model,
     );
-    return primary ? [primary] : [];
+    // A configured tier whose primary ref is ineligible still offers its
+    // first eligible fallback rather than dropping the tier entirely.
+    const pair = primary ?? pairs.find((entry) => entry.tier === tier);
+    return pair ? [pair] : [];
   });
 
 export const decisionForPair = (
