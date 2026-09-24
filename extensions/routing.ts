@@ -255,7 +255,10 @@ export const primaryRoutePairs = (
     const primary = pairs.find(
       (pair) => pair.tier === tier && pair.model === profile[tier]?.model,
     );
-    return primary ? [primary] : [];
+    // A configured tier whose primary ref is ineligible still offers its
+    // first eligible fallback rather than dropping the tier entirely.
+    const pair = primary ?? pairs.find((entry) => entry.tier === tier);
+    return pair ? [pair] : [];
   });
 
 export const decisionForPair = (

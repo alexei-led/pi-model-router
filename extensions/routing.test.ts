@@ -285,6 +285,24 @@ describe('route capability validation', () => {
     ]);
   });
 
+  it('offers a tier via its eligible fallback instead of dropping it when the primary is ineligible', () => {
+    const profile: RouterProfile = {
+      medium: { model: 'test/gone', fallbacks: ['test/present'] },
+      low: { model: 'test/low' },
+    };
+    const findModel = (_provider: string, id: string) =>
+      id === 'present' || id === 'low' ? model(id) : undefined;
+    const pairs = availableRoutePairs(profile, findModel, false);
+    expect(pairs).toEqual([
+      { tier: 'medium', model: 'test/present', thinking: 'medium' },
+      { tier: 'low', model: 'test/low', thinking: 'low' },
+    ]);
+    expect(primaryRoutePairs(profile, pairs)).toEqual([
+      { tier: 'medium', model: 'test/present', thinking: 'medium' },
+      { tier: 'low', model: 'test/low', thinking: 'low' },
+    ]);
+  });
+
   it('parses normalized canonical refs directly and keeps fallback alias metadata', () => {
     const config = normalizeConfig({
       models: {

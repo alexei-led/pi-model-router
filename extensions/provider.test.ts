@@ -1303,7 +1303,7 @@ describe('Jev provider integration', () => {
   );
 
   it.each(['none', 'jev', 'classifier'] as const)(
-    'preserves a fallback-only baseline with one eligible primary (%s)',
+    "keeps routing through a tier's eligible fallback once the advisor treats it as a real candidate (%s)",
     async (advisor) => {
       for (const unavailable of ['missing', 'image'] as const) {
         const s = setup();
@@ -1321,9 +1321,16 @@ describe('Jev provider integration', () => {
         }).config;
         delete s.state.pinnedTierByProfile.balanced;
         if (advisor === 'jev') enableAdvisors(s);
-        if (advisor === 'classifier')
+        if (advisor === 'classifier') {
           s.state.currentConfig.classifierModel = { model: 'test/small' };
-        const fetch = mockChoice('high');
+          // First delegate call answers the classifier's own query.
+          s.delegate.mockReturnValueOnce(
+            done('Tier: medium\nReasoning: keep baseline'),
+          );
+        }
+        // Both tiers now offer a real candidate (high's primary, medium's
+        // eligible fallback), so the advisor picks between them explicitly.
+        const fetch = mockChoice('medium');
         const context = userContext();
         if (unavailable === 'missing') s.models.shift();
         else {
@@ -1339,16 +1346,29 @@ describe('Jev provider integration', () => {
         expect((await consume(s.stream(context))).result.stopReason).toBe(
           'stop',
         );
-        expect(fetch).not.toHaveBeenCalled();
-        expect(s.delegate).toHaveBeenCalledOnce();
-        expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
+        if (advisor === 'none') {
+          expect(fetch).not.toHaveBeenCalled();
+          expect(s.delegate).toHaveBeenCalledOnce();
+        } else if (advisor === 'jev') {
+          expect(fetch).toHaveBeenCalledOnce();
+          expect(s.delegate).toHaveBeenCalledOnce();
+        } else {
+          expect(fetch).not.toHaveBeenCalled();
+          expect(s.delegate).toHaveBeenCalledTimes(2);
+        }
+        expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('fallback');
+        // The fallback ref is the tier's only eligible candidate here, so it
+        // is what routing actually chose (isFallback), not a mid-stream
+        // fallback from a failed primary attempt — provenance stays the
+        // advisor's, not 'fallback'.
         expect(s.state.lastDecision).toMatchObject({
           tier: 'medium',
           targetLabel: 'test/fallback',
-          reasonCode: 'fallback',
+          isFallback: true,
+          reasonCode: advisor === 'none' ? 'baseline' : advisor,
         });
         expect(advisorOf(s.state.lastDecision)).toBe(
-          advisor === 'none' ? 'none' : 'bypassed',
+          advisor === 'none' ? 'none' : advisor,
         );
       }
     },
@@ -1948,11 +1968,14 @@ describe('Jev provider integration', () => {
     expect(s.delegate).not.toHaveBeenCalled();
   });
 
-  it('filters unsupported efforts and vision before Jev and never offers fallback-chain entries', async () => {
+  it('filters unsupported efforts and vision before Jev, offering at most one candidate per tier even via fallback', async () => {
     const s = setup();
     enableAdvisors(s);
     required(required(s.state.currentConfig.profiles.balanced).high).thinking =
       'high';
+    // Disables medium thinking on the shared "primary" model, so the medium
+    // tier's own primary ref becomes ineligible and falls through to its
+    // configured fallback ("test/fallback") instead of dropping the tier.
     required(s.models[0]).thinkingLevelMap = { medium: null };
     const fetch = mockChoice('high');
     await consume(s.stream(userContext()));
@@ -1960,9 +1983,10 @@ describe('Jev provider integration', () => {
       String(fetch.mock.calls[0]?.[1]?.body),
     ) as ChoiceRequest;
     const ids = Object.keys(body.questions.route.criteria);
-    expect(ids).toHaveLength(3); // high, low plus uncertain; fallbacks remain local
-    expect(ids.join(' ')).not.toContain('fallback');
-    expect(ids.join(' ')).not.toContain('medium|');
+    // high, medium (via its eligible fallback), low, plus uncertain
+    expect(ids).toHaveLength(4);
+    expect(ids).toContain('medium|test%2Ffallback|medium');
+    expect(ids).not.toContain('medium|test%2Fprimary|medium');
     expect(s.state.lastDecision?.tier).toBe('high');
   });
 

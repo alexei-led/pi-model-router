@@ -636,7 +636,8 @@ export const registerRouterProvider = (
             const candidates = primaryRoutePairs(profile, pairs).map(
               createJevCandidate,
             );
-            // A single primary bypasses advice, not a baseline's eligible fallback.
+            // A single per-tier candidate (primary, or its first eligible
+            // fallback when the primary itself is ineligible) bypasses advice.
             if (candidates.length <= 1) {
               decision.advisor = 'bypassed';
               decision.bypassReason = 'single-candidate';
@@ -823,6 +824,10 @@ export const registerRouterProvider = (
             // Stale extension context — skip non-critical UI updates.
           }
 
+          // What routing actually chose, captured before the loop below
+          // overwrites decision.targetLabel with each attempted ref.
+          const routedTargetLabel = decision.targetLabel;
+
           // Explicit fallback refs authorize provider changes; never discover other accounts.
           const modelsToTry = [
             decision.targetLabel,
@@ -939,8 +944,11 @@ export const registerRouterProvider = (
                 decision.thinking = delegatedReasoning ?? 'off';
                 decision.isFallback =
                   i > 0 || modelRef !== profile[decision.tier]?.model;
+                // A Jev/classifier pick that already targets a fallback ref
+                // (the tier's only eligible candidate) is not a mid-stream
+                // fallback; only compare against what routing actually chose.
                 if (
-                  decision.isFallback &&
+                  modelRef !== routedTargetLabel &&
                   decision.reasonCode !== 'continuation'
                 )
                   decision.reasonCode = 'fallback';

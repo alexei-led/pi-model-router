@@ -1,6 +1,6 @@
 # Jev guide
 
-Jev advises one eligible primary model/effort pair for a new user turn.
+Jev advises one eligible model/effort pair for a new user turn.
 The router validates that advice. Pi runs the selected model and all tools.
 
 ## Enable Jev
@@ -152,7 +152,7 @@ The [policy study](research/jev-routing-policy.md) records the supporting experi
 
 ### Bypass and fallback
 
-A pin, budget policy, one eligible primary candidate, or a valid tool continuation bypasses advice.
+A pin, budget policy, only one eligible [candidate](architecture.md#route-selection), or a valid tool continuation bypasses advice.
 An invalid continuation selects a compatible local route without advice.
 
 When Jev is inactive, an optional Pi classifier can advise the route instead.
