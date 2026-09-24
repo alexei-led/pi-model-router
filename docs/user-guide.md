@@ -134,7 +134,7 @@ Removed commands such as `status`, `profile`, `fix`, and `debug` show their repl
 | File | Purpose |
 | --- | --- |
 | `~/.pi/agent/model-router.json` | User configuration and Jev approval. A custom Pi agent directory changes this location. |
-| `.pi/model-router.json` | Project overrides for local routes and display. Project Jev configuration has no effect. |
+| `.pi/model-router.json` | Project overrides for routes, the Pi classifier, and display. Project Jev configuration has no effect. |
 | `~/.pi/agent/model-router-state.json` | Last selected profile. The extension manages this file. |
 
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
@@ -156,6 +156,7 @@ Budgets and model capacities must be positive, finite numbers. Invalid values ar
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
 Without an eligible lower tier, the budget policy keeps an eligible baseline.
 The classifier timeout defaults to 10 seconds. A classifier error selects the baseline.
+User or project configuration can set `classifierModel`. It sends bounded recent conversation text through the configured Pi model; Jev approval does not govern this separate path.
 
 ## Read costs and cache data
 
