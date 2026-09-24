@@ -14,7 +14,7 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
-import { DEFAULT_JEV_CONTEXT } from './constants';
+import { DEFAULT_JEV_CONTEXT, ROUTER_COMMANDS as VERBS } from './constants';
 import { preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
@@ -32,17 +32,6 @@ import {
   formatPinSummary,
   formatThinkingSummary,
 } from './ui';
-
-/** One verb per concern; state is shown by the verb that changes it. */
-const VERBS = [
-  { name: 'pin', desc: 'Pin the active profile to a tier, or auto' },
-  { name: 'thinking', desc: 'Override thinking for every tier, or auto' },
-  { name: 'log', desc: 'Recent decisions and Jev stats; on, off or clear' },
-  { name: 'widget', desc: 'Toggle the status widget' },
-  { name: 'off', desc: 'Leave the router and restore the previous model' },
-  { name: 'reload', desc: 'Reload model-router.json' },
-  { name: 'help', desc: 'Show usage' },
-] as const;
 
 /** Removed verbs answer with the replacement instead of acting. */
 const RETIRED_VERBS: Record<string, string> = {

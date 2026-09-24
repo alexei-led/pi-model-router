@@ -127,7 +127,7 @@ Use `/router thinking auto` to clear the override.
 | `/router help` | Show command help. |
 
 Per-tier effort belongs in the profile configuration.
-Removed commands such as `status`, `profile`, `fix`, and `debug` show their replacements and do not change state.
+Removed commands such as `status`, `profile`, `fix`, and `debug` show their replacements unless a configured profile has that name.
 
 ## Configuration reference
 
@@ -140,6 +140,7 @@ Removed commands such as `status`, `profile`, `fix`, and `debug` show their repl
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
 
 A profile needs at least one tier. A partial profile is valid.
+Profile names must be nonempty, contain no whitespace, and not match an active command: `pin`, `thinking`, `log`, `widget`, `off`, `reload`, or `help`. Invalid names are ignored with a warning; rename these profiles before reloading.
 The router filters unavailable models, unsupported input, and unsupported effort before selection.
 `baselineTier` prefers a configured tier. Without it, the preference is `medium`, `high`, `low`, then `micro`.
 The [complete example](../model-router.example.json) shows aliases, all four tiers, and explicit fallbacks.
@@ -151,6 +152,7 @@ The [complete example](../model-router.example.json) shows aliases, all four tie
 | `models` | Aliases with a `model` reference and optional `contextWindow` and `maxTokens`. |
 | `ui.statusLine` | `compact` by default. `detailed` adds advisor probability, request time, and cache counters. |
 
+Budgets and model capacities must be positive, finite numbers. Invalid values are ignored with a warning.
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
 Without an eligible lower tier, the budget policy keeps an eligible baseline.
 The classifier timeout defaults to 10 seconds. A classifier error selects the baseline.
@@ -193,4 +195,4 @@ pi install npm:@alexeiled/pi-model-router
 ```
 
 If a manifest loads the upstream extension, remove that entry instead.
-Existing profiles remain usable. Deprecated `rules` and `phaseBias` produce a warning but have no routing effect.
+Deprecated `rules` and `phaseBias` produce a warning but have no routing effect.
