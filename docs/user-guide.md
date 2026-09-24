@@ -97,7 +97,7 @@ Here, `auto` is a profile name. The argument in `pin auto` clears a pin instead.
 An ineligible pin produces an error. The router does not substitute another tier.
 
 An effort override applies to every tier in the active profile.
-Each model runs the override at its nearest supported level. For example, `off` runs as `minimal` on a model without `off`.
+Each model runs the override at its nearest supported level. For example, `off` runs as `minimal` on a model without `off`. The confirmation names each tier that runs another level, such as `high as minimal`.
 Pi's thinking selector, such as Shift+Tab, sets the same override.
 An override that removes every eligible route produces an error without a partial configuration change.
 Use `/router thinking auto` to clear the override.

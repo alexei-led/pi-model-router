@@ -419,11 +419,14 @@ describe('/router thinking', () => {
     },
   );
 
-  it('warns about tiers that may skip an unsupported level but still applies it', async () => {
+  it('names tiers that run the override at another level and still applies it', async () => {
     const { run, state, ctx, lastNotice } = setup((s) => {
       s.currentConfig.profiles.balanced = {
         high: { model: 'openai/gpt-4o', thinkingLevels: ['max'] },
-        medium: { model: 'openai/gpt-4o-mini', thinkingLevels: ['off'] },
+        medium: {
+          model: 'openai/gpt-4o-mini',
+          thinkingLevels: ['low', 'medium'],
+        },
       };
     });
     ctx.modelRegistry.find.mockImplementation((provider, id) =>
@@ -431,10 +434,10 @@ describe('/router thinking', () => {
     );
     await run('thinking max');
     expect(state.thinkingByProfile.balanced?.high).toBe('max');
-    expect(lastNotice()[0]).toContain(
-      'medium may not support it and will run at the nearest supported level',
-    );
-    expect(lastNotice()[1]).toBe('warning');
+    expect(lastNotice()).toEqual([
+      'Router thinking set to max; medium as medium',
+      'info',
+    ]);
   });
 
   it.each(['thinking high max', 'thinking ultra'])(

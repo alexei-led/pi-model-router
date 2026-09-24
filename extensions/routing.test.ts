@@ -13,6 +13,7 @@ import {
   BASELINE_TIER_ORDER,
   clampEffort,
   decisionForPair,
+  effortAdjustments,
   phaseForTier,
   preservesRouteCoverage,
   primaryRoutePairs,
@@ -331,6 +332,29 @@ describe('route capability validation', () => {
       availableRoutePairs(profile, find, false, { high: 'max' })[0]?.thinking,
     ).toBe('max');
   });
+
+  it.each([
+    ['off', ['high as minimal', 'medium as low']],
+    ['max', ['micro as high']],
+    ['medium', []],
+  ] as const)(
+    'names tiers that run a %s override at another level',
+    (level, expected) => {
+      const models = { astra, opus, haiku };
+      const profile: RouterProfile = {
+        high: { model: 'test/astra' },
+        medium: { model: 'test/opus' },
+        micro: { model: 'test/haiku' },
+      };
+      expect(
+        effortAdjustments(
+          profile,
+          (_provider, id) => models[id as keyof typeof models],
+          level,
+        ),
+      ).toEqual(expected);
+    },
+  );
 
   it('retains each configured tier in thinking coverage checks', () => {
     const profile = allTierProfile();

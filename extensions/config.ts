@@ -880,22 +880,3 @@ export const collectProfileThinkingLevels = (
   }
   return levels;
 };
-
-/**
- * Returns tier names whose models don't include the given thinking level
- * in their resolvedThinkingLevels.
- */
-export const getUnsupportedTiers = (
-  profile: RouterProfile,
-  level: ThinkingLevel,
-): string[] => {
-  const unsupported: string[] = [];
-  for (const tier of ROUTER_TIERS) {
-    const tierConfig = profile[tier];
-    if (!tierConfig) continue;
-    if (!tierConfig.resolvedThinkingLevels?.includes(level)) {
-      unsupported.push(tier);
-    }
-  }
-  return unsupported;
-};

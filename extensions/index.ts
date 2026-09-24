@@ -6,7 +6,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { registerCommands } from './commands';
 import {
-  getUnsupportedTiers,
   loadRouterConfig,
   profileNames,
   ROUTER_TIERS,
@@ -14,7 +13,7 @@ import {
 } from './config';
 import { MAX_DEBUG_HISTORY } from './constants';
 import { registerRouterProvider } from './provider';
-import { preservesRouteCoverage } from './routing';
+import { effortAdjustments, preservesRouteCoverage } from './routing';
 import {
   buildPersistedState,
   isRouterPersistedState,
@@ -570,18 +569,16 @@ const routerExtension = (pi: ExtensionAPI) => {
     thinkingByProfile[selectedProfile] = overrides;
     persistState();
     actions.updateStatus(ctx);
-    if (event.level !== 'off') {
-      const activeProfile = currentConfig.profiles[selectedProfile];
-      if (!activeProfile) return;
-      const unsupported = getUnsupportedTiers(activeProfile, event.level);
-      if (unsupported.length > 0) {
-        ctx.ui.notify(
-          `Router thinking (all) set to ${event.level}. ` +
-            `${unsupported.join(', ')} tier${unsupported.length > 1 ? 's' : ''} may not support '${event.level}' and will run at the nearest supported level.`,
-          'warning',
-        );
-      }
-    }
+    const adjusted = effortAdjustments(
+      activeProfile,
+      (provider, id) => ctx.modelRegistry.find(provider, id),
+      event.level,
+    );
+    if (adjusted.length > 0)
+      ctx.ui.notify(
+        `Router thinking (all) set to ${event.level}; ${adjusted.join(', ')}.`,
+        'info',
+      );
   });
 };
 

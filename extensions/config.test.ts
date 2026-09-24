@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   collectProfileThinkingLevels,
-  getUnsupportedTiers,
   isObjectRecord,
   isRouterTier,
   isThinkingLevel,
@@ -762,59 +761,6 @@ describe('config.ts', () => {
       const levels = collectProfileThinkingLevels(profile);
       expect(levels.size).toBe(1);
       expect(levels.has('high')).toBe(true);
-    });
-  });
-
-  describe('getUnsupportedTiers', () => {
-    it('return tiers that do not include the requested thinking level', () => {
-      const profile: RouterProfile = {
-        high: {
-          model: 'openai/gpt-4o',
-          resolvedThinkingLevels: ['high', 'xhigh'],
-        },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['medium', 'low'],
-        },
-        low: { model: 'openai/gpt-4o-micro', resolvedThinkingLevels: ['low'] },
-      };
-      const unsupported = getUnsupportedTiers(profile, 'xhigh');
-      expect(unsupported).toEqual(['medium', 'low']);
-    });
-
-    it('return empty array if all tiers support the level', () => {
-      const profile: RouterProfile = {
-        high: {
-          model: 'openai/gpt-4o',
-          resolvedThinkingLevels: ['high', 'medium'],
-        },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['medium'],
-        },
-      };
-      const unsupported = getUnsupportedTiers(profile, 'medium');
-      expect(unsupported).toEqual([]);
-    });
-
-    it('skip missing tiers (undefined tier config)', () => {
-      const profile: RouterProfile = {
-        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high'] },
-      };
-      const unsupported = getUnsupportedTiers(profile, 'low');
-      expect(unsupported).toEqual(['high']);
-    });
-
-    it('treat tiers with undefined resolvedThinkingLevels as unsupported', () => {
-      const profile: RouterProfile = {
-        high: { model: 'openai/gpt-4o' },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['medium'],
-        },
-      };
-      const unsupported = getUnsupportedTiers(profile, 'medium');
-      expect(unsupported).toEqual(['high']);
     });
   });
 

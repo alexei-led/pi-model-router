@@ -879,6 +879,12 @@ describe('index.ts (orchestrator)', () => {
             },
           }),
         );
+        expect(ctx.ui.notify).toHaveBeenCalledWith(
+          expect.stringContaining(
+            `set to ${level}; high as ${level === 'max' ? 'high' : 'low'}`,
+          ),
+          'info',
+        );
       },
     );
 

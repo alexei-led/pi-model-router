@@ -185,6 +185,26 @@ export const preservesRouteCoverage = (
   );
 };
 
+/** Tiers whose text route runs an effort override at another level, as "tier as level". */
+export const effortAdjustments = (
+  profile: RouterProfile,
+  findModel: (provider: string, modelId: string) => Model<Api> | undefined,
+  level: ThinkingLevel,
+): string[] => {
+  const pairs = availableRoutePairs(
+    profile,
+    findModel,
+    false,
+    Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
+  );
+  return ROUTER_TIERS.flatMap((tier) => {
+    const pair = pairs.find((entry) => entry.tier === tier);
+    return pair && pair.thinking !== level
+      ? [`${tier} as ${pair.thinking}`]
+      : [];
+  });
+};
+
 export interface BaselineSelection {
   pair: RoutePair;
   reasonCode: 'baseline' | 'pinned' | 'budget';
