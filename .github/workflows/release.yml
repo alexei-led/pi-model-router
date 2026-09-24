@@ -85,7 +85,7 @@ jobs:
             core.setOutput("name", pkg.name);
             core.setOutput("version", pkg.version);
             core.setOutput("tag", tag);
-            core.setOutput("release_name", `${pkg.name} ${pkg.version}`);
+            core.setOutput("release_name", tag);
             core.setOutput("prerelease", String(pkg.version.includes("-")));
       - name: Ensure tag is on main
         run: |
