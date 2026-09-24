@@ -1,281 +1,194 @@
-# Jev advisor
+# Jev guide
 
-User guide for the optional TypeSafe Jev advisor: what it sends, how it chooses,
-how to configure it and how to read its diagnostics. Mechanism and code
-boundaries are in [architecture.md](architecture.md); the evidence behind the
-defaults is in [research/](research/).
+Jev advises one eligible primary model/effort pair for a new user turn.
+The router validates that advice. Pi runs the selected model and all tools.
 
-## What it does
+## Enable Jev
 
-Jev makes one bounded TypeSafe System One Choice request per eligible new user
-turn and picks one of the active profile's eligible primary tier/model/thinking
-pairs. It never selects another profile, an arbitrary model, a provider account
-or a thinking level that the profile does not configure. Explicit generation
-fallback chains stay as you configured them and are not extra Jev choices.
+CAUTION: Approve external text transfer before you enable a profile. Selected conversation text can contain secrets or private data.
 
-Jev is skipped, and the local baseline used, when:
-
-- a tier is pinned;
-- the session is above `maxSessionBudget`;
-- only one primary candidate is eligible (nothing to choose);
-- the turn is a tool continuation with a reusable validated route.
-
-Malformed responses, `uncertain`, timeout and HTTP errors go directly to the
-eligible baseline. There is no classifier cascade after Jev. When Jev is not
-active (disabled, not opted in or missing a key), the optional Pi classifier is
-a separate compatibility path; without it, the router uses the baseline.
-
-## Enabling and privacy
-
-Configure Jev **only** in `~/.pi/agent/model-router.json` (or the agent
-directory selected by Pi). Both global `jev.enabled` and an explicit per-profile
-`profiles.<name>.jev.enabled` opt-in are required. All project-level `jev`
-settings, including profile opt-ins, are ignored with a warning before user
-credentials are merged. Work profiles stay off unless you explicitly approve
-sending their bounded recent conversation text externally.
-
-Jev receives bounded text in three named JSON fields, `currentRequest`,
-`recentDialogue` and `recentToolEvidence`, plus candidate tier/model/thinking
-identifiers. System prompts, raw config, credentials from config, thinking
-blocks, tool-call arguments and image/binary blocks are never extracted.
-
-This is not a redaction service: the selected text, including tool output, may
-contain secrets or private data. Enabling a profile is approval to send that
-text. TypeSafe states that Jev is not trained on customer requests; zero data
-retention is an enterprise option, not a default. See
-[TypeSafe legal](https://docs.typesafe.ai/legal).
-
-Semantic classification and confidence are probabilistic, not a security
-boundary. Tiers describe model/effort choices; Pi owns tool permissions.
-
-## Configuration
+1. Get a TypeSafe API key.
+2. Add these fields to your user `model-router.json` and its existing `auto` profile.
+3. Replace the key placeholder.
 
 ```json
 {
-  "jev": {
-    "enabled": true,
-    "apiKey": "<rendered by chezmoi/1Password>",
-    "endpoint": "https://api.typesafe.ai/v1/systemone",
-    "model": "jev-1.13.0",
-    "timeoutMs": 1500,
-    "confidenceThreshold": 0.65,
-    "probabilityThreshold": 0.8,
-    "maxStateTokens": 3000,
-    "context": {
-      "previousTurns": 2,
-      "maxHistoryTokens": 500,
-      "toolResults": "last-error",
-      "maxToolTokens": 250
-    },
-    "retry": { "maxAttempts": 2, "backoffMs": 400 },
-    "mode": "advisory"
-  },
-  "profiles": {
-    "personal": {
-      "jev": { "enabled": true },
-      "high": { "model": "openai/gpt-5.4-pro", "thinking": "high" },
-      "medium": { "model": "google/gemini-flash-latest", "thinking": "medium" },
-      "low": { "model": "openai/gpt-5.4-nano", "thinking": "off" },
-      "micro": { "model": "openai/gpt-5.4-nano", "thinking": "off" }
-    }
-  }
+  "jev": { "enabled": true, "apiKey": "<your-api-key>" },
+  "profiles": { "auto": { "jev": { "enabled": true } } }
 }
 ```
 
-All values except `enabled`, `apiKey` and the profile opt-in are defaults.
+4. Keep the existing model definitions in that profile.
+5. Run `/router reload`.
+6. Run `/router auto`.
+7. Send a new request.
+8. Run `/router` to inspect the advisor result.
 
-| Key | Default | Meaning |
+If your profile has another name, use that name instead of `auto`.
+With multiple eligible routes and no bypass, status shows a Jev choice or a reason for baseline fallback.
+The [user guide](user-guide.md#understand-the-result) explains the result fields.
+
+Both global enablement and explicit profile approval are required.
+Project Jev fields have no effect. Work profiles have no automatic approval.
+[Profile configuration](user-guide.md#first-profile) belongs in the user guide.
+
+### Store the key
+
+Keep the rendered configuration out of Git. Restrict file access to its owner, for example with mode `0600`.
+A secret manager can render `apiKey` before Pi starts.
+The extension does not run secret-lookup commands or require an environment variable.
+
+## Privacy boundary
+
+```mermaid
+flowchart LR
+    subgraph Pi["Inside Pi"]
+        Current["Current request"] --> Select["Bounded text selection"]
+        Recent["Recent dialogue"] --> Select
+        Tool["One permitted tool result"] --> Select
+        Excluded["Excluded: system prompts, thinking,<br/>tool arguments, binary data"]
+    end
+    Select -->|"Selected text + candidate IDs"| Jev["TypeSafe Jev · external service"]
+    classDef policy fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    classDef advisor fill:#fef3c7,stroke:#b45309,color:#451a03
+    classDef local fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    class Select policy
+    class Jev advisor
+    class Excluded local
+    style Pi fill:transparent,stroke:#64748b
+```
+
+The request has three text fields: `currentRequest`, `recentDialogue`, and `recentToolEvidence`.
+It also includes candidate tier, model, and effort identifiers.
+Raw configuration, configuration credentials, and tool definitions do not enter the selected text.
+
+This filter is not redaction. Text from a user, assistant, or tool can still contain sensitive data.
+TypeSafe states that customer requests do not train Jev. Zero data retention is an enterprise option, not the default.
+[TypeSafe's legal terms](https://docs.typesafe.ai/legal) define the service policy.
+
+## Configuration reference
+
+All fields in this table belong under user-level `jev`.
+Partial `context` and `retry` objects inherit defaults.
+Invalid values or unknown nested keys reject the Jev configuration with a value-free warning.
+
+| Field | Default | Range or behavior |
 | --- | --- | --- |
-| `endpoint` | TypeSafe System One | HTTPS only; no embedded credentials, query or fragment. |
-| `model` | `jev-1.13.0` | Pin a versioned ID. `jev-latest` moves on new releases, which can change answers behind tuned thresholds. |
-| `timeoutMs` | `1500` | Total advisory budget: request, response body and the single transient retry. Positive, finite, at most 2147483647. No product cap; 3000–5000 is valid if you prefer waiting over falling back. |
-| `confidenceThreshold` | `0.65` | 0–1. Choice confidence at or above this is acted on directly. |
-| `probabilityThreshold` | `0.8` | Above 0, at most 1. Used below the confidence threshold; see [Acceptance policy](#acceptance-policy). |
-| `maxStateTokens` | `3000` | Estimated token budget for the selected state, 1–24000. |
-| `context.previousTurns` | `2` | Prior user turns, each with its last non-empty assistant text reply. 0–20. |
-| `context.maxHistoryTokens` | `500` | Shared estimated-token ceiling for prior dialogue, 0–24000. |
-| `context.toolResults` | `"last-error"` | `"none"`, `"last"` or `"last-error"` (last result only when Pi marks it `isError`). |
-| `context.maxToolTokens` | `250` | Estimated-token ceiling for that one tool result, 0–24000. |
-| `retry.maxAttempts` | `2` | HTTP attempts in total, 1–5. `1` disables retries. |
-| `retry.backoffMs` | `400` | First backoff delay, 0–60000; doubled per attempt and raised to `Retry-After` when the server sends one. |
-| `mode` | `"advisory"` | The only supported value. |
+| `enabled` | `false` | Needs `apiKey` and explicit profile approval. |
+| `endpoint` | `https://api.typesafe.ai/v1/systemone` | HTTPS only. No embedded credentials, query, or fragment. |
+| `model` | `jev-1.13.0` | A versioned ID keeps the model fixed. `jev-latest` can change without a configuration edit. |
+| `timeoutMs` | `1500` | Total advisory budget. Positive milliseconds, at most 2147483647. |
+| `confidenceThreshold` | `0.65` | From 0 through 1. Controls direct acceptance of the top option. |
+| `probabilityThreshold` | `0.8` | Greater than 0, at most 1. Controls cumulative probability selection. |
+| `maxStateTokens` | `3000` | Local state-token estimate, from 1 through 24000. |
+| `context.previousTurns` | `2` | From 0 through 20 prior user turns. |
+| `context.maxHistoryTokens` | `500` | Shared dialogue estimate, from 0 through 24000. |
+| `context.toolResults` | `"last-error"` | `"none"`, `"last"`, or `"last-error"`. |
+| `context.maxToolTokens` | `250` | Tool-text estimate, from 0 through 24000. |
+| `retry.maxAttempts` | `2` | Total HTTP attempts, from 1 through 5. A value of 1 disables retries. |
+| `retry.backoffMs` | `400` | Initial delay, from 0 through 60000 milliseconds. |
+| `mode` | `"advisory"` | The only supported mode. |
 
-Invalid values or unknown `context`/`retry` keys reject the whole Jev config
-with a value-free warning. Partial `context` and `retry` objects inherit
-defaults.
-
-Only a documented transient status (`408`, `429`, `5xx`) is retried, and only
-when a full round trip still fits inside `timeoutMs`. Permanent statuses,
-malformed responses and caller cancellation are never retried. The status list
-and the minimum retry window are TypeSafe's contract and stay in code.
-
-### Storing the key
-
-Use a private chezmoi template such as `private_model-router.json.tmpl` under
-your agent-directory source path and render only `apiKey`, for example
-`{{ onepasswordRead "op://Personal/TypeSafe/apiKey" | toJson }}` (unquoted in
-the JSON template). Keep the rendered file out of Git with mode `0600`. No
-environment variable is required; the extension never executes a secret-lookup
-command. The repository example keeps Jev disabled with a placeholder key.
+The same deadline covers request preparation, HTTP, response reading, and retry delays.
+Only `408`, `429`, and `5xx` qualify for retries. A retry needs enough remaining time for a full round trip.
+The delay doubles per retry and respects `Retry-After`.
+Permanent errors, invalid response bodies, and caller cancellation do not trigger retries.
 
 ## Context selection
 
-Priority is current request → recent dialogue → tool evidence. Individual
-ceilings never expand `maxStateTokens`. The full current request wins when it
-fits; otherwise its beginning and end are kept and `truncated: true` is set.
-Prior turns use the same head/tail excerpts when needed.
+The current request takes priority, then recent dialogue, then tool evidence.
+The individual limits never increase `maxStateTokens`.
+Long text retains its beginning and end, with an explicit truncation flag.
 
+Each prior turn contributes its last non-empty assistant reply.
+Empty, thinking-only, and tool-call-only replies do not consume dialogue slots.
 Only the last tool result of the immediately previous user turn is eligible.
-`last-error` uses Pi's native `isError` flag; it does not parse output for words
-such as `ERROR`, search backwards for an old failure, or resurrect a failure
-after a later successful result. A tool can report a real failure as ordinary
-text with `isError: false`; choose `"last"` when that matters. Empty,
-thinking-only and tool-call-only assistant messages cannot consume dialogue
-slots.
 
-Suggested overrides (merge into `jev.context`):
+`last-error` uses Pi's native `isError` flag. It does not search text for error words or recover an older failure.
+For tools that report failures without that flag, `"last"` includes their latest result but sends more text.
 
-- Independent tasks: `{"previousTurns": 0, "toolResults": "none"}`
-- Dialogue only: `{"previousTurns": 2, "toolResults": "none"}`
-- Tool-heavy diagnosis: `{"toolResults": "last", "maxToolTokens": 500}`
-- Longer follow-ups: `{"previousTurns": 4, "maxHistoryTokens": 1000}`
+| Task pattern | Example override under `jev.context` |
+| --- | --- |
+| Independent requests | `{ "previousTurns": 0, "toolResults": "none" }` |
+| Dialogue without tool output | `{ "previousTurns": 2, "toolResults": "none" }` |
+| Tool diagnosis | `{ "toolResults": "last", "maxToolTokens": 500 }` |
+| Longer follow-ups | `{ "previousTurns": 4, "maxHistoryTokens": 1000 }` |
 
-Larger windows did not consistently help in the recorded experiments; the one
-clear gain was keeping a request that sits at the end of long text. See
-[research/jev-context-selection.md](research/jev-context-selection.md).
+TypeSafe publishes no Jev tokenizer or token-count endpoint.
+The router uses a conservative estimate and rejects requests with more than 28000 estimated tokens before HTTP.
+This leaves room within Jev's 32000-token state-plus-question limit.
+Diagnostics show both estimated tokens and reported input tokens.
+Generation still receives Pi's normal context, not the reduced Jev context.
 
-Token counts are estimates. TypeSafe publishes no tokenizer; the router uses a
-conservative local estimate and rejects a serialized request above 28000
-estimated tokens, below Jev's 32k state-plus-question limit. Widget/debug show
-the estimate next to Jev's reported `usage.input_tokens`. This affects Jev only:
-generation still receives Pi's normal context.
-
-## How Jev is asked
-
-Jev classifies the **latest user request**; earlier messages are context only.
-Each tier is a structured Choice option with `covers`, `notFor` and `examples`
-(`high` also lists `useWhen`) plus its concrete route, following TypeSafe's
-guidance for easily confused adjacent options. An `uncertain` option lets Jev
-abstain.
-
-The objective is quality-first: prefer frontier reasoning when it can materially
-improve correctness or completeness or reduce rework, even if a smaller model
-could probably complete the task. Direct retrieval and mechanical work still
-favor micro/low. This is semantic advice, not a keyword or length heuristic.
-
-Confidence measures how decisively the probability mass sits on one option. It
-is **not** the chance that the selected generation model will succeed, and it is
-distinct from the top option's probability. See
-[Jev Choice](https://docs.typesafe.ai/primitives/choice).
+The [context study](research/jev-context-selection.md) explains the defaults. More history did not improve every task.
 
 ## Acceptance policy
 
-1. Top option `uncertain` → no advice; the baseline is used.
-2. Confidence ≥ `confidenceThreshold` → act on the top option (`basis=choice`).
-3. Otherwise read the full validated distribution and act on the **lowest tier
-   whose cumulative probability, counted from micro upward, reaches
-   `probabilityThreshold`** (`basis=probability`). Abstention mass counts for the
-   profile's baseline tier.
+Jev receives structured criteria for each tier and an `uncertain` option.
+The criteria favor correctness and less rework. Simple retrieval and mechanical tasks favor lower tiers.
+Confidence describes the choice distribution, not the probability that the generation model will answer correctly.
 
-This is deliberately asymmetric: a split between adjacent low tiers stays low,
-while material mass on high moves the route up, because the cumulative sum
-reaches the threshold only at the top. Raise `probabilityThreshold` toward 1 for
-a more conservative fallback, or lower it toward 0.5 to follow the plain argmax.
-Do not lower `confidenceThreshold` just to raise the acceptance rate. The
-thresholds were checked against the published task corpus and live sessions in
-[research/jev-routing-policy.md](research/jev-routing-policy.md).
-
-Concurrent calls for the same turn share one request and its deadline. A
-repeated same-turn call reuses the validated decision. Each new user turn can
-choose a different backend and thinking level; tool continuations keep their
-validated route. The logical `router/<profile>` model stays selected.
-
-### Quality-first fallback
-
-If avoiding underpowered answers matters more than cost or latency, set
-`"baselineTier": "high"` on a profile that configures a high tier:
-
-```json
-{ "profiles": { "personal": { "baselineTier": "high" } } }
+```mermaid
+flowchart LR
+    Reply["Validated answer"] --> Abstain{"Uncertain?"}
+    Abstain -->|"Yes"| Baseline["Eligible baseline"]
+    Abstain -->|"No"| Confidence{"Confidence sufficient?"}
+    Confidence -->|"Yes"| Choice["Use top option"]
+    Confidence -->|"No"| Route["Sum from micro upward<br/>Use first tier at threshold"]
+    classDef policy fill:#dbeafe,stroke:#2563eb,color:#0f172a
+    classDef advisor fill:#fef3c7,stroke:#b45309,color:#451a03
+    classDef generation fill:#dcfce7,stroke:#15803d,color:#14532d
+    classDef local fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    class Reply advisor
+    class Abstain,Confidence policy
+    class Choice,Route generation
+    class Baseline local
 ```
 
-Uncertain, failed or timed-out advice then prefers the eligible high route, and
-abstention mass counts for high. Confident micro/low advice still wins. Pins,
-live capabilities, explicit fallback order and the soft budget still apply.
+Abstention mass counts for the baseline tier in the cumulative calculation.
+A higher probability threshold favors stronger tiers. A lower threshold does not mean an argmax rule.
+Only current eligible candidates can win. Invalid advice or a timeout selects the baseline without a second advisor.
+The [policy study](research/jev-routing-policy.md) records the supporting experiment and its limits.
+
+### Bypass and fallback
+
+A pin, budget policy, one eligible primary candidate, or a valid tool continuation bypasses advice.
+An invalid continuation selects a compatible local route without advice.
+
+When Jev is inactive, an optional Pi classifier can advise the route instead.
+A failed Jev call never activates that classifier.
+Without an active advisor, the router selects its eligible baseline.
+A profile with an eligible `baselineTier: "high"` favors high on fallback. Confident lower-tier advice still takes priority.
 
 ## Diagnostics
 
-```json
-{ "ui": { "statusLine": "compact" } }
-```
+| Display | Meaning |
+| --- | --- |
+| `Jev → high c91% · 807ms` | Direct high selection, with confidence and local latency. |
+| `Jev medium c35% <65% → high` | Probability selection changed the acted-on tier from the top option. |
+| `p48%` | Probability of the top option, not confidence. Detailed mode also shows the request start. |
+| `selected`, `basis`, `route-p` | Acted-on tier, selection rule, and cumulative probability. |
+| `reuse` or `tool route` | No new advisor request. Metrics refer to the original request. |
+| `advice skipped: …` | A local policy bypassed the advisor. |
+| `no tier chosen → baseline` | Jev abstained. The baseline is not necessarily medium. |
 
-- **compact** (default): profile, tier, model/thinking, advisor outcome,
-  confidence and latency. Examples:
-  `🧭 Jev → high c91% · 807ms`,
-  `🧭 Jev medium c35% <65% → high · 764ms` (probability-based selection),
-  `🧭 Jev: no tier chosen → baseline · 860ms`,
-  `🧭 Jev: invalid response (distribution-sum) → baseline · 500ms`,
-  `🧭 Jev: timeout → baseline · 5.0s`.
-- **detailed**: adds the top option's probability and the request start time:
-  `🧭 Jev medium c35% <65% → high · 764ms · p48% @18:34:49`.
-- **Widget / `/router`**: full metrics, including the Jev model label,
-  HTTP status, attempt count, candidate count, `selected`, `basis`, `route-p`
-  (cumulative probability of the selected tier and every lower tier),
-  `route-threshold`, estimated context/request tokens and actual server input
-  usage.
-- **Log**: `/router log on`, then `/router log`. The last 50 decisions are
-  saved in branch-safe `router-state` session entries and shown with unique
-  request counts, advised tiers, outcome rates and median latency for the
-  retained window only. Locally generated request IDs deduplicate shared
-  requests, cached routes and tool continuations. `/router log clear` forgets
-  them.
+The widget shows model labels, HTTP status, attempt count, candidate count, limits, and input usage.
+The [decision log](user-guide.md#command-reference) retains 50 decisions and deduplicates local request IDs within that window.
+Its request count is not a session-lifetime billing counter.
 
-Reading the footer:
-
-- `c` is confidence, `p` is the top option's probability, `<65%` means the
-  Choice was below `confidenceThreshold` and the arrow shows the tier selected
-  from the distribution.
-- `ms`/`s` is local request-to-validated-result time. `@` is the request start.
-- `reuse` / `tool route`: no new request; the metrics belong to the original
-  routing attempt.
-- `baseline` means the deterministic local baseline, not necessarily medium.
-- `no tier chosen` means Jev abstained. Compact mode omits abstention scores;
-  widget/debug label them `abstention-confidence` and `abstention-p`.
-- `local baseline` means no advisor is configured. `advice skipped: …` means
-  an advisor is configured but was not asked, and says why: `pinned <tier>`,
-  `over budget`, `only <tier> eligible` (one primary route survived the
-  capability, input or thinking-override filter), `tool turn`, `no user turn`
-  or `turn already advised`. Widget/debug keep the raw `bypassReason` code.
-
-Outcomes: `selected`, `uncertain`, `invalid-response`, `http-error`,
-`network-error`, `deadline`, `cancelled`, `unavailable`, `input-too-large`.
-A quick rejection is not a timeout; increasing `timeoutMs` will not change it.
-
-An `invalid-response` names the local check that failed: `unreadable-body`,
-`missing-answer`, `unexpected-answer-type`, `unknown-choice`,
-`invalid-confidence`, `distribution-keys` (unknown option key),
-`distribution-sum` (outside two-decimal rounding tolerance) or
-`distribution-argmax` (`choice` is not the top option). Omitted zero-mass
-options are accepted. `http-error` keeps only the status and attempt count; the
-widget adds a fixed hint for `401` (check the user-config key), `422` (request
-shape rejected) and `429`/`529` (transient limit, retried once).
-
-State, debug and UI retain only validated choices, numeric diagnostics, local
-validation codes, recognized model labels and locally generated request IDs.
-They never retain the key, endpoint, request text, raw response or remote
-explanations.
+Local outcomes include `selected`, `uncertain`, `invalid-response`, `http-error`, `network-error`, `deadline`, `cancelled`, `unavailable`, and `input-too-large`.
+An invalid response includes a local code such as `distribution-sum`, `unknown-choice`, or `invalid-confidence`.
+Raw response text does not enter the log.
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Action |
-| --- | --- | --- |
-| `advice skipped: only high eligible` on every turn | A thinking override (for example Pi's `xhigh`) or a capability filter leaves one primary route | `/router thinking auto`, or give other tiers a model that supports that level |
-| `advice skipped: pinned …` / `over budget` | Manual pin or `maxSessionBudget` reached | `/router pin auto`; raise or remove the budget |
-| No `🧭 Jev` in the footer after upgrading | Pi loaded the previous extension version at session start | Start a new Pi session |
-| `Jev disabled: missing user-config API key` | Key absent or blank in the user config | Render the key; project config cannot supply it |
-| `timeout → baseline` often | Budget too small for your network | `"timeoutMs": 3000` in user config |
-| `HTTP 401` | Wrong or revoked key | Check the rendered user config |
-| `HTTP 422` | Request shape rejected by TypeSafe | Report with `/router log` output; no request text is stored |
-| `HTTP 429` / `529` after retry | Rate limit or overload | Transient; the router already retried once |
-| `invalid response (…)` | A local validation named in parentheses | Report the code; raw responses are not stored by design |
-| Uses the configured baseline on ambiguous follow-ups | Jev abstained | Expected; add the referent to the request or set `baselineTier` |
+| Symptom | Action |
+| --- | --- |
+| Only one tier is eligible | Clear an effort override or change incompatible models. |
+| Missing user API key | Add the rendered key to user configuration, not project configuration. |
+| Frequent deadlines | Increase `timeoutMs`, for example to 3000. This permits more delay before fallback. |
+| HTTP `401` | Make sure that the key is correct and active. |
+| HTTP `422` | Report the local diagnostics. Do not attach private request text. |
+| HTTP `429` or `529` after retry | Reduce request rate or retry later. The provider reports a limit or overload. |
+| Invalid response | Report the local response code. A longer timeout does not correct a schema error. |
+| Ambiguous follow-up selects baseline | Add the missing reference to the request. Abstention is an expected result. |

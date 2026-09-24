@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="title">Jev in use: different profiles, different routes</title>
+  <desc id="desc">Recorded responses on September 23–24, 2026. Pi: 25 sessions, 1,967 responses, medium 322 and high 1,645. Claude Code: 26 parent sessions, 1,623 responses, micro 154, low 1,239, medium 73 and high 157. The workloads and policies differ. Route share is not a savings or quality benchmark.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    .panel { fill: #f8fafc; stroke: #cbd5e1; }
+    .text { fill: #0f172a; }
+    .muted { fill: #475569; }
+    .track { fill: #e2e8f0; }
+    .bar { fill: #2563eb; }
+    .rule { stroke: #cbd5e1; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0f172a; }
+      .panel { fill: #1e293b; stroke: #475569; }
+      .text { fill: #f8fafc; }
+      .muted { fill: #cbd5e1; }
+      .track { fill: #334155; }
+      .bar { fill: #60a5fa; }
+      .rule { stroke: #475569; }
+    }
+  </style>
+  <rect class="bg" width="880" height="420" rx="12"/>
+  <text class="text" x="24" y="36" font-size="22" font-weight="700">One advisor. Different profiles. Different routes.</text>
+  <text class="muted" x="24" y="62" font-size="15">Recorded use · September 23–24, 2026 · One developer</text>
+  <rect class="panel" x="24" y="84" width="404" height="250" rx="10"/>
+  <rect class="panel" x="452" y="84" width="404" height="250" rx="10"/>
+  <g font-size="16">
+    <text class="text" x="44" y="116" font-size="20" font-weight="700">Pi model router</text>
+    <text class="muted" x="44" y="140">25 sessions · 1,967 responses</text>
+    <text class="muted" x="44" y="179">Micro</text><rect class="track" x="123" y="163" width="202" height="20" rx="3"/><text class="text" x="340" y="179">0.0%</text>
+    <text class="muted" x="44" y="213">Low</text><rect class="track" x="123" y="197" width="202" height="20" rx="3"/><text class="text" x="340" y="213">0.0%</text>
+    <text class="muted" x="44" y="247">Medium</text><rect class="track" x="123" y="231" width="202" height="20" rx="3"/><rect class="bar" x="123" y="231" width="33.1" height="20" rx="3"/><text class="text" x="340" y="247">16.4%</text>
+    <text class="muted" x="44" y="281">High</text><rect class="track" x="123" y="265" width="202" height="20" rx="3"/><rect class="bar" x="123" y="265" width="168.9" height="20" rx="3"/><text class="text" x="340" y="281">83.6%</text>
+    <text class="muted" x="44" y="315" font-size="14">37 unique Jev requests in retained metrics</text>
+    <text class="text" x="472" y="116" font-size="20" font-weight="700">Claude Code router</text>
+    <text class="muted" x="472" y="140">26 parent sessions · 1,623 responses</text>
+    <text class="muted" x="472" y="179">Micro</text><rect class="track" x="551" y="163" width="202" height="20" rx="3"/><rect class="bar" x="551" y="163" width="19.2" height="20" rx="3"/><text class="text" x="768" y="179">9.5%</text>
+    <text class="muted" x="472" y="213">Low</text><rect class="track" x="551" y="197" width="202" height="20" rx="3"/><rect class="bar" x="551" y="197" width="154.2" height="20" rx="3"/><text class="text" x="768" y="213">76.3%</text>
+    <text class="muted" x="472" y="247">Medium</text><rect class="track" x="551" y="231" width="202" height="20" rx="3"/><rect class="bar" x="551" y="231" width="9.1" height="20" rx="3"/><text class="text" x="768" y="247">4.5%</text>
+    <text class="muted" x="472" y="281">High</text><rect class="track" x="551" y="265" width="202" height="20" rx="3"/><rect class="bar" x="551" y="265" width="19.5" height="20" rx="3"/><text class="text" x="768" y="281">9.7%</text>
+    <text class="muted" x="472" y="315" font-size="14">111 recorded Jev answers</text>
+  </g>
+  <line class="rule" x1="24" y1="354" x2="856" y2="354"/>
+  <text class="text" x="24" y="380" font-size="16">Different workloads and policies. These shares do not measure savings or answer quality.</text>
+  <text class="muted" x="24" y="404" font-size="14">The evaluation explains the time windows, cost calculations, and missing data.</text>
+</svg>

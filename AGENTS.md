@@ -41,9 +41,12 @@ Bounded advisor text can include recent tool output and private data. Exclude sy
 - **Error Handling**: Preserve explicit fallback order, capability/effort validation, cancellation and no retry after visible content. Never persist remote explanations or secret-bearing configuration; retain only allowlisted local reason codes and diagnostics.
 
 ## Documentation Reference
-- `docs/README.md`: Index and conventions (folders by type, lowercase kebab-case names, dated `research/` reports, `archive/` for superseded documents, one fact in one place).
+- `docs/user-guide.md`: Profiles, commands, diagnostics and migration.
+- `docs/evaluation.md`: Dated usage evidence, cost assumptions and aggregate data.
+- `docs/release-guide.md`: Maintainer checks and publication procedure.
+- Keep one fact in one document, use lowercase kebab-case names, and leave archived reports unchanged during current-doc updates.
 - `docs/architecture.md`: Mechanism and module boundaries.
 - `docs/jev-advisor.md`: Jev configuration, acceptance policy, diagnostics and troubleshooting.
 - `docs/research/`: Dated experiments behind the current defaults.
-- `README.md`: Usage and installation guide.
+- `README.md`: Project front page and installation.
 - `model-router.example.json`: Reference for configuration structure.

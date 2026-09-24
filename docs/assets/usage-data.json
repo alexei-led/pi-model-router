@@ -1,0 +1,146 @@
+{
+  "period": {
+    "piStart": "2026-09-23T00:00:00Z",
+    "claudeStart": "2026-09-23T09:05:00Z",
+    "endExclusive": "2026-09-24T06:00:00Z"
+  },
+  "pi": {
+    "sessions": 25,
+    "responses": 1967,
+    "tiers": {
+      "micro": 0,
+      "low": 0,
+      "medium": 322,
+      "high": 1645
+    },
+    "reportedCatalogCostUsd": 377.1918894600009,
+    "uniqueJevRequests": 37,
+    "jevInputTokens": 77341,
+    "medianJevLatencyMs": 436.888416999951,
+    "p95JevLatencyMs": 1158.1729579940438,
+    "errorResponses": 2,
+    "groups": [
+      {
+        "model": "gpt-6-astra",
+        "tier": "high",
+        "responses": 641,
+        "inputTokens": 3294810,
+        "outputTokens": 193381,
+        "cacheReadTokens": 85063168,
+        "cacheWriteTokens": 0,
+        "reportedCatalogCostUsd": 127.68031800000004
+      },
+      {
+        "model": "gpt-6-luna",
+        "tier": "medium",
+        "responses": 322,
+        "inputTokens": 1580890,
+        "outputTokens": 233571,
+        "cacheReadTokens": 15899136,
+        "cacheWriteTokens": 0,
+        "reportedCatalogCostUsd": 0.43386586000000016
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "tier": "high",
+        "responses": 446,
+        "inputTokens": 1284241,
+        "outputTokens": 144299,
+        "cacheReadTokens": 141600640,
+        "cacheWriteTokens": 0,
+        "reportedCatalogCostUsd": 138.812338
+      },
+      {
+        "model": "gpt-6-sol",
+        "tier": "high",
+        "responses": 558,
+        "inputTokens": 14056713,
+        "outputTokens": 146773,
+        "cacheReadTokens": 154476672,
+        "cacheWriteTokens": 0,
+        "reportedCatalogCostUsd": 110.2653676
+      }
+    ]
+  },
+  "claude": {
+    "parentSessions": 26,
+    "conversationKeys": 29,
+    "responses": 1623,
+    "tiers": {
+      "micro": 154,
+      "low": 1239,
+      "medium": 73,
+      "high": 157
+    },
+    "adviceRecords": 111,
+    "estimatedGenerationCostUsd": 142.2383446000003,
+    "sameTokenAllOpusUsd": 178.31294880000002,
+    "groups": {
+      "low": {
+        "tier": "low",
+        "responses": 1239,
+        "inputTokens": 334944728,
+        "cacheReadTokens": 329578821,
+        "outputTokens": 1054310,
+        "estimatedCostUsd": 96.0785377000002,
+        "cacheWrite5mTokens": 1229303,
+        "cacheWrite1hTokens": 4136604
+      },
+      "micro": {
+        "tier": "micro",
+        "responses": 154,
+        "inputTokens": 6620565,
+        "cacheReadTokens": 5565172,
+        "outputTokens": 65715,
+        "estimatedCostUsd": 2.3416217,
+        "cacheWrite5mTokens": 872342,
+        "cacheWrite1hTokens": 183051
+      },
+      "medium": {
+        "tier": "medium",
+        "responses": 73,
+        "inputTokens": 31846243,
+        "cacheReadTokens": 29946856,
+        "outputTokens": 61875,
+        "estimatedCostUsd": 22.421967199999987,
+        "cacheWrite5mTokens": 0,
+        "cacheWrite1hTokens": 1899387
+      },
+      "high": {
+        "tier": "high",
+        "responses": 157,
+        "inputTokens": 56195479,
+        "cacheReadTokens": 55352330,
+        "outputTokens": 179028,
+        "estimatedCostUsd": 21.39621800000001,
+        "cacheWrite5mTokens": 0,
+        "cacheWrite1hTokens": 843149
+      }
+    },
+    "prices": {
+      "claude-opus-5-5": {
+        "input": 4,
+        "output": 20,
+        "cacheRead": 0.2
+      },
+      "claude-sonnet-5": {
+        "input": 2,
+        "output": 10,
+        "cacheRead": 0.2
+      },
+      "claude-haiku-4-5": {
+        "input": 1,
+        "output": 5,
+        "cacheRead": 0.1
+      }
+    },
+    "pricesChecked": "2026-09-23"
+  },
+  "limits": [
+    "No answer-quality measurement or invoices.",
+    "Jev fees are not available.",
+    "Pi request IDs cover only retained advisor records.",
+    "All-Opus keeps observed cache and output counters; it is not a savings prediction.",
+    "Different workloads and policies; not a comparison of product quality."
+  ]
+}
