@@ -422,7 +422,7 @@ export const normalizeTierConfig = (
     contextWindow: tierContextWindow,
     maxTokens: tierMaxTokens,
     reasoning: effectiveReasoning,
-    thinkingLevels: tierThinkingLevels,
+    thinkingLevels: explicitThinkingLevels,
     resolvedContextWindow,
     resolvedMaxTokens,
     resolvedThinkingLevels,

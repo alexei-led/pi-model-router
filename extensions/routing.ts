@@ -143,11 +143,8 @@ export const availableRoutePairs = (
             { tier, model: target, thinking: requested },
             findModel,
             imageAttached,
-            ownConfig?.reasoning === false
-              ? []
-              : index === 0
-                ? (config.thinkingLevels ?? config.resolvedThinkingLevels)
-                : ownConfig?.thinkingLevels,
+            // Only declared levels narrow a route; undeclared means the registry's.
+            ownConfig?.reasoning === false ? [] : ownConfig?.thinkingLevels,
           );
           return thinking ? [{ tier, model: target, thinking }] : [];
         } catch {

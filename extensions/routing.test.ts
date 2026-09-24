@@ -305,6 +305,33 @@ describe('route capability validation', () => {
     ).toEqual([]);
   });
 
+  it('narrows normalized routes only by declared levels, never by the router defaults', () => {
+    const { config } = normalizeConfig({
+      models: {
+        frontier: { model: 'test/astra' },
+        capped: { model: 'test/opus', thinkingLevels: ['low', 'medium'] },
+      },
+      profiles: {
+        p: {
+          high: { model: 'frontier', thinking: 'high' },
+          low: { model: 'capped', thinking: 'low' },
+        },
+      },
+    });
+    const profile = required(config.profiles.p);
+    const find = (_provider: string, id: string) =>
+      id === 'astra' ? astra : opus;
+    expect(
+      availableRoutePairs(profile, find, false, { high: 'off', low: 'max' }),
+    ).toEqual([
+      { tier: 'high', model: 'test/astra', thinking: 'minimal' },
+      { tier: 'low', model: 'test/opus', thinking: 'medium' },
+    ]);
+    expect(
+      availableRoutePairs(profile, find, false, { high: 'max' })[0]?.thinking,
+    ).toBe('max');
+  });
+
   it('retains each configured tier in thinking coverage checks', () => {
     const profile = allTierProfile();
     expect(
