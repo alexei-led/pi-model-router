@@ -237,31 +237,34 @@ const selectRoute = (
       routeProbability: parsed.probability,
     };
   const tiers = massByTier(candidates, parsed.probabilities);
-  const ascending = TIERS_ASCENDING.flatMap((tier) => {
-    const entry = tiers.get(tier);
-    return entry ? [{ tier, ...entry }] : [];
-  });
-  const top = ascending.at(-1);
-  if (!top) return undefined;
-  const abstained = tiers.has(baselineTier) ? baselineTier : top.tier;
+  const ascending = TIERS_ASCENDING.filter(
+    (tier) => tiers.has(tier) || tier === baselineTier,
+  );
   let cumulative = 0;
-  for (const entry of ascending) {
+  for (const tier of ascending) {
+    const entry = tiers.get(tier);
     cumulative +=
-      entry.mass +
-      (entry.tier === abstained ? (parsed.probabilities.uncertain ?? 0) : 0);
+      (entry?.mass ?? 0) +
+      (tier === baselineTier ? (parsed.probabilities.uncertain ?? 0) : 0);
     if (cumulative >= config.probabilityThreshold)
-      return {
-        candidate: entry.candidate,
+      return entry
+        ? {
+            candidate: entry.candidate,
+            basis: 'probability',
+            routeProbability: Math.min(1, cumulative),
+          }
+        : undefined;
+  }
+  // Rounding slack may select the top bucket; a fallback-only baseline stays local.
+  const topTier = ascending.at(-1);
+  const top = topTier ? tiers.get(topTier) : undefined;
+  return top
+    ? {
+        candidate: top.candidate,
         basis: 'probability',
         routeProbability: Math.min(1, cumulative),
-      };
-  }
-  // Rounding slack can leave the sum just under the threshold; keep the top tier.
-  return {
-    candidate: top.candidate,
-    basis: 'probability',
-    routeProbability: Math.min(1, cumulative),
-  };
+      }
+    : undefined;
 };
 
 /** Local validation only: the failing check is named, remote text is discarded. */
@@ -316,10 +319,15 @@ const isTransientStatus = (status: number): boolean =>
   status === 408 || status === 429 || status >= 500;
 
 const serverRetryDelayMs = (response: Response): number | undefined => {
-  const milliseconds = Number(response.headers.get('retry-after-ms'));
-  if (Number.isFinite(milliseconds) && milliseconds >= 0) return milliseconds;
-  const seconds = Number(response.headers.get('retry-after'));
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+  const msHeader = response.headers.get('retry-after-ms')?.trim();
+  const milliseconds = Number(msHeader);
+  if (msHeader && Number.isFinite(milliseconds) && milliseconds >= 0)
+    return milliseconds;
+  const retryAfter = response.headers.get('retry-after')?.trim();
+  if (!retryAfter) return undefined;
+  if (/^\d+$/.test(retryAfter)) return Number(retryAfter) * 1000;
+  const date = Date.parse(retryAfter);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 };
 
 const retryDelayMs = (

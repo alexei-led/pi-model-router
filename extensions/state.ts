@@ -361,7 +361,9 @@ export const buildPersistedState = ({
   return structuredClone({
     enabled: routerEnabled,
     selectedProfile: selectedProfile ?? '',
-    ...(selectedProfile && pinnedTierByProfile[selectedProfile]
+    ...(selectedProfile &&
+    Object.hasOwn(pinnedTierByProfile, selectedProfile) &&
+    pinnedTierByProfile[selectedProfile]
       ? { pinTier: pinnedTierByProfile[selectedProfile] }
       : {}),
     pinByProfile,

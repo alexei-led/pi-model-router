@@ -1,3 +1,14 @@
+/** Active command names are reserved profile names. */
+export const ROUTER_COMMANDS = [
+  { name: 'pin', desc: 'Pin the active profile to a tier, or auto' },
+  { name: 'thinking', desc: 'Override thinking for every tier, or auto' },
+  { name: 'log', desc: 'Recent decisions and Jev stats; on, off or clear' },
+  { name: 'widget', desc: 'Toggle the status widget' },
+  { name: 'off', desc: 'Leave the router and restore the previous model' },
+  { name: 'reload', desc: 'Reload model-router.json' },
+  { name: 'help', desc: 'Show usage' },
+] as const;
+
 export const MAX_DEBUG_HISTORY = 50;
 // Bound JSON metadata as well as text; expand only with measured long-dialogue needs.
 export const MAX_JEV_CONTEXT_TURNS = 20;
@@ -18,13 +29,3 @@ export const DEFAULT_CLASSIFIER_TIMEOUT_MS = 10_000;
 export const MAX_TURN_CACHE_ENTRIES = 16;
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_MAX_TOKENS = 16_384;
-/** `/router <verb>` dispatches these before profile lookup, so a same-named profile is unreachable. */
-export const ROUTER_VERB_NAMES = [
-  'pin',
-  'thinking',
-  'log',
-  'widget',
-  'off',
-  'reload',
-  'help',
-] as const;

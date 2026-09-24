@@ -184,7 +184,7 @@ Raw response text does not enter the log.
 
 | Symptom | Action |
 | --- | --- |
-| Only one tier is eligible | Clear an effort override or change incompatible models. |
+| Only one tier is eligible | Make sure that the other tiers' models exist in `/model` and support the input. |
 | Missing user API key | Add the rendered key to user configuration, not project configuration. |
 | Frequent deadlines | Increase `timeoutMs`, for example to 3000. This permits more delay before fallback. |
 | HTTP `401` | Make sure that the key is correct and active. |

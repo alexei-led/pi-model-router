@@ -340,9 +340,10 @@ export const updateStatus = (
   } = state;
   const activeRouterProfile = routerEnabled ? selectedProfile : undefined;
   const statusProfile = selectedProfile ?? 'none';
-  const activePin = selectedProfile
-    ? pinnedTierByProfile[selectedProfile]
-    : undefined;
+  const activePin =
+    selectedProfile && Object.hasOwn(pinnedTierByProfile, selectedProfile)
+      ? pinnedTierByProfile[selectedProfile]
+      : undefined;
   const pinLabel = activePin ? ` [pin:${activePin}]` : '';
 
   if (activeRouterProfile) {

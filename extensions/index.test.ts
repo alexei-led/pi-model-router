@@ -6,7 +6,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import routerExtension from './index';
-import { done, model } from './test/fixtures';
+import { done, events, message, model } from './test/fixtures';
 import type { RouterConfig } from './types';
 import * as ui from './ui';
 
@@ -198,6 +198,75 @@ describe('index.ts (orchestrator)', () => {
       debugHistory: [],
       lastDecision: expect.any(Object),
     });
+  });
+
+  it('persists and restores the newest identical zero-cost decisions after history fills', async () => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      Object.assign(ctx.modelRegistry, {
+        streamSimple: () =>
+          events({
+            type: 'done',
+            reason: 'stop',
+            message: message({
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  total: 0,
+                },
+              },
+            }),
+          }),
+      });
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'new' }, ctx);
+      const command = mockPi.registerCommand.mock.calls.find(
+        ([name]) => name === 'router',
+      )?.[1];
+      await command?.handler(
+        'log on',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+      for (let turn = 1; turn <= 55; turn++) {
+        now.mockReturnValue(turn * 1000);
+        const stream = provider?.streamSimple?.(
+          model('balanced', { provider: 'router' }),
+          normalizeContext({
+            messages: [{ role: 'user', content: 'task', timestamp: turn }],
+          }),
+        );
+        if (!stream) throw new Error('Missing router stream');
+        for await (const _event of stream) {
+          /* Drain generation. */
+        }
+        expect((await stream.result()).stopReason).toBe('stop');
+      }
+      const snapshot = mockPi.appendEntry.mock.calls.at(-1)?.[1];
+      expect(snapshot.debugHistory).toHaveLength(50);
+      expect(snapshot.debugHistory[0].timestamp).toBe(6000);
+      expect(snapshot.debugHistory.at(-1).timestamp).toBe(55000);
+      ctx.sessionManager.getBranch = () => [
+        { type: 'custom', customType: 'router-state', data: snapshot },
+      ];
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'resume' }, ctx);
+      expect(mockPi.appendEntry.mock.calls.at(-1)?.[1].debugHistory).toEqual(
+        snapshot.debugHistory,
+      );
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('restores micro pins and thinking overrides without migration', async () => {
@@ -758,15 +827,14 @@ describe('index.ts (orchestrator)', () => {
       },
     );
     it.each(['max', 'minimal'])(
-      'rejects unsupported %s selection atomically and restores Pi display',
+      'rejects an %s override atomically when the profile has no eligible route, restoring Pi display',
       async (level) => {
         routerExtension(mockPi);
         const ctx = buildMockCtx();
+        // Router pseudo-model resolves (session_start needs it to stay enabled);
+        // every backing model is missing, so no tier has a live route at all.
         ctx.modelRegistry.find.mockImplementation((provider, id) =>
-          model(id, {
-            provider,
-            thinkingLevelMap: { max: null, minimal: null },
-          }),
+          provider === 'router' ? model(id, { provider }) : undefined,
         );
         for (const handler of handlersFor('session_start'))
           await handler({}, ctx);
@@ -782,8 +850,40 @@ describe('index.ts (orchestrator)', () => {
       },
     );
 
+    it.each(['max', 'minimal'] as const)(
+      'accepts an unsupported %s override by running the clamped equivalent level',
+      async (level) => {
+        routerExtension(mockPi);
+        const ctx = buildMockCtx();
+        ctx.modelRegistry.find.mockImplementation((provider, id) =>
+          model(id, {
+            provider,
+            thinkingLevelMap: { max: null, minimal: null },
+          }),
+        );
+        for (const handler of handlersFor('session_start'))
+          await handler({}, ctx);
+        mockPi.appendEntry.mockClear();
+        for (const handler of handlersFor('thinking_level_select'))
+          handler({ level, previousLevel: 'medium' }, ctx);
+        expect(mockPi.appendEntry).toHaveBeenCalledWith(
+          'router-state',
+          expect.objectContaining({
+            thinkingByProfile: {
+              balanced: {
+                high: level,
+                medium: level,
+                low: level,
+                micro: level,
+              },
+            },
+          }),
+        );
+      },
+    );
+
     it.each(['thinking', 'image'] as const)(
-      'preserves configured %s coverage when selecting thinking',
+      'preserves configured %s coverage by clamping an unsupported thinking override',
       async (capability) => {
         routerExtension(mockPi);
         const ctx = buildMockCtx();
@@ -802,9 +902,23 @@ describe('index.ts (orchestrator)', () => {
         mockPi.appendEntry.mockClear();
         for (const handler of handlersFor('thinking_level_select'))
           handler({ level: 'low', previousLevel: 'medium' }, ctx);
-        expect(mockPi.appendEntry).not.toHaveBeenCalled();
-        expect(mockPi.setThinkingLevel).toHaveBeenLastCalledWith('medium');
-        expect(ctx.ui.notify).toHaveBeenCalledWith(
+        // 'low' is unsupported everywhere but clamps up to 'medium', so every
+        // tier (and both text/image inputs) keeps a route instead of being
+        // dropped: the override is accepted, not rejected.
+        expect(mockPi.appendEntry).toHaveBeenCalledWith(
+          'router-state',
+          expect.objectContaining({
+            thinkingByProfile: {
+              balanced: {
+                high: 'low',
+                medium: 'low',
+                low: 'low',
+                micro: 'low',
+              },
+            },
+          }),
+        );
+        expect(ctx.ui.notify).not.toHaveBeenCalledWith(
           expect.stringContaining('unchanged'),
           'warning',
         );

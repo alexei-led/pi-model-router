@@ -69,6 +69,29 @@ describe('state.ts', () => {
       expect(isRouterPersistedState({ ...valid, ...invalid })).toBe(false);
   });
 
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'persists unpinned prototype-like profile %s without inherited values',
+    (name) => {
+      const state = buildPersistedState({
+        routerEnabled: true,
+        selectedProfile: name,
+        pinnedTierByProfile: {},
+        thinkingByProfile: {},
+        debugEnabled: false,
+        widgetEnabled: false,
+        debugHistory: [],
+        lastDecision: undefined,
+        lastNonRouterModel: undefined,
+        accumulatedCost: 0,
+      });
+      expect(state.pinTier).toBeUndefined();
+      expect(state.pinByProfile).toEqual({});
+      expect(isRouterPersistedState(JSON.parse(JSON.stringify(state)))).toBe(
+        true,
+      );
+    },
+  );
+
   it('round-trips pins, thinking overrides, decisions and cost', () => {
     const state = buildPersistedState({
       routerEnabled: true,

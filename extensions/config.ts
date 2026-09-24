@@ -12,7 +12,7 @@ import {
   MAX_JEV_BACKOFF_MS,
   MAX_JEV_CONTEXT_TURNS,
   MAX_JEV_STATE_TOKENS,
-  ROUTER_VERB_NAMES,
+  ROUTER_COMMANDS,
 } from './constants';
 import type {
   ClassifierConfig,
@@ -229,7 +229,9 @@ export const normalizeModelsMap = (
     }
 
     const contextWindow =
-      typeof entry.contextWindow === 'number' && entry.contextWindow > 0
+      typeof entry.contextWindow === 'number' &&
+      Number.isFinite(entry.contextWindow) &&
+      entry.contextWindow > 0
         ? entry.contextWindow
         : undefined;
     if (entry.contextWindow !== undefined && !contextWindow) {
@@ -239,7 +241,9 @@ export const normalizeModelsMap = (
     }
 
     const maxTokens =
-      typeof entry.maxTokens === 'number' && entry.maxTokens > 0
+      typeof entry.maxTokens === 'number' &&
+      Number.isFinite(entry.maxTokens) &&
+      entry.maxTokens > 0
         ? entry.maxTokens
         : undefined;
     if (entry.maxTokens !== undefined && !maxTokens) {
@@ -353,14 +357,15 @@ export const normalizeTierConfig = (
 
   // Resolve contextWindow: tier config > alias > hardcoded default
   const tierContextWindow =
-    typeof value.contextWindow === 'number' && value.contextWindow > 0
+    typeof value.contextWindow === 'number' &&
+    Number.isFinite(value.contextWindow) &&
+    value.contextWindow > 0
       ? value.contextWindow
       : undefined;
-  if (value.contextWindow !== undefined && tierContextWindow === undefined) {
+  if (value.contextWindow !== undefined && tierContextWindow === undefined)
     warnings.push(
-      `Profile "${profileName}" ${tier} tier has invalid contextWindow. Ignored.`,
+      `Profile "${profileName}" tier "${tier}" has invalid contextWindow. Ignored.`,
     );
-  }
   const resolvedContextWindow =
     tierContextWindow ??
     aliasDefinition?.contextWindow ??
@@ -368,14 +373,15 @@ export const normalizeTierConfig = (
 
   // Resolve maxTokens: tier config > alias > hardcoded default
   const tierMaxTokens =
-    typeof value.maxTokens === 'number' && value.maxTokens > 0
+    typeof value.maxTokens === 'number' &&
+    Number.isFinite(value.maxTokens) &&
+    value.maxTokens > 0
       ? value.maxTokens
       : undefined;
-  if (value.maxTokens !== undefined && tierMaxTokens === undefined) {
+  if (value.maxTokens !== undefined && tierMaxTokens === undefined)
     warnings.push(
-      `Profile "${profileName}" ${tier} tier has invalid maxTokens. Ignored.`,
+      `Profile "${profileName}" tier "${tier}" has invalid maxTokens. Ignored.`,
     );
-  }
   const resolvedMaxTokens =
     tierMaxTokens ?? aliasDefinition?.maxTokens ?? DEFAULT_MAX_TOKENS;
 
@@ -598,6 +604,14 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     isObjectRecord(raw.profiles) ? raw.profiles : {},
   )) {
     if (name === '__proto__') continue;
+    if (
+      !name ||
+      /\s/.test(name) ||
+      ROUTER_COMMANDS.some((command) => command.name === name)
+    ) {
+      warnings.push('Ignored router profile with an invalid or reserved name.');
+      continue;
+    }
     const profileRecord = isObjectRecord(profile) ? profile : {};
     const high = normalizeTierConfig(
       profileRecord.high,
@@ -634,12 +648,6 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       continue;
     }
 
-    if (ROUTER_VERB_NAMES.some((verb) => verb === name)) {
-      warnings.push(
-        `Profile "${name}" collides with the reserved "/router ${name}" command and is unreachable via "/router ${name}".`,
-      );
-    }
-
     let baselineTier: RouterTier | undefined;
     if (profileRecord.baselineTier !== undefined) {
       const candidate = profileRecord.baselineTier;
@@ -674,14 +682,13 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     warnings.push('Deprecated router config field "rules" ignored.');
 
   const maxSessionBudget =
-    typeof raw.maxSessionBudget === 'number' && raw.maxSessionBudget > 0
+    typeof raw.maxSessionBudget === 'number' &&
+    Number.isFinite(raw.maxSessionBudget) &&
+    raw.maxSessionBudget > 0
       ? raw.maxSessionBudget
       : undefined;
-  if (raw.maxSessionBudget !== undefined && maxSessionBudget === undefined) {
-    warnings.push(
-      'Invalid maxSessionBudget; must be a positive number. Ignored.',
-    );
-  }
+  if (raw.maxSessionBudget !== undefined && maxSessionBudget === undefined)
+    warnings.push('Invalid maxSessionBudget. Ignored.');
 
   // Resolve classifierModel — accepts string or { model, thinking } object
   let classifierModel: ClassifierConfig | undefined;

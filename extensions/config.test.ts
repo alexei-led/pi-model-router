@@ -20,7 +20,6 @@ import {
   resolveModelRef,
   resolveProfileName,
 } from './config';
-import { DEFAULT_MAX_TOKENS } from './constants';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
 
 describe('Jev context configuration', () => {
@@ -154,6 +153,90 @@ vi.mock('node:fs', () => ({
 }));
 
 describe('config.ts', () => {
+  it.each([
+    'help',
+    'off',
+    'pin',
+    'thinking',
+    'log',
+    'widget',
+    'reload',
+    '',
+    'two words',
+    ' leading',
+  ])(
+    'rejects profile names that cannot be selected by the command: %j',
+    (name) => {
+      const { config, warnings } = normalizeConfig({
+        profiles: {
+          [name]: { medium: { model: 'test/primary' } },
+          valid: { medium: { model: 'test/primary' } },
+        },
+      });
+      expect(Object.keys(config.profiles)).toEqual(['valid']);
+      expect(warnings).toContain(
+        'Ignored router profile with an invalid or reserved name.',
+      );
+    },
+  );
+
+  it.each(['status', 'profile', 'disable', 'fix', 'debug', '?', 'constructor'])(
+    'preserves selectable profile names even when they match retired verbs: %s',
+    (name) => {
+      const { config, warnings } = normalizeConfig({
+        profiles: { [name]: { medium: { model: 'test/primary' } } },
+      });
+      expect(Object.keys(config.profiles)).toEqual([name]);
+      expect(warnings).toEqual([]);
+    },
+  );
+
+  it.each([Infinity, -Infinity, NaN, 0, -1, '100'])(
+    'does not accept invalid budgets or model capacities: %s',
+    (value) => {
+      const { config, warnings } = normalizeConfig({
+        maxSessionBudget: value,
+        models: {
+          target: {
+            model: 'test/primary',
+            contextWindow: value,
+            maxTokens: value,
+          },
+        },
+        profiles: {
+          valid: {
+            medium: { model: 'target', contextWindow: value, maxTokens: value },
+          },
+        },
+      });
+      expect(config.maxSessionBudget).toBeUndefined();
+      expect(config.models?.target?.contextWindow).toBeUndefined();
+      expect(config.models?.target?.maxTokens).toBeUndefined();
+      expect(config.profiles.valid?.medium?.contextWindow).toBeUndefined();
+      expect(config.profiles.valid?.medium?.maxTokens).toBeUndefined();
+      expect(config.profiles.valid?.medium?.resolvedContextWindow).toBe(128000);
+      expect(config.profiles.valid?.medium?.resolvedMaxTokens).toBe(16384);
+      expect(warnings).toContain('Invalid maxSessionBudget. Ignored.');
+      expect(warnings).toContain(
+        'Profile "valid" tier "medium" has invalid contextWindow. Ignored.',
+      );
+      expect(warnings).toContain(
+        'Profile "valid" tier "medium" has invalid maxTokens. Ignored.',
+      );
+    },
+  );
+
+  it('rejects overflow numbers parsed from valid JSON', () => {
+    const { config, warnings } = normalizeConfig(
+      JSON.parse(
+        '{"maxSessionBudget":1e999,"profiles":{"valid":{"medium":{"model":"test/primary","contextWindow":1e999,"maxTokens":1e999}}}}',
+      ),
+    );
+    expect(config.maxSessionBudget).toBeUndefined();
+    expect(config.profiles.valid?.medium?.resolvedContextWindow).toBe(128000);
+    expect(config.profiles.valid?.medium?.resolvedMaxTokens).toBe(16384);
+    expect(warnings.length).toBeGreaterThan(0);
+  });
   describe('type guards', () => {
     it('isObjectRecord should validate objects', () => {
       expect(isObjectRecord({})).toBe(true);
@@ -429,25 +512,6 @@ describe('config.ts', () => {
         expect(JSON.stringify(warnings)).not.toContain('leaked');
       },
     );
-
-    it('warns on invalid tier contextWindow and maxTokens instead of dropping them silently', () => {
-      const warnings: string[] = [];
-      const result = normalizeTierConfig(
-        { model: 'gpt4', contextWindow: -1, maxTokens: 'lots' },
-        'p',
-        'high',
-        warnings,
-        models,
-      );
-      // Falls through to the alias's contextWindow (80000) and the hardcoded
-      // maxTokens default, rather than silently accepting the invalid values.
-      expect(result?.resolvedContextWindow).toBe(80000);
-      expect(result?.resolvedMaxTokens).toBe(DEFAULT_MAX_TOKENS);
-      expect(warnings).toEqual([
-        'Profile "p" high tier has invalid contextWindow. Ignored.',
-        'Profile "p" high tier has invalid maxTokens. Ignored.',
-      ]);
-    });
   });
 
   describe('normalizeConfig', () => {
@@ -521,36 +585,6 @@ describe('config.ts', () => {
       expect(config.profiles.balanced?.high?.model).toBe(
         'google/gemini-2.5-pro',
       );
-    });
-
-    it('warns and ignores an invalid maxSessionBudget instead of dropping it silently', () => {
-      const { config, warnings } = normalizeConfig({
-        maxSessionBudget: -5,
-        profiles: { p: { medium: { model: 'test/primary' } } },
-      });
-      expect(config.maxSessionBudget).toBeUndefined();
-      expect(warnings).toContain(
-        'Invalid maxSessionBudget; must be a positive number. Ignored.',
-      );
-    });
-
-    it('warns when a profile name collides with a reserved /router verb', () => {
-      const { config, warnings } = normalizeConfig({
-        profiles: {
-          pin: { medium: { model: 'test/primary' } },
-          balanced: { medium: { model: 'test/primary' } },
-        },
-      });
-      // The profile still normalizes; only "/router pin" can't reach it.
-      expect(config.profiles.pin?.medium?.model).toBe('test/primary');
-      expect(warnings).toContain(
-        'Profile "pin" collides with the reserved "/router pin" command and is unreachable via "/router pin".',
-      );
-      expect(
-        warnings.some(
-          (w) => w.includes('"balanced"') && w.includes('reserved'),
-        ),
-      ).toBe(false);
     });
   });
 

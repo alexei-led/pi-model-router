@@ -117,6 +117,25 @@ const setup = (mutate?: (state: MutableCommandState) => void) => {
 };
 
 describe('/router surface', () => {
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'shows auto pin for unpinned prototype-like profile %s',
+    async (profile) => {
+      const s = setup((state) => {
+        state.selectedProfile = profile;
+        state.currentConfig = normalizeConfig({
+          profiles: { [profile]: { medium: { model: 'openai/gpt-4o' } } },
+        }).config;
+      });
+      s.ctx.model.id = profile;
+      await s.run('pin');
+      expect(s.lastNotice()[0]).toBe(`Pin: auto (profile ${profile})`);
+      await s.run('pin low');
+      await s.run('pin auto');
+      await s.run('pin');
+      expect(s.lastNotice()[0]).toBe(`Pin: auto (profile ${profile})`);
+    },
+  );
+
   it('offers exactly the eight verbs plus profile names at the top level', () => {
     const { cmd } = setup();
     expect(cmd.complete('')).toEqual([
@@ -361,20 +380,42 @@ describe('/router thinking', () => {
   });
 
   it.each(['max', 'minimal'])(
-    'rejects %s when no route would remain, without mutating state',
+    'rejects %s when the profile has no eligible route, without mutating state',
     async (level) => {
       const { run, state, actions, ctx, lastNotice } = setup((s) => {
         s.thinkingByProfile.balanced = { high: 'high' };
       });
-      ctx.modelRegistry.find.mockImplementation((provider, id) =>
-        model(id, { provider, thinkingLevelMap: { max: null, minimal: null } }),
-      );
+      // No model resolves at all, so every tier is ineligible regardless of
+      // the requested level (clamping only saves a route that has a live
+      // model to clamp against).
+      ctx.modelRegistry.find.mockReturnValue(undefined);
       await run(`thinking ${level}`);
       expect(state.thinkingByProfile.balanced).toEqual({ high: 'high' });
       expect(actions.persistState).not.toHaveBeenCalled();
       expect(actions.syncPiThinkingLevel).not.toHaveBeenCalled();
       expect(lastNotice()[0]).toContain('leaves no eligible route');
       expect(lastNotice()[1]).toBe('warning');
+    },
+  );
+
+  it.each(['max', 'minimal'])(
+    'accepts %s by clamping to the nearest level each live model supports',
+    async (level) => {
+      const { run, state, actions, ctx } = setup((s) => {
+        s.thinkingByProfile.balanced = { high: 'high' };
+      });
+      ctx.modelRegistry.find.mockImplementation((provider, id) =>
+        model(id, { provider, thinkingLevelMap: { max: null, minimal: null } }),
+      );
+      await run(`thinking ${level}`);
+      expect(state.thinkingByProfile.balanced).toEqual({
+        high: level,
+        medium: level,
+        low: level,
+        micro: level,
+      });
+      expect(actions.persistState).toHaveBeenCalledOnce();
+      expect(actions.syncPiThinkingLevel).toHaveBeenLastCalledWith(level);
     },
   );
 
@@ -390,7 +431,9 @@ describe('/router thinking', () => {
     );
     await run('thinking max');
     expect(state.thinkingByProfile.balanced?.high).toBe('max');
-    expect(lastNotice()[0]).toContain('medium may not support it');
+    expect(lastNotice()[0]).toContain(
+      'medium may not support it and will run at the nearest supported level',
+    );
     expect(lastNotice()[1]).toBe('warning');
   });
 

@@ -97,6 +97,7 @@ Here, `auto` is a profile name. The argument in `pin auto` clears a pin instead.
 An ineligible pin produces an error. The router does not substitute another tier.
 
 An effort override applies to every tier in the active profile.
+Each model runs the override at its nearest supported level. For example, `off` runs as `minimal` on a model without `off`.
 Pi's thinking selector, such as Shift+Tab, sets the same override.
 An override that removes every eligible route produces an error without a partial configuration change.
 Use `/router thinking auto` to clear the override.
@@ -105,8 +106,7 @@ Use `/router thinking auto` to clear the override.
 
 | Symptom | Action |
 | --- | --- |
-| No eligible route | Make sure that the model exists in `/model` and supports the input and effort. |
-| Only high remains eligible | Run `/router thinking auto`, or choose models that support the override. |
+| No eligible route | Make sure that the model exists in `/model` and supports the input. Check `reasoning` and `thinkingLevels` in the configuration. |
 | The baseline handles every request | Inspect `/router`. Enable an advisor for semantic selection, or clear a pin. |
 | Jev does not run | Inspect the bypass reason and the [Jev diagnostics](jev-advisor.md#diagnostics). |
 | Old behavior after an extension change | Start a new Pi session. |
@@ -127,21 +127,21 @@ Use `/router thinking auto` to clear the override.
 | `/router help` | Show command help. |
 
 Per-tier effort belongs in the profile configuration.
-Removed commands such as `status`, `profile`, `fix`, and `debug` show their replacements and do not change state.
+Removed commands such as `status`, `profile`, `fix`, and `debug` show their replacements unless a configured profile has that name.
 
 ## Configuration reference
 
 | File | Purpose |
 | --- | --- |
 | `~/.pi/agent/model-router.json` | User configuration and Jev approval. A custom Pi agent directory changes this location. |
-| `.pi/model-router.json` | Project overrides for local routes and display. Project Jev configuration has no effect. |
+| `.pi/model-router.json` | Project overrides for routes, the Pi classifier, and display. Project Jev configuration has no effect. |
 | `~/.pi/agent/model-router-state.json` | Last selected profile. The extension manages this file. |
 
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
 
 A profile needs at least one tier. A partial profile is valid.
-A profile named after a `/router` verb produces a warning. `/router <name>` runs the verb, not the profile.
-The router filters unavailable models, unsupported input, and unsupported effort before selection.
+Profile names must be nonempty, contain no whitespace, and not match an active command: `pin`, `thinking`, `log`, `widget`, `off`, `reload`, or `help`. Invalid names are ignored with a warning; rename these profiles before reloading.
+The router filters unavailable models and unsupported input before selection. An unsupported effort runs at the nearest supported level.
 `baselineTier` prefers a configured tier. Without it, the preference is `medium`, `high`, `low`, then `micro`.
 The [complete example](../model-router.example.json) shows aliases, all four tiers, and explicit fallbacks.
 
@@ -152,9 +152,11 @@ The [complete example](../model-router.example.json) shows aliases, all four tie
 | `models` | Aliases with a `model` reference and optional `contextWindow` and `maxTokens`. |
 | `ui.statusLine` | `compact` by default. `detailed` adds advisor probability, request time, and cache counters. |
 
+Budgets and model capacities must be positive, finite numbers. Invalid values are ignored with a warning.
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
 Without an eligible lower tier, the budget policy keeps an eligible baseline.
 The classifier timeout defaults to 10 seconds. A classifier error selects the baseline.
+User or project configuration can set `classifierModel`. It sends bounded recent conversation text through the configured Pi model; Jev approval does not govern this separate path.
 
 ## Read costs and cache data
 
@@ -194,4 +196,4 @@ pi install npm:@alexeiled/pi-model-router
 ```
 
 If a manifest loads the upstream extension, remove that entry instead.
-Existing profiles remain usable. Deprecated `rules` and `phaseBias` produce a warning but have no routing effect.
+Deprecated `rules` and `phaseBias` produce a warning but have no routing effect.

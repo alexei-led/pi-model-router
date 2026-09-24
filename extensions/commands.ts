@@ -14,7 +14,7 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
-import { DEFAULT_JEV_CONTEXT, ROUTER_VERB_NAMES } from './constants';
+import { DEFAULT_JEV_CONTEXT, ROUTER_COMMANDS as VERBS } from './constants';
 import { preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
@@ -32,21 +32,6 @@ import {
   formatPinSummary,
   formatThinkingSummary,
 } from './ui';
-
-/** One verb per concern; state is shown by the verb that changes it. */
-const VERB_DESCRIPTIONS: Record<(typeof ROUTER_VERB_NAMES)[number], string> = {
-  pin: 'Pin the active profile to a tier, or auto',
-  thinking: 'Override thinking for every tier, or auto',
-  log: 'Recent decisions and Jev stats; on, off or clear',
-  widget: 'Toggle the status widget',
-  off: 'Leave the router and restore the previous model',
-  reload: 'Reload model-router.json',
-  help: 'Show usage',
-};
-const VERBS = ROUTER_VERB_NAMES.map((name) => ({
-  name,
-  desc: VERB_DESCRIPTIONS[name],
-}));
 
 /** Removed verbs answer with the replacement instead of acting. */
 const RETIRED_VERBS: Record<string, string> = {
@@ -197,10 +182,10 @@ export const registerCommands = (
     if (!profile) return;
     const value = args[0]?.toLowerCase();
     if (args.length === 0) {
-      ctx.ui.notify(
-        `Pin: ${state.pinnedTierByProfile[profile] ?? 'auto'} (profile ${profile})`,
-        'info',
-      );
+      const pin = Object.hasOwn(state.pinnedTierByProfile, profile)
+        ? state.pinnedTierByProfile[profile]
+        : undefined;
+      ctx.ui.notify(`Pin: ${pin ?? 'auto'} (profile ${profile})`, 'info');
       return;
     }
     if (args.length > 1 || !isRouterPinValue(value)) {
@@ -271,7 +256,7 @@ export const registerCommands = (
         : [];
     ctx.ui.notify(
       level
-        ? `Router thinking set to ${level}${unsupported.length > 0 ? `; ${unsupported.join(', ')} may not support it and will be skipped when unsupported` : ''}`
+        ? `Router thinking set to ${level}${unsupported.length > 0 ? `; ${unsupported.join(', ')} may not support it and will run at the nearest supported level` : ''}`
         : 'Router thinking override cleared',
       unsupported.length > 0 ? 'warning' : 'info',
     );
@@ -453,7 +438,9 @@ export const registerCommands = (
         if (noArgs(`/router ${verb}`)) await handleProfile(verb, ctx);
         return;
       }
-      const replacement = RETIRED_VERBS[verb];
+      const replacement = Object.hasOwn(RETIRED_VERBS, verb)
+        ? RETIRED_VERBS[verb]
+        : undefined;
       ctx.ui.notify(
         replacement
           ? `/router ${verb} was removed; use ${replacement}`

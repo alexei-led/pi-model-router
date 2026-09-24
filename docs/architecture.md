@@ -71,9 +71,10 @@ A valid continuation reuses its actual route. An invalid continuation selects a 
 Pins, budget policy, and only one eligible candidate also bypass advisors.
 The budget is a soft generation-cost policy, not a billing cap.
 
-Eligibility requires provider availability, input support, and exact effort support.
+Eligibility requires provider availability, input support, and at least one allowed effort level.
 Local declarations can restrict registry capabilities but cannot grant capabilities.
-The router never reduces an explicit unsupported effort level silently.
+An unsupported effort runs at the nearest allowed level, as in Pi: the next higher level, else the next lower level.
+The route, status line, and log show the level that runs.
 
 An eligible `baselineTier` takes priority. The remaining preference is `medium`, `high`, `low`, then `micro`.
 Each tier offers at most one advisor candidate: its primary, or its first eligible fallback when the primary is ineligible.
