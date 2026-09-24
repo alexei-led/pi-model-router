@@ -74,7 +74,7 @@ The budget is a soft generation-cost policy, not a billing cap.
 Eligibility requires provider availability, input support, and at least one allowed effort level.
 Local declarations can restrict registry capabilities but cannot grant capabilities.
 An unsupported effort runs at the nearest allowed level, as in Pi: the next higher level, else the next lower level.
-The route, status line, and log show the level that runs.
+The route, status line, log, and Pi's footer show the level that runs.
 
 An eligible `baselineTier` takes priority. The remaining preference is `medium`, `high`, `low`, then `micro`.
 Each tier offers at most one advisor candidate: its primary, or its first eligible fallback when the primary is ineligible.

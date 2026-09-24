@@ -420,11 +420,7 @@ describe('router provider', () => {
     });
     registerRouterProvider(s.api, s.state, s.actions);
     expect(s.register).toHaveBeenCalledTimes(1);
-    const balanced = required(s.state.currentConfig.profiles.balanced);
-    balanced.high = {
-      model: 'test/primary',
-      resolvedThinkingLevels: ['xhigh'],
-    };
+    required(s.models[0]).thinkingLevelMap = { xhigh: 'xhigh' };
     registerRouterProvider(s.api, s.state, s.actions);
     expect(s.register).toHaveBeenCalledTimes(2);
   });
@@ -2417,5 +2413,53 @@ describe('Jev provider integration', () => {
       targetLabel: 'test/fallback',
       thinking: 'high',
     });
+    // Pi's footer follows the attempt that runs, not the first choice.
+    expect(
+      s.actions.syncPiThinkingLevel.mock.calls.map(([level]) => level),
+    ).toEqual(['medium', 'high']);
   });
+
+  it('shows the level an override runs at, not the requested level', async () => {
+    const s = setup();
+    required(s.models[0]).thinkingLevelMap = { off: null };
+    s.state.thinkingByProfile = {
+      balanced: { high: 'off', medium: 'off', low: 'off', micro: 'off' },
+    };
+    await consume(s.stream());
+    expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('minimal');
+    expect(s.actions.syncPiThinkingLevel).toHaveBeenCalledWith('minimal');
+    expect(s.actions.syncPiThinkingLevel).not.toHaveBeenCalledWith('off');
+  });
+
+  it.each([
+    [
+      'an undeclared route runs xhigh',
+      { xhigh: 'xhigh' },
+      undefined,
+      { xhigh: 'xhigh' },
+    ],
+    ['a tier asks for max its model lacks', undefined, 'max', undefined],
+    ['a route runs max', { max: 'max' }, undefined, { max: 'max' }],
+  ] as const)(
+    'lists router xhigh and max only when %s',
+    (_label, primaryLevels, highThinking, expected) => {
+      const s = setup();
+      if (primaryLevels)
+        required(s.models[0]).thinkingLevelMap = { ...primaryLevels };
+      if (highThinking)
+        s.state.currentConfig = normalizeConfig({
+          profiles: {
+            balanced: {
+              high: { model: 'test/primary', thinking: highThinking },
+              low: { model: 'test/small' },
+            },
+          },
+        }).config;
+      registerRouterProvider(s.api, s.state, s.actions);
+      const router = s.register.mock.calls
+        .at(-1)?.[1]
+        .models?.find((entry) => entry.id === 'balanced');
+      expect(router?.thinkingLevelMap).toEqual(expected);
+    },
+  );
 });

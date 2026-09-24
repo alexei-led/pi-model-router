@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  collectProfileThinkingLevels,
   isObjectRecord,
   isRouterTier,
   isThinkingLevel,
@@ -727,43 +726,6 @@ describe('config.ts', () => {
     });
   });
 
-  describe('collectProfileThinkingLevels', () => {
-    it('collect thinking levels from all tiers', () => {
-      const profile: RouterProfile = {
-        high: {
-          model: 'openai/gpt-4o',
-          resolvedThinkingLevels: ['high', 'xhigh'],
-        },
-        medium: {
-          model: 'openai/gpt-4o-mini',
-          resolvedThinkingLevels: ['medium', 'low'],
-        },
-      };
-      const levels = collectProfileThinkingLevels(profile);
-      expect(levels.has('high')).toBe(true);
-      expect(levels.has('xhigh')).toBe(true);
-      expect(levels.has('medium')).toBe(true);
-      expect(levels.has('low')).toBe(true);
-      expect(levels.size).toBe(4);
-    });
-
-    it('return empty set for profile with no tiers', () => {
-      const profile: RouterProfile = {};
-      const levels = collectProfileThinkingLevels(profile);
-      expect(levels.size).toBe(0);
-    });
-
-    it('skip tiers without resolvedThinkingLevels', () => {
-      const profile: RouterProfile = {
-        high: { model: 'openai/gpt-4o', resolvedThinkingLevels: ['high'] },
-        medium: { model: 'openai/gpt-4o-mini' },
-      };
-      const levels = collectProfileThinkingLevels(profile);
-      expect(levels.size).toBe(1);
-      expect(levels.has('high')).toBe(true);
-    });
-  });
-
   describe('normalizeConfig – classifier config variants', () => {
     it('normalize classifierModel as object with valid thinking', () => {
       const raw = {
@@ -877,7 +839,6 @@ describe('micro config compatibility', () => {
       model: 'test/tiny',
       thinking: 'off',
       fallbacks: ['test/backup'],
-      resolvedThinkingLevels: [],
     });
     const old = normalizeConfig({
       profiles: {

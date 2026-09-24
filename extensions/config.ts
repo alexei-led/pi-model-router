@@ -50,12 +50,6 @@ export type RouterPinValue = (typeof ROUTER_PIN_VALUES)[number];
 export const isRouterPinValue = (value: unknown): value is RouterPinValue =>
   ROUTER_PIN_VALUES.some((candidate) => candidate === value);
 
-export const DEFAULT_THINKING_LEVELS: readonly ThinkingLevel[] = [
-  'high',
-  'medium',
-  'low',
-] as const;
-
 export const isObjectRecord = (
   value: unknown,
 ): value is Record<string, unknown> =>
@@ -385,7 +379,7 @@ export const normalizeTierConfig = (
   const resolvedMaxTokens =
     tierMaxTokens ?? aliasDefinition?.maxTokens ?? DEFAULT_MAX_TOKENS;
 
-  // Resolve thinkingLevels: tier config > alias > default
+  // Declared thinkingLevels: tier config > alias
   // Validate tier-level thinkingLevels array
   let tierThinkingLevels: ThinkingLevel[] | undefined;
   if (Array.isArray(value.thinkingLevels)) {
@@ -397,22 +391,6 @@ export const normalizeTierConfig = (
 
   const explicitThinkingLevels =
     tierThinkingLevels ?? aliasDefinition?.thinkingLevels;
-  const baseThinkingLevels: ThinkingLevel[] =
-    explicitThinkingLevels ??
-    (effectiveReasoning === false ? [] : [...DEFAULT_THINKING_LEVELS]);
-
-  // Auto-add the tier's thinking value if it's not 'off' and not already present,
-  // but only if the user didn't explicitly constrain the thinkingLevels array.
-  const resolvedThinkingLevels: ThinkingLevel[] = [...baseThinkingLevels];
-  if (
-    !explicitThinkingLevels &&
-    effectiveReasoning !== false &&
-    thinking !== 'off' &&
-    !resolvedThinkingLevels.includes(thinking)
-  ) {
-    resolvedThinkingLevels.push(thinking);
-  }
-
   return {
     model: parsedModel,
     thinkingExplicit: isThinkingLevel(value.thinking),
@@ -425,7 +403,6 @@ export const normalizeTierConfig = (
     thinkingLevels: explicitThinkingLevels,
     resolvedContextWindow,
     resolvedMaxTokens,
-    resolvedThinkingLevels,
   };
 };
 
@@ -861,22 +838,4 @@ export const resolveMaxTokens = (
 
   // 2-4. Pre-resolved during config normalization (tier > alias > hardcoded)
   return tierConfig.resolvedMaxTokens ?? DEFAULT_MAX_TOKENS;
-};
-
-/**
- * Collect the union of all tier models' resolved thinking levels for a profile.
- * Returns a Set of ThinkingLevel values.
- */
-export const collectProfileThinkingLevels = (
-  profile: RouterProfile,
-): Set<ThinkingLevel> => {
-  const levels = new Set<ThinkingLevel>();
-  for (const tier of ROUTER_TIERS) {
-    const tierConfig = profile[tier];
-    if (!tierConfig?.resolvedThinkingLevels) continue;
-    for (const level of tierConfig.resolvedThinkingLevels) {
-      levels.add(level);
-    }
-  }
-  return levels;
 };

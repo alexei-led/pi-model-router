@@ -40,7 +40,6 @@ export interface RoutedTierConfig {
   thinkingLevels?: ThinkingLevel[] | undefined;
   resolvedContextWindow?: number | undefined;
   resolvedMaxTokens?: number | undefined;
-  resolvedThinkingLevels?: ThinkingLevel[] | undefined;
 }
 
 export interface JevContextConfig {

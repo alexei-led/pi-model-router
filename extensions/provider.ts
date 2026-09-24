@@ -17,7 +17,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { runClassifier } from './classifier';
 import {
-  collectProfileThinkingLevels,
   MAX_THINKING_LEVEL,
   parseCanonicalModelRef,
   profileNames,
@@ -338,14 +337,24 @@ export const registerRouterProvider = (
     }
 
     const hasReasoning = supportsReasoning(profile, state.currentModelRegistry);
-    const profileLevels = collectProfileThinkingLevels(profile);
-    // Build thinkingLevelMap from the union of all tier models' declared levels.
-    // Only needed if xhigh or max are in the set (pi supports all others by default).
+    const registry = state.currentModelRegistry;
+    // Pi clamps the footer and picker to these levels, so list a level only when
+    // some route runs it exactly.
+    const runsLevel = (level: ThinkingLevel): boolean =>
+      [false, true].some((imageAttached) =>
+        availableRoutePairs(
+          profile,
+          (provider, id) => registry?.find(provider, id),
+          imageAttached,
+          Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
+        ).some((pair) => pair.thinking === level),
+      );
+    // Only xhigh and max need a map entry; pi supports the others by default.
     let thinkingLevelMap: Record<string, string> | undefined;
     if (hasReasoning) {
       const map: Record<string, string> = {};
-      if (profileLevels.has('xhigh')) map.xhigh = 'xhigh';
-      if (profileLevels.has(MAX_THINKING_LEVEL)) map.max = MAX_THINKING_LEVEL;
+      if (runsLevel('xhigh')) map.xhigh = 'xhigh';
+      if (runsLevel(MAX_THINKING_LEVEL)) map.max = MAX_THINKING_LEVEL;
       if (Object.keys(map).length > 0) thinkingLevelMap = map;
     }
 
@@ -824,8 +833,9 @@ export const registerRouterProvider = (
           // may be invalidated (stale) after session teardown.
           // The route's thinking already includes any override, mapped to a
           // level the target supports.
+          let shownThinking = decision.thinking;
           try {
-            actions.syncPiThinkingLevel(decision.thinking);
+            actions.syncPiThinkingLevel(shownThinking);
             if (state.lastExtensionContext) {
               actions.updateStatus(state.lastExtensionContext);
             }
@@ -903,6 +913,11 @@ export const registerRouterProvider = (
                 pair.thinking !== 'off' ? pair.thinking : undefined;
 
               try {
+                // A fallback can run at another level than the one shown.
+                if (pair.thinking !== shownThinking) {
+                  actions.syncPiThinkingLevel(pair.thinking);
+                  shownThinking = pair.thinking;
+                }
                 if (state.lastExtensionContext) {
                   if (delegatedReasoning) {
                     state.lastExtensionContext.ui.setHiddenThinkingLabel?.(
