@@ -11,9 +11,11 @@ import {
   type Model,
   type SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
-import type {
-  ExtensionAPI,
-  ExtensionContext,
+import {
+  calculateContextTokens,
+  type ExtensionAPI,
+  type ExtensionContext,
+  estimateTokens as estimateMessageTokens,
 } from '@earendil-works/pi-coding-agent';
 import { runClassifier } from './classifier';
 import {
@@ -36,6 +38,7 @@ import { createJevCandidate, runJevDetailed } from './jev';
 import {
   availableRoutePairs,
   decisionForPair,
+  fitContextRoutes,
   primaryRoutePairs,
   selectBaselineRoute,
 } from './routing';
@@ -259,6 +262,32 @@ const truncateContext = (context: Context, limit: number): Context => {
         .filter((message) => message.role !== 'system'),
     ],
   };
+};
+
+/**
+ * Request size for route fitting: the larger of the last valid usage plus
+ * later messages, and a text estimate of the whole transcript. The text
+ * estimate keeps a usage report from a truncated request from hiding growth.
+ */
+const estimateRequestTokens = (context: Context): number => {
+  const system = context.systemPrompt
+    ? Math.ceil(context.systemPrompt.length / 4)
+    : 0;
+  const sizes = context.messages.map((message) =>
+    estimateMessageTokens(message),
+  );
+  const text = system + sizes.reduce((sum, size) => sum + size, 0);
+  const index = context.messages.findLastIndex(
+    (message) =>
+      message.role === 'assistant' &&
+      message.stopReason !== 'error' &&
+      message.stopReason !== 'aborted' &&
+      calculateContextTokens(message.usage) > 0,
+  );
+  const last = context.messages[index];
+  if (last?.role !== 'assistant') return text;
+  const later = sizes.slice(index + 1).reduce((sum, size) => sum + size, 0);
+  return Math.max(text, calculateContextTokens(last.usage) + later);
 };
 
 const supportsReasoning = (
@@ -490,13 +519,24 @@ export const registerRouterProvider = (
           )
             ? state.thinkingByProfile[model.id]
             : undefined;
-          const available = () =>
+          const eligible = () =>
             availableRoutePairs(
               profile,
               findModel,
               imageAttached,
               thinkingOverrides,
             );
+          // Route selection skips windows too small for the request. A pin is
+          // explicit, so it keeps its route and relies on truncation.
+          const contextTokens = estimateRequestTokens(context);
+          const windowOf = (pair: RoutePair) => {
+            const { provider, modelId } = parseCanonicalModelRef(pair.model);
+            return findModel(provider, modelId)?.contextWindow;
+          };
+          const available = () =>
+            pinnedTier
+              ? eligible()
+              : fitContextRoutes(eligible(), windowOf, contextTokens);
           let pairs = available();
           const lastUserIndex = context.messages.findLastIndex(
             (entry) => entry.role === 'user',
@@ -801,15 +841,16 @@ export const registerRouterProvider = (
             (decision.targetProvider !== priorAssistant.provider ||
               decision.targetModelId !== priorAssistant.model)
           ) {
+            const continuable = eligible();
             const priorPair =
-              pairs.find(
+              continuable.find(
                 (pair) =>
                   pair.model ===
                     `${priorAssistant.provider}/${priorAssistant.model}` &&
                   pair.tier === continuationDecision?.tier &&
                   pair.thinking === continuationDecision?.thinking,
               ) ??
-              pairs.find(
+              continuable.find(
                 (pair) =>
                   pair.model ===
                   `${priorAssistant.provider}/${priorAssistant.model}`,
@@ -889,7 +930,8 @@ export const registerRouterProvider = (
                 effectiveContext = truncateContext(context, targetLimit);
               }
 
-              const pair = available().find(
+              // Explicit fallbacks keep their order even when a window is small.
+              const pair = eligible().find(
                 (candidate) =>
                   candidate.tier === decision.tier &&
                   candidate.model === modelRef,

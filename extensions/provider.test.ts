@@ -623,6 +623,78 @@ describe('router provider', () => {
     expect(context.messages).toHaveLength(4);
   });
 
+  describe('context-window fit', () => {
+    // 'small' has a 1024-token window: 921 tokens at the 0.9 fill.
+    const fitSetup = () => {
+      const s = setup();
+      s.state.currentConfig = normalizeConfig({
+        profiles: {
+          balanced: {
+            baselineTier: 'low',
+            high: { model: 'test/primary' },
+            low: { model: 'test/small' },
+          },
+        },
+      }).config;
+      delete s.state.pinnedTierByProfile.balanced;
+      return s;
+    };
+    const large = () => userContext('x'.repeat(4000));
+    const grownByUsage = (): Context => ({
+      messages: [
+        { role: 'user', content: 'first', timestamp: 1 },
+        message({
+          usage: { ...message().usage, input: 3000, totalTokens: 3001 },
+        }),
+        { role: 'user', content: 'next', timestamp: 2 },
+      ],
+    });
+
+    it.each([
+      ['keeps the baseline when the request fits', userContext(), 'small'],
+      ['skips a baseline window too small for the text', large(), 'primary'],
+      [
+        'skips a baseline window too small for the last usage',
+        grownByUsage(),
+        'primary',
+      ],
+    ])('%s', async (_name, context, target) => {
+      const s = fitSetup();
+      await consume(s.stream(context));
+      expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe(target);
+      expect(s.delegate.mock.calls.at(-1)?.[1].messages).toHaveLength(
+        context.messages.length,
+      );
+    });
+
+    it('honors a pin to a small window and truncates instead', async () => {
+      const s = fitSetup();
+      s.state.pinnedTierByProfile.balanced = 'low';
+      const context: Context = {
+        messages: [
+          { role: 'user', content: 'x'.repeat(4000), timestamp: 1 },
+          message(),
+          { role: 'user', content: 'implement', timestamp: 2 },
+        ],
+      };
+      await consume(s.stream(context));
+      expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('small');
+      expect(s.delegate.mock.calls.at(-1)?.[1].messages).toHaveLength(1);
+    });
+
+    it('offers the advisor only routes that fit', async () => {
+      const s = fitSetup();
+      enableAdvisors(s);
+      const fetch = mockChoice('low');
+      await consume(s.stream(large()));
+      expect(fetch).not.toHaveBeenCalled();
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'high',
+        bypassReason: 'single-candidate',
+      });
+    });
+  });
+
   it('rejects unknown profiles and unavailable registries with a terminal error', async () => {
     const s = setup();
     s.state.currentConfig.profiles = {};
@@ -1404,6 +1476,9 @@ describe('Jev provider integration', () => {
           },
         }).config;
         delete s.state.pinnedTierByProfile.balanced;
+        // The image estimate alone would overflow the 1024-token fixture window.
+        required(s.models.find((entry) => entry.id === 'small')).contextWindow =
+          8192;
         if (advisor === 'jev') enableAdvisors(s);
         if (advisor === 'classifier') {
           s.state.currentConfig.classifierModel = { model: 'test/small' };

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Unpinned routing skips a route whose context window cannot hold the conversation at 90% fill, so a smaller model no longer silently drops old turns. If no route fits, the largest windows stay eligible and truncation still applies. A pin keeps its tier and truncates as before.
+
 ## [0.9.0] - 2026-09-24
 
 ### Upgrade requirements

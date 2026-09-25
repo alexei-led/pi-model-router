@@ -95,6 +95,7 @@ flowchart LR
 
 Here, `auto` is a profile name. The argument in `pin auto` clears a pin instead.
 An ineligible pin produces an error. The router does not substitute another tier.
+A pin to a tier whose context window is too small for the conversation keeps that tier; old turns are truncated.
 
 An effort override applies to every tier in the active profile.
 Each model runs the override at its nearest supported level. For example, `off` runs as `minimal` on a model without `off`. The confirmation names each tier that runs another level, such as `high runs at minimal`.

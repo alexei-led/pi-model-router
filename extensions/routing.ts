@@ -5,6 +5,7 @@ import {
   type Model,
 } from '@earendil-works/pi-ai';
 import { parseCanonicalModelRef, THINKING_LEVELS } from './config';
+import { CONTEXT_FILL } from './constants';
 import type {
   ModelDefinition,
   RoutePair,
@@ -203,6 +204,25 @@ export const effortAdjustments = (
       ? [`${tier} runs at ${pair.thinking}`]
       : [];
   });
+};
+
+/**
+ * Keep routes whose context window holds the estimated request. When none
+ * does, keep the largest windows so provider truncation drops the least.
+ * An unknown window counts as fitting: nothing proves it is too small.
+ */
+export const fitContextRoutes = (
+  pairs: readonly RoutePair[],
+  windowOf: (pair: RoutePair) => number | undefined,
+  contextTokens: number,
+): RoutePair[] => {
+  const size = (pair: RoutePair) => windowOf(pair) ?? Number.POSITIVE_INFINITY;
+  const fitting = pairs.filter(
+    (pair) => contextTokens <= size(pair) * CONTEXT_FILL,
+  );
+  if (fitting.length > 0) return fitting;
+  const largest = Math.max(0, ...pairs.map(size));
+  return pairs.filter((pair) => size(pair) === largest);
 };
 
 export interface BaselineSelection {
