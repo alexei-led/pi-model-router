@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1] - 2026-09-25
+
+### Changed
+
+- Unpinned routing skips a route whose context window cannot hold the conversation at 90% fill, so a smaller model no longer silently drops old turns. If no route fits, the largest windows stay eligible and truncation still applies. A pin keeps its tier and truncates as before.
+- A tool continuation that cannot reuse its record, for example after a context transform rewrites older history, keeps the model that issued the tool calls in its recorded tier instead of switching to the baseline mid-loop. A pin or budget decision still wins.
+
 ## [0.9.0] - 2026-09-24
 
 ### Upgrade requirements

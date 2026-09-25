@@ -29,3 +29,5 @@ export const DEFAULT_CLASSIFIER_TIMEOUT_MS = 10_000;
 export const MAX_TURN_CACHE_ENTRIES = 16;
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_MAX_TOKENS = 16_384;
+/** Share of a route's context window the estimated request may fill; the rest is output headroom. */
+export const CONTEXT_FILL = 0.9;

@@ -67,7 +67,9 @@ flowchart TD
     class Baseline local
 ```
 
-A valid continuation reuses its actual route. An invalid continuation selects a compatible local route without advice.
+A valid continuation reuses its actual route. An invalid continuation selects a compatible local route without advice:
+the model that issued the tool calls, in its recorded tier, when that route is still eligible; otherwise the baseline.
+A pin or budget decision still takes priority. A mid-loop switch would reread the whole context uncached.
 Pins, budget policy, and only one eligible candidate also bypass advisors.
 The budget is a soft generation-cost policy, not a billing cap.
 
@@ -75,6 +77,12 @@ Eligibility requires provider availability, input support, and at least one allo
 Local declarations can restrict registry capabilities but cannot grant capabilities.
 An unsupported effort runs at the nearest allowed level, as in Pi: the next higher level, else the next lower level.
 The route, status line, log, and Pi's footer show the level that runs.
+
+Unpinned selection also skips a route whose context window cannot hold the request at 90% fill.
+The request size is the larger of the last valid usage plus later messages and Pi's text estimate of the whole transcript.
+If no route fits, the largest windows stay eligible and truncation handles the overflow.
+This is a capacity check, not a size preference: every fitting route stays a candidate.
+A pin, a Google tool continuation, and explicit generation fallbacks keep their route and rely on truncation.
 
 An eligible `baselineTier` takes priority. The remaining preference is `medium`, `high`, `low`, then `micro`.
 Each tier offers at most one advisor candidate: its primary, or its first eligible fallback when the primary is ineligible.
@@ -125,7 +133,7 @@ The bounded cache stores the actual successful route, not only the advisor label
 Reuse requires matching session, user turn, profile, policy, configuration, branch ancestry, model, and tool-result identities.
 When the caller omits `sessionId`, the key uses Pi's native session ID.
 Changed capabilities or configuration invalidate reuse. The original provider `sessionId` passes through unchanged.
-Context truncation removes complete old user turns and preserves system instructions and the active tool chain.
+Context truncation, the last resort after the window check, removes complete old user turns and preserves system instructions and the active tool chain.
 Its text estimate does not guarantee a fit for images or oversized active turns.
 
 ## Failure behavior

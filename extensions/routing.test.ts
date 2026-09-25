@@ -14,6 +14,7 @@ import {
   clampEffort,
   decisionForPair,
   effortAdjustments,
+  fitContextRoutes,
   phaseForTier,
   preservesRouteCoverage,
   primaryRoutePairs,
@@ -176,6 +177,50 @@ describe('eligible baseline routing', () => {
       reasonCode: 'budget',
       isBudgetForced: false,
     });
+  });
+});
+
+describe('context-window fit', () => {
+  const pair = (tier: RouterTier, ref: string) => ({
+    tier,
+    model: ref,
+    thinking: 'medium' as const,
+  });
+  const small = pair('low', 'test/small');
+  const large = pair('high', 'test/large');
+  const alsoLarge = pair('medium', 'test/also-large');
+  const unknown = pair('micro', 'test/unknown');
+  const windows: Record<string, number | undefined> = {
+    'test/small': 1000,
+    'test/large': 10_000,
+    'test/also-large': 10_000,
+  };
+  const windowOf = (entry: { model: string }) => windows[entry.model];
+
+  it.each([
+    ['keeps every route that fits', 900, [small, large], [small, large]],
+    ['fits exactly at the fill limit', 900, [small], [small]],
+    [
+      'drops a route one token past the fill limit',
+      901,
+      [small, large],
+      [large],
+    ],
+    [
+      'keeps every largest window when none fits',
+      50_000,
+      [small, large, alsoLarge],
+      [large, alsoLarge],
+    ],
+    [
+      'treats an unknown window as fitting',
+      50_000,
+      [small, unknown],
+      [unknown],
+    ],
+    ['returns nothing for no routes', 10, [], []],
+  ])('%s', (_name, tokens, pairs, expected) => {
+    expect(fitContextRoutes(pairs, windowOf, tokens)).toEqual(expected);
   });
 });
 
