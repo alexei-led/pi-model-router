@@ -67,7 +67,9 @@ flowchart TD
     class Baseline local
 ```
 
-A valid continuation reuses its actual route. An invalid continuation selects a compatible local route without advice.
+A valid continuation reuses its actual route. An invalid continuation selects a compatible local route without advice:
+the model that issued the tool calls, in its recorded tier, when that route is still eligible; otherwise the baseline.
+A pin or budget decision still takes priority. A mid-loop switch would reread the whole context uncached.
 Pins, budget policy, and only one eligible candidate also bypass advisors.
 The budget is a soft generation-cost policy, not a billing cap.
 

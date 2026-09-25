@@ -1989,12 +1989,62 @@ describe('Jev provider integration', () => {
         toolContext(userContext('same task', 1), toolMessage('test', 'small')),
       ),
     );
+    // The evicted record is not reused, but the latest route for the same
+    // model still keeps the loop off the baseline.
     expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      reasonCode: 'baseline',
+      tier: 'low',
+      reasonCode: 'continuation',
+      bypassReason: 'tool-continuation',
     });
+    expect(s.state.lastDecision?.reuse).toBeUndefined();
     expect(advisorOf(s.state.lastDecision)).toBe('bypassed');
     expect(fetch).toHaveBeenCalledTimes(17);
+  });
+
+  it.each([
+    [
+      'keeps the advised route when the turn key changes',
+      'rewrite',
+      'low',
+      'small',
+    ],
+    [
+      'keeps baseline when no route names the prior model',
+      'foreign',
+      'medium',
+      'primary',
+    ],
+    ['keeps an explicit pin over the prior model', 'pin', 'high', 'primary'],
+  ] as const)('%s', async (_name, kind, tier, target) => {
+    const s = setup();
+    enableAdvisors(s);
+    mockChoice('low');
+    const history: Context = {
+      messages: [
+        { role: 'user', content: 'earlier', timestamp: 1 },
+        message({ content: [{ type: 'text', text: 'long tool output' }] }),
+        { role: 'user', content: 'same task', timestamp: 2 },
+      ],
+    };
+    s.delegate.mockReturnValueOnce(finishTool(toolMessage('test', 'small')));
+    await consume(s.stream(history));
+    expect(s.state.lastDecision).toMatchObject({ tier: 'low' });
+    // A context transform (for example, pruning) rewrites older history.
+    const rewritten: Context = {
+      messages: [
+        required(history.messages[0]),
+        message({ content: [{ type: 'text', text: '[pruned]' }] }),
+        required(history.messages[2]),
+      ],
+    };
+    const prior =
+      kind === 'foreign'
+        ? toolMessage('test', 'other')
+        : toolMessage('test', 'small');
+    if (kind === 'pin') s.state.pinnedTierByProfile.balanced = 'high';
+    await consume(s.stream(toolContext(rewritten, prior)));
+    expect(s.state.lastDecision).toMatchObject({ tier });
+    expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe(target);
   });
 
   it.each([

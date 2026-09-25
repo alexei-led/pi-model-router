@@ -832,37 +832,52 @@ export const registerRouterProvider = (
             }
           }
 
-          // Google thought signatures cannot be replayed against a different thinking model.
+          // An invalid continuation keeps the model that issued the tool calls
+          // when it is still a fitting route: a mid-loop switch rereads the
+          // whole context uncached. Google thought signatures cannot be
+          // replayed against a different thinking model, so they must keep it.
           const priorAssistant = context.messages[latestAssistantIndex];
+          const mustContinue =
+            priorAssistant?.role === 'assistant' &&
+            requiresGoogleContinuation(priorAssistant);
           if (
             toolContinuation &&
             priorAssistant?.role === 'assistant' &&
-            requiresGoogleContinuation(priorAssistant) &&
+            (mustContinue || decision.reasonCode === 'baseline') &&
             (decision.targetProvider !== priorAssistant.provider ||
               decision.targetModelId !== priorAssistant.model)
           ) {
-            const continuable = eligible();
+            const priorRef = `${priorAssistant.provider}/${priorAssistant.model}`;
+            // The record is lost when the turn key changes; the latest
+            // decision for the same model still names its tier and effort.
+            const priorRoute =
+              continuationDecision ??
+              (state.lastDecision?.targetLabel === priorRef
+                ? state.lastDecision
+                : undefined);
+            const continuable = mustContinue ? eligible() : pairs;
+            const sameTier = (pair: RoutePair) =>
+              pair.model === priorRef && pair.tier === priorRoute?.tier;
+            // Only Google may leave the recorded tier; a changed tier config
+            // must not keep a model the tier no longer names.
             const priorPair =
               continuable.find(
                 (pair) =>
-                  pair.model ===
-                    `${priorAssistant.provider}/${priorAssistant.model}` &&
-                  pair.tier === continuationDecision?.tier &&
-                  pair.thinking === continuationDecision?.thinking,
+                  sameTier(pair) && pair.thinking === priorRoute?.thinking,
               ) ??
               continuable.find(
-                (pair) =>
-                  pair.model ===
-                  `${priorAssistant.provider}/${priorAssistant.model}`,
+                mustContinue ? (pair) => pair.model === priorRef : sameTier,
               );
-            if (!priorPair)
+            if (!priorPair && mustContinue)
               throw new Error(
                 'No compatible route for Google tool continuation.',
               );
-            decision = {
-              ...decisionForPair(model.id, priorPair, 'continuation'),
-              advisor: decision.advisor,
-            };
+            if (priorPair)
+              decision = {
+                ...decisionForPair(model.id, priorPair, 'continuation'),
+                advisor: decision.advisor,
+                bypassReason: decision.bypassReason,
+              };
           }
 
           // A reused route must not carry the previous generation's usage.
