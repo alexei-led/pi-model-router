@@ -64,7 +64,8 @@ Recent records cover 1,967 Pi responses across 25 sessions. They show route use,
 
 ## Install
 
-Requires Pi **0.86.0+** and Node.js **22.19.0+**.
+Requires Pi **1.0.2 or later in the 1.x series** and Node.js **22.19.0+**.
+The test suite checks Pi 1.0.2 types and isolated RPC provider startup without model calls.
 
 ```sh
 pi install npm:@alexeiled/pi-model-router

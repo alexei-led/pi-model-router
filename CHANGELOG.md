@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.2] - 2026-10-04
+
+### Changed
+
+- Validate against Pi 1.0.2 and bound SDK, AI, agent-core, and TUI peer/development ranges to `^1.0.2`. Add an isolated RPC startup test for the router provider without model dispatch, and narrow the provider test to chat models under Pi's mixed-operation model types.
+- Keep the custom provider, routing policy, cancellation, continuation, and compatibility dispatch unchanged. Virtual-model migration is not part of this release.
+
+### Upgrade
+
+- Upgrade Pi to 1.0.2 or later in the 1.x series before installing this version. Older hosts are no longer supported. Start a new Pi session after upgrading the router.
+
 ## [0.9.1] - 2026-09-25
 
 ### Changed
