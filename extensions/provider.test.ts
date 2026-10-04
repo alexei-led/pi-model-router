@@ -2581,10 +2581,14 @@ describe('Jev provider integration', () => {
           },
         }).config;
       registerRouterProvider(s.api, s.state, s.actions);
-      const router = s.register.mock.calls
-        .at(-1)?.[1]
-        .models?.find((entry) => entry.id === 'balanced');
-      expect(router?.thinkingLevelMap).toEqual(expected);
+      const router = required(
+        s.register.mock.calls
+          .at(-1)?.[1]
+          .models?.find((entry) => entry.id === 'balanced'),
+      );
+      if (router.type === 'image' || router.type === 'classifier')
+        throw new Error('Expected a chat router model');
+      expect(router.thinkingLevelMap).toEqual(expected);
     },
   );
 });
