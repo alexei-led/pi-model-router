@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi Router — terminal UI prototype</title>
+<style>
+:root { color-scheme: dark; --bg:#101215; --panel:#191c21; --line:#363c46; --fg:#d6dce5; --dim:#9ba6b5; --accent:#8db7fa; --green:#9fd1ad; --amber:#e4bd7a; --red:#ee9a9a; --font:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; }
+body.light { color-scheme:light; --bg:#f4f3ee; --panel:#fffef9; --line:#b9bec5; --fg:#273342; --dim:#5c6876; --accent:#225da6; --green:#2d7145; --amber:#885407; --red:#a73d3d; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 var(--font); }
+button,select,input { font:inherit; color:inherit; }
+button,select,input[type=number] { background:var(--panel); border:1px solid var(--line); padding:.3rem .55rem; border-radius:0; }
+button { cursor:pointer; }
+button:hover,button[aria-pressed=true] { color:var(--accent); border-color:var(--accent); }
+button:disabled { cursor:default; color:var(--dim); }
+:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+h1,h2,h3,p { margin:0; } h1 { font-size:1.1rem; } h2 { font-size:1rem; color:var(--accent); } h3 { font-size:1rem; }
+main { max-width:1220px; margin:auto; padding:1.4rem; }
+.intro { display:flex; gap:1rem; justify-content:space-between; flex-wrap:wrap; margin-bottom:1rem; }
+.dim { color:var(--dim); } .accent { color:var(--accent); } .green { color:var(--green); } .amber { color:var(--amber); } .red { color:var(--red); }
+.controls { display:flex; flex-wrap:wrap; gap:.65rem 1rem; align-items:center; padding:.8rem 0; border-block:1px solid var(--line); }
+.controls label { display:flex; gap:.5rem; align-items:center; }
+.note { font-size:.8rem; margin:.65rem 0 1rem; }
+.terminal { border:1px solid var(--line); background:var(--panel); max-width:100%; margin-inline:auto; }
+.terminal.narrow { width:690px; }
+.titlebar { padding:.5rem 1rem; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:1rem; color:var(--dim); }
+.transcript { min-height:220px; padding:1.2rem; }
+.transcript p { margin:.6rem 0; }
+.code { padding:.7rem; border-inline-start:2px solid var(--line); color:var(--dim); white-space:pre-wrap; }
+.band { margin:0 1rem; border:1px solid var(--line); padding:.55rem .8rem; }
+.bandrow { display:flex; gap:.5rem 1rem; justify-content:space-between; flex-wrap:wrap; }
+.band strong { color:var(--accent); font-weight:normal; }
+.mini { display:flex; gap:.3rem; flex-wrap:wrap; margin-top:.3rem; }
+.linkbutton { border:0; padding:0 .3rem; color:var(--accent); background:transparent; }
+.editor { margin:.8rem 1rem .2rem; padding:.6rem 0; border-block:1px solid var(--accent); }
+.editor label { display:block; color:var(--dim); font-size:.8rem; }
+.editor input { width:100%; background:transparent; border:0; padding:.3rem 0; }
+.footer { margin:0 1rem; padding:.4rem 0 .8rem; display:flex; gap:.5rem 1rem; flex-wrap:wrap; justify-content:space-between; color:var(--dim); font-size:.8rem; }
+.statusonly .band { display:none; }
+.banner { padding:.4rem 1rem; color:var(--amber); border-bottom:1px solid var(--line); }
+.overlay { width:min(96vw,960px); max-height:90vh; padding:0; border:1px solid var(--accent); background:var(--panel); color:var(--fg); }
+.overlay::backdrop { background:rgb(0 0 0 / .6); }
+.dialoghead { display:flex; justify-content:space-between; gap:1rem; padding:.8rem 1rem; border-bottom:1px solid var(--line); }
+.tabs { display:flex; flex-wrap:wrap; gap:.45rem; padding:.8rem 1rem; border-bottom:1px solid var(--line); }
+.tabs button { border:0; padding:.1rem .5rem; }
+.tabs button[aria-selected=true] { color:var(--accent); background:var(--bg); }
+.page { padding:1rem; max-height:62vh; overflow:auto; }
+[hidden] { display:none !important; }
+.section { margin-bottom:1.2rem; }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:1.2rem; }
+.kv { display:grid; grid-template-columns:150px 1fr; gap:.2rem .8rem; margin:.5rem 0; }
+.kv dt { color:var(--dim); } .kv dd { margin:0; overflow-wrap:anywhere; }
+.rule { border-top:1px solid var(--line); margin:1rem 0; }
+.tablewrap { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; text-align:left; font-size:.85rem; }
+th { color:var(--dim); font-weight:normal; }
+td,th { padding:.45rem .55rem; border-bottom:1px solid var(--line); white-space:nowrap; }
+td:first-child,th:first-child { padding-inline-start:0; }
+tr.selected td { color:var(--accent); }
+.stats { display:grid; grid-template-columns:repeat(3,1fr); gap:.8rem; margin-bottom:1rem; }
+.stat { border-bottom:1px solid var(--line); padding-bottom:.65rem; }
+.stat b { display:block; font-size:1.3rem; font-weight:normal; color:var(--accent); }
+.stat span { color:var(--dim); font-size:.8rem; }
+.bar { white-space:pre; color:var(--green); font-size:.8rem; }
+fieldset { border:1px solid var(--line); padding:.8rem; margin:.8rem 0; }
+legend { color:var(--dim); padding:0 .3rem; }
+.fields { display:grid; grid-template-columns:1fr 1fr; gap:.65rem 1rem; }
+.fields label { display:flex; flex-direction:column; gap:.2rem; }
+.check { display:flex; align-items:start; gap:.65rem; margin:.6rem 0; }
+.check input { margin-top:.45rem; }
+.actions { display:flex; flex-wrap:wrap; gap:.6rem; margin-top:.8rem; }
+.dialogfoot { display:flex; gap:1rem; justify-content:space-between; flex-wrap:wrap; border-top:1px solid var(--line); padding:.7rem 1rem; color:var(--dim); font-size:.8rem; }
+.explain { margin-top:1.2rem; font-size:.85rem; }
+.explain summary { cursor:pointer; color:var(--accent); }
+.explain ul { padding-left:1.2rem; }
+pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:.85rem; }
+.toast { min-height:1.5rem; color:var(--green); margin-top:.8rem; }
+@media(max-width:700px) { main { padding:.7rem; } .grid,.fields { grid-template-columns:1fr; } .stats { grid-template-columns:1fr 1fr; } .kv { grid-template-columns:110px 1fr; } .transcript { min-height:160px; padding:.8rem; } .page { max-height:60vh; } .band,.editor,.footer { margin-inline:.7rem; } }
+@media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto; } }
+</style>
+</head>
+<body>
+<main>
+<header class="intro"><div><h1>Pi Router / UI prototype</h1><p class="dim">Три уровня: status → band → router screen.</p></div><span class="amber">DEMO DATA · NO LIVE CONNECTION</span></header>
+<div class="controls" aria-label="Настройки прототипа">
+<label>Preview <select id="surface"><option value="band">Status + band</option><option value="status">Status only</option></select></label>
+<label>Ширина <select id="width"><option value="wide">120 columns ≈</option><option value="narrow">80 columns ≈</option></select></label>
+<label>Сценарий <select id="scenario"><option value="selected">Jev selected</option><option value="continuation">Tool continuation</option><option value="timeout">Advisor timeout</option><option value="fallback">Generation fallback</option><option value="budget">Soft budget exceeded</option><option value="unknown">Unknown tariff</option></select></label>
+<button id="theme" type="button" aria-pressed="false">Light theme</button>
+<button id="open" type="button">Open router screen</button>
+</div>
+<p class="note dim">HTML — только макет терминала. Клики заменяют клавиши; в Pi: theme tokens, строки, SelectList/SettingsList, ui.custom(). Команды config/stats/screen ниже — предложения, не текущий API роутера.</p>
+<section id="terminal" class="terminal" aria-label="Макет терминала Pi">
+<div class="titlebar"><span>pi · pi-model-router · main</span><span>router/auto</span></div>
+<div id="notice" class="banner" hidden></div>
+<div class="transcript"><p class="accent">› Проверь обработку отмены и fallback.</p><p>Сначала проверю terminal events и пути повторного запроса.</p><p class="code">read  extensions/provider.ts
+bash  npm test -- provider.test.ts
+<span class="green">✓ cancellation stops delegation; no retry after content</span></p><p class="dim">Демонстрационный transcript. Реальные запросы не выполняются.</p></div>
+<div class="band" aria-label="Router status panel">
+<div class="bandrow"><strong id="route"></strong><span id="route-source" class="green"></span></div>
+<div class="bandrow dim"><span id="usage-summary"></span><span>future cache: unknown</span></div>
+<div class="bandrow"><span id="cost-summary" class="dim"></span><div class="mini"><button class="linkbutton" type="button" data-open="now">[ Now ]</button><button class="linkbutton" type="button" data-open="config">[ Config ]</button><button class="linkbutton" type="button" data-open="stats">[ Stats ]</button></div></div>
+</div>
+<div class="editor"><label for="prompt">Prompt · try /router, /router config, /router stats</label><input id="prompt" autocomplete="off" placeholder="› /router" aria-label="Demo command"></div>
+<div class="footer"><span>↑ 48k ↓ 1.2k · context 18% · main</span><span id="footer-status"></span></div>
+</section>
+<p id="toast" class="toast" role="status" aria-live="polite"></p>
+<details class="explain"><summary>Что можно реализовать в Pi?</summary><ul>
+<li>Status: <code>ctx.ui.setStatus('router', text)</code>. Не заменяем общий footer.</li>
+<li>Band: <code>ctx.ui.setWidget('router', component, {placement:'aboveEditor'})</code>; 2–3 строки, ширина в terminal cells.</li>
+<li>Экран: <code>ctx.ui.custom()</code>, overlay на широком терминале, обычный custom screen на узком. Это временный экран, не постоянная sidebar, сжимающая transcript.</li>
+<li>Tabs, формы, таблицы и текстовые bars — реализуемые компоненты. Native select/HTML dialog здесь лишь браузерные заместители терминальных списков.</li>
+<li>Изменения session runtime и preview файлов разделены. В этом HTML ничего не пишется в config, сеть или localStorage.</li>
+<li>Stats, scope и unknown — честные. Полный ledger сессии и config editor потребуют реализации; текущий debug ring содержит максимум 50 решений.</li>
+</ul><p><a href="../research/2026-10-05-claude-router-transfer.md">Анализ и рекомендации</a></p></details>
+</main>
+
+<dialog id="screen" class="overlay" aria-labelledby="screen-title">
+<div class="dialoghead"><h2 id="screen-title">Router / auto</h2><button id="close" type="button" aria-label="Close router screen">[ Esc · close ]</button></div>
+<div class="tabs" role="tablist" aria-label="Router views">
+<button id="tab-now" role="tab" aria-selected="true" aria-controls="page-now" data-tab="now">1 Now</button>
+<button id="tab-config" role="tab" aria-selected="false" aria-controls="page-config" data-tab="config" tabindex="-1">2 Config</button>
+<button id="tab-advisor" role="tab" aria-selected="false" aria-controls="page-advisor" data-tab="advisor" tabindex="-1">3 Advisor</button>
+<button id="tab-stats" role="tab" aria-selected="false" aria-controls="page-stats" data-tab="stats" tabindex="-1">4 Stats</button>
+<button id="tab-events" role="tab" aria-selected="false" aria-controls="page-events" data-tab="events" tabindex="-1">5 Events</button>
+</div>
+<section id="page-now" class="page" role="tabpanel" aria-labelledby="tab-now" tabindex="0">
+<div class="grid">
+<div class="section"><h3>Last observed generation</h3><dl class="kv"><dt>Selection</dt><dd>router/auto</dd><dt>Dispatched</dt><dd id="dispatched"></dd><dt>Effort</dt><dd id="observed-effort"></dd><dt>Decision</dt><dd id="decision"></dd><dt>Advisor</dt><dd id="advisor-summary"></dd><dt>Transition</dt><dd id="transition"></dd><dt>Attempts</dt><dd id="attempts"></dd></dl></div>
+<div class="section"><h3>Observed usage / last attempt</h3><dl class="kv"><dt>Ordinary input</dt><dd>2,000 tokens</dd><dt>Cache read</dt><dd>42,000 tokens</dd><dt>Cache write</dt><dd>6,000 tokens</dd><dt>Output</dt><dd>1,200 tokens</dd><dt>Read share</dt><dd>84% of input (42k / 50k)</dd><dt>Request cost</dt><dd id="last-cost"></dd><dt>Cache next time</dt><dd class="amber">unknown, not “warm”</dd></dl></div>
+</div>
+<div class="rule"></div>
+<div class="section"><h3>Next request / session override</h3><p id="next-state" class="accent"></p><p class="dim">Pin или thinking меняет следующий запрос, не last observed model. Tool continuation сохраняет валидированный actual route.</p><div class="actions"><button type="button" data-open="config">Edit session controls</button><button id="reset" type="button">Clear session overrides</button></div></div>
+<div class="section"><h3>Same-workload scenarios · NOT predicted savings</h3><p class="dim">Те же 50k input + 1.2k output, примерные demo-тарифы. Cache extremes, не прогноз hit rate. Без TTL и prefix proof.</p><div class="tablewrap"><table><thead><tr><th>Model</th><th>All read</th><th>All new/write</th></tr></thead><tbody id="shadow"></tbody></table></div></div>
+</section>
+
+<section id="page-config" class="page" role="tabpanel" aria-labelledby="tab-config" tabindex="0" hidden>
+<p class="amber">DEMO: изменения только в памяти этой страницы.</p>
+<form id="session-form">
+<fieldset><legend>Session controls · no file write</legend><div class="fields">
+<label>Profile<select id="profile"><option>auto</option><option>cheap</option><option>deep</option></select></label>
+<label>Pin<select id="pin"><option>auto</option><option>micro</option><option>low</option><option>medium</option><option>high</option></select></label>
+<label>Thinking override<select id="thinking"><option>auto</option><option>off</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
+<label>Widget<select id="widget"><option value="on">on</option><option value="off">off</option></select></label>
+</div><div class="actions"><button type="submit">Apply to demo session</button></div></fieldset>
+</form>
+<div class="section"><h3>Effective profile · merged, read-only</h3><p class="dim">Origin показывает источник каждого поля. Availability — проверяемые capabilities, не аттестация backend login.</p>
+<div class="tablewrap"><table><thead><tr><th>Tier</th><th>Model / thinking</th><th>Origin</th><th>Eligibility / fallback</th></tr></thead><tbody>
+<tr><td>high</td><td>openai/gpt-5.4-pro · high</td><td>user</td><td>eligible · sonnet fallback</td></tr>
+<tr class="selected"><td>medium</td><td>google/gemini-flash-latest · medium</td><td>project overrides user</td><td>eligible · baseline</td></tr>
+<tr><td>low</td><td>openai/gpt-5.4-nano · off</td><td>user</td><td>eligible</td></tr>
+<tr><td>micro</td><td>openai/gpt-5.4-nano · off</td><td>user</td><td>same model, distinct tier</td></tr>
+</tbody></table></div><p class="dim">Фиксированный пример effective profile auto, не динамический registry. У unsupported effort показывать requested → effective.</p></div>
+<form id="file-form"><fieldset><legend>Proposed config editor · explicit file destination</legend><div class="fields">
+<label>Destination<select id="destination"><option value="user">User · ~/.pi/agent/model-router.json</option><option value="project">Project · .pi/model-router.json</option></select></label>
+<label>Baseline tier<select id="baseline"><option>medium</option><option>high</option><option>low</option><option>micro</option></select></label>
+<label>Soft generation budget / USD<input id="budget" type="number" min="0.01" max="1000000" step="0.01" value="5" required></label>
+<label>Status verbosity<select id="verbosity"><option>compact</option><option>detailed</option></select></label>
+</div><label class="check"><input id="edit-route" type="checkbox">Include a tier route change in this patch</label>
+<div id="route-fields" class="fields" hidden>
+<label>Tier to edit<select id="edit-tier"><option>medium</option><option>high</option><option>low</option><option>micro</option></select></label>
+<label>Primary model<select id="edit-model"><option value="google/gemini-flash-latest">google/gemini-flash-latest</option><option value="openai/gpt-5.4-pro">openai/gpt-5.4-pro</option><option value="openai/gpt-5.4-nano">openai/gpt-5.4-nano</option></select></label>
+<label>Requested thinking<select id="edit-thinking"><option>medium</option><option>off</option><option>low</option><option>high</option><option>xhigh</option><option>max</option></select></label>
+<label>Explicit fallback<select id="edit-fallback"><option value="">none</option><option value="openai/gpt-5.4-pro">openai/gpt-5.4-pro</option><option value="google/gemini-flash-latest">google/gemini-flash-latest</option></select></label>
+</div>
+<p class="dim">Demo catalog only. Production editor must validate availability, input, window and requested → effective thinking; a valid JSON patch is not live route validation.</p>
+<div class="actions"><button type="submit">Preview config change</button></div>
+<p class="dim">В Pi: validate → diff → explicit confirm → atomic write → reload. Project Jev settings игнорируются. API key не показываем и не экспортируем.</p>
+</fieldset></form>
+<details id="config-preview" hidden><summary>Proposed patch · not saved</summary><pre id="config-json"></pre><p class="amber">Это partial patch, не полный config. Запись файла в прототипе отключена.</p></details>
+</section>
+
+<section id="page-advisor" class="page" role="tabpanel" aria-labelledby="tab-advisor" tabindex="0" hidden>
+<h3>Authorization first · user-owned</h3><dl class="kv"><dt>User Jev</dt><dd>enabled · synthetic fixture</dd><dt>Profile opt-in</dt><dd>yes · synthetic fixture</dd><dt>Key</dt><dd>not inspected · demo only</dd><dt>Request budget</dt><dd>1,500 ms total including retry/body</dd><dt>Choice threshold</dt><dd>0.65</dd><dt>Cumulative mass</dt><dd>0.80</dd><dt>Fallback policy</dt><dd>baseline · no second advisor</dd></dl>
+<div class="rule"></div><h3>Bounded context</h3><dl class="kv"><dt>Current request</dt><dd>text within total state bound</dd><dt>Recent dialogue</dt><dd>2 turns · ≈500 tokens</dd><dt>Tool evidence</dt><dd>last-error · ≈250 tokens</dd><dt>Total state</dt><dd>≈3,000 tokens</dd><dt>Excluded</dt><dd>system, credentials, thinking, tool arguments, binary</dd></dl>
+<p class="amber">Недавний текст и tool output могут содержать private data. Filtering ≠ redaction.</p>
+<p class="dim">UI не должен автоматически давать privacy opt-in. Проект не может его включить. Все значения здесь — fixture, никакие advisor calls не выполняются.</p>
+<div class="rule"></div><h3>Current demo advice</h3><p id="advice-detail"></p><p class="dim">В production: только allowlisted local reason codes; без remote explanations и текста prompt.</p>
+</section>
+
+<section id="page-stats" class="page" role="tabpanel" aria-labelledby="tab-stats" tabindex="0" hidden>
+<div class="section"><h3>Scope: synthetic current branch · 12 generation attempts</h3><p class="dim">Предлагаемый full branch ledger. Не live stats и не реальные расходы. Current implementation: ≤50 debug decisions. Сценарий меняет last sample, не этот fixture.</p></div>
+<div class="stats"><div class="stat"><b id="total-cost"></b><span>generation / catalog estimate</span></div><div class="stat"><b>unknown</b><span>advisor charges · excluded</span></div><div class="stat"><b id="cache-share"></b><span>cache-read share / input</span></div><div class="stat"><b>5 / 7</b><span>user turns / continuations</span></div><div class="stat"><b>4</b><span>unique advisor calls, not 12</span></div><div class="stat"><b>2</b><span>failed attempts with usage</span></div></div>
+<div class="section"><h3>Generation mix / by tier</h3><div class="tablewrap"><table><thead><tr><th>Tier</th><th>Attempts</th><th>Share</th><th>Cost estimate</th><th>Distribution</th></tr></thead><tbody id="tier-stats"></tbody></table></div></div>
+<div class="grid"><div><h3>Token ledger · disjoint counters</h3><dl class="kv" id="token-ledger"></dl></div><div><h3>Advisor / 4 unique requests</h3><dl class="kv"><dt>Accepted</dt><dd>3 / 4</dd><dt>Timeout</dt><dd>1 / 4</dd><dt>Latency p50</dt><dd>420 ms</dd><dt>HTTP attempts</dt><dd>5 across 4 requests</dd><dt>Billing</dt><dd>unknown</dd></dl></div></div>
+<div class="rule"></div><h3>Tariff counterfactual · not measured savings</h3><p id="counterfactual"></p><p class="amber">Same token counts/cache behavior, alternative tariff only. Не независимый fixed-model run. Output, retries и cache behavior могли бы отличаться.</p>
+<p class="dim">Catalog estimate ≠ invoice ≠ subscription utilization. Branch rewind не возвращает потраченные деньги; abandoned branches должны учитываться отдельно в lifetime spend.</p>
+</section>
+
+<section id="page-events" class="page" role="tabpanel" aria-labelledby="tab-events" tabindex="0" hidden>
+<h3>Recent routing events · metadata only</h3><p class="dim">Фиксированный fixture; debug ring и lifetime ledger — разные источники. Нет prompt, tool args, ключей или remote reasoning.</p>
+<div class="tablewrap"><table><thead><tr><th>Time</th><th>Route</th><th>Reason</th><th>Usage / outcome</th></tr></thead><tbody>
+<tr><td>11:12:24</td><td>medium / flash</td><td>continuation</td><td>42k cache-read · success</td></tr>
+<tr><td>11:12:20</td><td>medium / flash</td><td>jev · 0.86 · choice</td><td>request #4 · 430 ms</td></tr>
+<tr><td>11:10:31</td><td>medium / flash</td><td>baseline · deadline</td><td>request #3 · 1,500 ms</td></tr>
+<tr><td>11:08:45</td><td>high / pro → sonnet</td><td>fallback before content</td><td>first attempt charged · success</td></tr>
+<tr><td>11:07:10</td><td>low / nano</td><td>pinned</td><td>advisor skipped</td></tr>
+</tbody></table></div>
+<p class="dim">Идентификаторы здесь локальные demo labels. Raw provider errors не персистируем без очистки.</p>
+</section>
+<div class="dialogfoot"><span>← → tabs · 1–5 direct · Esc close · Tab controls</span><span id="screen-feedback" role="status" aria-live="polite">Prototype · nothing saved</span></div>
+</dialog>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const text = (id, value) => { $(id).textContent = value; };
+const tiers = ['micro', 'low', 'medium', 'high'];
+const names = { micro:'openai/gpt-5.4-nano', low:'openai/gpt-5.4-nano', medium:'google/gemini-flash-latest', high:'openai/gpt-5.4-pro' };
+const rates = { micro:[.2,1,.02,.25], low:[.2,1,.02,.25], medium:[.3,2.5,.03,.3], high:[15,60,1.5,18.75] };
+const ledger = ['high','high','low','micro','medium','medium','high','low','medium','medium','medium','medium'].map((tier, i) => ({
+  tier, input:1200, read:18000, write:800, output:450, failed:i===1 || i===6
+}));
+const cost = (row, tier = row.tier) => {
+  const [input, output, read, write] = rates[tier];
+  return (row.input*input + row.output*output + row.read*read + row.write*write)/1e6;
+};
+const sum = (key) => ledger.reduce((n, row) => n + row[key], 0);
+const total = ledger.reduce((n, row) => n + cost(row), 0);
+const money = (n) => '$' + n.toFixed(4);
+const last = {tier:'medium',input:2000,read:42000,write:6000,output:1200};
+const session = {profile:'auto',pin:'auto',thinking:'auto',widget:'on'};
+const scenarios = {
+  selected:{tier:'medium',effort:'medium',source:'Jev · 0.86 · 430ms',decision:'jev / choice',advisor:'selected',transition:'model-switch',attempts:1},
+  continuation:{tier:'medium',effort:'medium',source:'tool continuation · advisor skipped',decision:'continuation / validated route',advisor:'not called; reused route',transition:'same-model',attempts:1},
+  timeout:{tier:'medium',effort:'medium',source:'baseline · Jev deadline',decision:'baseline / deadline',advisor:'deadline · 1500ms total',transition:'same-model',attempts:1,notice:'Advisor timeout → eligible baseline. No second advisor.'},
+  fallback:{tier:'high',model:'anthropic/sonnet (demo fallback)',effort:'high',source:'fallback · before visible content',decision:'fallback / explicit order',advisor:'selected high; actual model changed',transition:'model-switch',attempts:2,notice:'First attempt failed before content. Its reported cost still counts.'},
+  budget:{tier:'medium',effort:'medium',source:'budget · advisor skipped',decision:'budget / medium-or-lower baseline',advisor:'not called',transition:'same-model',attempts:1,notice:'Soft generation budget exceeded. Not a spending cap; generation continues.'},
+  unknown:{tier:'medium',effort:'medium',source:'baseline · tariff unknown',decision:'baseline',advisor:'not called',transition:'model-switch',attempts:1,notice:'Unknown price is not free generation. Completeness must be shown.'}
+};
+const row = (values) => {
+  const tr = document.createElement('tr');
+  values.forEach((value) => { const td=document.createElement('td'); td.textContent=value; tr.append(td); });
+  return tr;
+};
+const drawStats = () => {
+  text('total-cost',money(total));
+  text('cache-share',Math.round(100*sum('read')/(sum('input')+sum('read')+sum('write'))) + '%');
+  $('tier-stats').replaceChildren(...tiers.map((tier) => {
+    const rows=ledger.filter((entry)=>entry.tier===tier);
+    const tr=row([tier,rows.length,(rows.length/ledger.length*100).toFixed(1)+'%',money(rows.reduce((n,entry)=>n+cost(entry),0)),'█'.repeat(rows.length)]);
+    tr.lastChild.className='bar'; return tr;
+  }));
+  const entries=[['Ordinary input',sum('input')],['Cache read',sum('read')],['Cache write',sum('write')],['Output',sum('output')]];
+  $('token-ledger').replaceChildren(...entries.flatMap(([label,count]) => {
+    const dt=document.createElement('dt'),dd=document.createElement('dd'); dt.textContent=label;dd.textContent=count.toLocaleString('en-US');return [dt,dd];
+  }));
+  const allHigh=ledger.reduce((n,entry)=>n+cost(entry,'high'),0);
+  text('counterfactual','Repriced as demo high tariff: '+money(allHigh)+' vs '+money(total)+'. Tariff difference: '+money(allHigh-total)+'. Rates are illustrative, not live catalog.');
+};
+const draw = () => {
+  const kind=$('scenario').value, sample=scenarios[kind], target=sample.model ?? names[sample.tier];
+  text('route','router/auto → '+sample.tier+' → '+target.replace(/^[^/]+\//,'')+' / '+sample.effort);
+  text('route-source',sample.source);
+  text('usage-summary','last input: 2k new · 42k read · 6k write · output: 1.2k');
+  text('cost-summary','branch generation ≈ '+money(total)+' catalog · advisor $ unknown');
+  text('footer-status','router:auto · '+sample.tier+' · '+money(total)+' branch est.'+(kind==='unknown'?' · last $ unknown':''));
+  text('dispatched',target);text('observed-effort',sample.effort);
+  text('decision',sample.decision);text('advisor-summary',sample.advisor);text('transition',sample.transition);text('attempts',sample.attempts);
+  text('last-cost',kind==='unknown' || kind==='fallback' ? 'unknown (demo: incomplete tariff/attempt evidence)' : money(cost(last))+' catalog estimate');
+  text('next-state',session.profile+' · pin '+session.pin+' · thinking '+session.thinking+' · widget '+session.widget);
+  text('advice-detail',sample.source+' · '+sample.advisor);
+  $('notice').hidden=!sample.notice; text('notice',sample.notice ?? '');
+  $('terminal').classList.toggle('statusonly',$('surface').value==='status'||session.widget==='off');
+  $('terminal').classList.toggle('narrow',$('width').value==='narrow');
+  $('shadow').replaceChildren(...['high','medium'].map((tier) => {
+    const [input,output,read,write]=rates[tier];
+    return row([names[tier],kind==='unknown'?'unknown':money((50000*read+1200*output)/1e6),kind==='unknown'?'unknown':money((50000*Math.max(input,write)+1200*output)/1e6)]);
+  }));
+};
+const tabs=['now','config','advisor','stats','events'];
+let activeTab='now';
+const activate = (tab, focus=false) => {
+  activeTab=tab;
+  tabs.forEach((name) => {
+    const selected=name===tab;
+    $('page-'+name).hidden=!selected;
+    $('tab-'+name).setAttribute('aria-selected',String(selected));
+    $('tab-'+name).tabIndex=selected?0:-1;
+  });
+  $('page-'+tab).scrollTop=0;
+  if(focus) $('tab-'+tab).focus();
+};
+const open = (tab='now') => {
+  activate(tab);
+  if(!$('screen').open) $('screen').showModal();
+  $('tab-'+tab).focus();
+};
+document.querySelectorAll('[data-open]').forEach((button)=>button.addEventListener('click',()=>open(button.dataset.open)));
+document.querySelectorAll('[data-tab]').forEach((button)=>button.addEventListener('click',()=>activate(button.dataset.tab,true)));
+$('open').addEventListener('click',()=>open());
+$('close').addEventListener('click',()=>$('screen').close());
+$('screen').addEventListener('keydown',(event)=>{
+  if(event.target.matches('input,select,textarea')) return;
+  const index=tabs.indexOf(activeTab);
+  if(event.key==='ArrowRight'||event.key==='ArrowLeft') {
+    event.preventDefault();activate(tabs[(index+(event.key==='ArrowRight'?1:4))%5],true);
+  } else if(/^[1-5]$/.test(event.key)) { event.preventDefault();activate(tabs[Number(event.key)-1],true); }
+});
+$('theme').addEventListener('click',()=>{
+  const light=document.body.classList.toggle('light');$('theme').setAttribute('aria-pressed',String(light));text('theme',light?'Dark theme':'Light theme');
+});
+['surface','width','scenario'].forEach((id)=>$(id).addEventListener('change',draw));
+$('session-form').addEventListener('submit',(event)=>{
+  event.preventDefault();Object.keys(session).forEach((key)=>{session[key]=$(key).value;});
+  draw();text('screen-feedback','Applied in demo memory; next request only.');text('toast','Session overrides applied to demo. Last observed generation is unchanged.');
+});
+$('reset').addEventListener('click',()=>{
+  Object.assign(session,{profile:'auto',pin:'auto',thinking:'auto',widget:'on'});
+  Object.keys(session).forEach((key)=>{$(key).value=session[key];});draw();text('screen-feedback','Session overrides cleared.');
+});
+$('edit-route').addEventListener('change',()=>{$('route-fields').hidden=!$('edit-route').checked;});
+$('file-form').addEventListener('submit',(event)=>{
+  event.preventDefault();
+  const profilePatch={baselineTier:$('baseline').value};
+  if($('edit-route').checked) {
+    const fallback=$('edit-fallback').value;
+    profilePatch[$('edit-tier').value]={model:$('edit-model').value,thinking:$('edit-thinking').value,fallbacks:fallback?[fallback]:[]};
+  }
+  const patch={maxSessionBudget:Number($('budget').value),ui:{statusLine:$('verbosity').value},profiles:{auto:profilePatch}};
+  text('config-json','Destination: '+$('destination').selectedOptions[0].textContent+'\n\n'+JSON.stringify(patch,null,2));
+  $('config-preview').hidden=false;$('config-preview').open=true;text('screen-feedback','Partial patch preview; live capabilities not checked. No file written.');
+});
+$('prompt').addEventListener('keydown',(event)=>{
+  if(event.key!=='Enter')return;
+  const command=event.target.value.trim();
+  const routes={'/router':'now','/router config':'config','/router stats':'stats','/router log':'events','/router screen':'now'};
+  if(Object.hasOwn(routes,command)){open(routes[command]);event.target.value='';}
+  else text('toast','Demo commands: /router, /router config, /router stats, /router log.');
+});
+drawStats();draw();
+</script>
+</body>
+</html>
