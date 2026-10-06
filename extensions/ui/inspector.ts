@@ -638,10 +638,16 @@ export class RouterUIInspector implements Component {
     body.push(...this.content().flatMap((line) => wrapTextWithAnsi(line, w)));
     if (height < 7) {
       header.splice(0, header.length);
+      const action = this.actions()[this.focus - fields.length - 1];
       footer.splice(
         0,
         footer.length,
-        this.theme.fg('dim', 'Tab focus · Esc close'),
+        this.theme.fg(
+          action ? 'accent' : 'muted',
+          action
+            ? `›${action} · Enter · Tab · Esc`
+            : `Tab: ${this.actions().join('/')} · Esc`,
+        ),
       );
     }
     if (this.wide && height >= 7)

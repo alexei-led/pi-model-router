@@ -79,6 +79,12 @@ section-row focus reset, and the intended Apply action was then exercised.
    prioritizing model identity. The 44-column live recheck showed the model.
 3. Short status originally bypassed non-TUI output handling. Print now writes
    stderr; JSON emits `router-status`; RPC notifies. Host tests cover each.
+4. Independent review found hidden action labels below seven usable panel rows.
+   The compact footer now shows the focused action and Enter hint. Regressions
+   at 11/12/15 terminal rows failed before the fix and passed afterward. A live
+   agterm check with enlarged font confirmed visible Apply and successful queueing.
+   Agterm's minimum window height was 432 points; the font change reached the
+   short-layout path without pretending the requested 320-point resize succeeded.
 
 ## Bounded real-service classifier smoke
 
@@ -126,7 +132,7 @@ local observations in real Pi, not measurements from the service smoke.
 
 ## Release gates
 
-- Clean dependency install, Biome/TypeScript and 819 tests in 20 suites passed.
+- Clean dependency install, Biome/TypeScript and 822 tests in 20 suites passed.
 - Dependency audit: zero vulnerabilities.
 - Package dry run: 23 production files; no test helpers or test files.
 - Publication dry run passed. It does not prove trusted-publisher access.

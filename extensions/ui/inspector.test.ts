@@ -106,6 +106,30 @@ const fixture = () => {
 };
 
 describe('Signal Panel', () => {
+  it.each([11, 12, 15])(
+    'keeps focused draft actions visible at %i terminal rows',
+    async (rows) => {
+      const f = fixture();
+      Object.assign(f.tui.terminal, { rows });
+      f.panel.selectTab('settings');
+      f.panel.handleInput('\t');
+      f.panel.handleInput('\x1b[C');
+      expect(f.draft.dirty()).not.toHaveLength(0);
+      f.panel.handleInput('\t');
+      f.panel.handleInput('\t');
+      const lines = f.panel.render(40);
+      expect(lines.join('\n')).toContain('›Apply');
+      expect(lines.join('\n')).toContain('Enter');
+      expect(lines.every((line) => visibleWidth(line) <= 40)).toBe(true);
+      expect(lines.length).toBeLessThanOrEqual(rows - 8);
+      f.panel.handleInput('\r');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(f.adapters.getSnapshot().pendingControls?.pin).toBe('high');
+      f.panel.dispose();
+    },
+  );
+
   it('uses three sections with no edit actions while browsing', () => {
     const f = fixture();
     const text = f.panel.render(80).join('\n');
