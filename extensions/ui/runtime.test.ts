@@ -27,6 +27,32 @@ const setup = () => {
   return { state, runtime };
 };
 describe('router UI runtime boundary', () => {
+  it('projects the Pi classifier path without pretending it made an HTTP request', () => {
+    const { runtime } = setup();
+    runtime.beginRequest()({
+      stage: 'selected',
+      decision: {
+        profile: 'auto',
+        tier: 'medium',
+        phase: 'implementation',
+        targetProvider: 'openai',
+        targetModelId: 'medium',
+        targetLabel: 'openai/medium',
+        reasonCode: 'classifier',
+        advisor: 'classifier',
+        thinking: 'medium',
+        routingLatencyMs: 27,
+        timestamp: 1,
+      },
+    });
+    expect(runtime.adapters.getSnapshot().advice).toMatchObject({
+      advisor: 'classifier',
+      outcome: 'selected',
+      latencyMs: 27,
+    });
+    expect(runtime.adapters.getSnapshot().advice?.requestId).toBeUndefined();
+  });
+
   it('queues controls without changing routing and activates on the explicit user boundary', async () => {
     const { state, runtime } = setup();
     expect(

@@ -116,6 +116,44 @@ const setup = (mutate?: (state: MutableCommandState) => void) => {
   return { pi, state, actions, ctx, cmd, run, lastNotice };
 };
 
+describe('unified Router commands', () => {
+  it('registers only /router and opens overview, usage and settings', async () => {
+    const pi = buildMockPi();
+    const register = vi.spyOn(pi, 'registerCommand');
+    const open = vi.fn().mockResolvedValue(undefined);
+    const s = setup();
+    registerCommands(pi as unknown as ExtensionAPI, s.state, s.actions, open);
+    expect(register.mock.calls.map(([name]) => name)).toEqual(['router']);
+    for (const [args, tab] of [
+      ['', 'now'],
+      ['usage', 'usage'],
+      ['settings', 'settings'],
+    ]) {
+      await pi
+        .command()
+        .handler(args ?? '', s.ctx as unknown as ExtensionCommandContext);
+      expect(open).toHaveBeenLastCalledWith(s.ctx, tab);
+    }
+    await pi
+      .command()
+      .handler('usage extra', s.ctx as unknown as ExtensionCommandContext);
+    expect(open).toHaveBeenCalledTimes(3);
+  });
+  it.each(['usage', 'settings', 'status', 'profile'])(
+    'keeps profile %s addressable explicitly',
+    async (name) => {
+      const s = setup((state) => {
+        state.currentConfig = normalizeConfig({
+          profiles: { [name]: { medium: { model: 'openai/medium' } } },
+        }).config;
+      });
+      expect(s.state.currentConfig.profiles[name]).toBeDefined();
+      await s.run('profile ' + name);
+      expect(s.actions.switchToRouterProfile).toHaveBeenCalledWith(name, s.ctx);
+    },
+  );
+});
+
 describe('/router surface', () => {
   it.each(['constructor', 'toString', 'hasOwnProperty'])(
     'shows auto pin for unpinned prototype-like profile %s',
@@ -136,11 +174,13 @@ describe('/router surface', () => {
     },
   );
 
-  it('offers exactly the eight verbs plus profile names at the top level', () => {
+  it('offers one command family and completes profiles only as arguments', () => {
     const { cmd } = setup();
     expect(cmd.complete('')).toEqual([
-      'balanced',
-      'cheap',
+      'status',
+      'usage',
+      'settings',
+      'profile',
       'pin',
       'thinking',
       'log',
@@ -149,8 +189,8 @@ describe('/router surface', () => {
       'reload',
       'help',
     ]);
-    expect(cmd.complete('p')).toEqual(['pin']);
-    expect(cmd.complete('ch')).toEqual(['cheap']);
+    expect(cmd.complete('p')).toEqual(['profile', 'pin']);
+    expect(cmd.complete('ch')).toBeNull();
   });
 
   it('completes verb arguments without retired forms', () => {
@@ -169,12 +209,13 @@ describe('/router surface', () => {
     expect(cmd.complete('log ')).toEqual(['log on', 'log off', 'log clear']);
     expect(cmd.complete('widget ')).toBeNull();
     expect(cmd.complete('debug ')).toBeNull();
-    expect(cmd.complete('profile ')).toBeNull();
+    expect(cmd.complete('profile ')).toEqual([
+      'profile balanced',
+      'profile cheap',
+    ]);
   });
 
   it.each([
-    ['status', '/router'],
-    ['profile balanced', '/router <profile>'],
     ['disable', '/router off'],
     ['fix high', '/router pin <tier>'],
     ['debug show', '/router log'],
@@ -228,16 +269,16 @@ describe('/router status', () => {
     );
     expect(text).toContain('Pin: balanced:high');
     expect(text).toContain('$0.0500 / $10.00');
-    expect(text).toContain('Jev: not configured');
+    expect(text).toContain('/router settings');
+    expect(text.split('\n').length).toBeLessThanOrEqual(7);
     expect(text).toContain('Last: medium → openai/gpt-4o-mini (medium)');
-    expect(text).toContain('⚠️ Configuration warnings:');
     expect(text).toContain('Warning 1');
     state.lastDecision = undefined;
     await run('');
     expect(lastNotice()[0]).not.toContain('Last:');
   });
 
-  it('shows Jev settings when configured', async () => {
+  it('keeps advisor credentials out of short status', async () => {
     const { run, lastNotice } = setup((s) => {
       s.currentConfig = normalizeConfig({
         jev: { enabled: true, apiKey: 'synthetic', timeoutMs: 3000 },
@@ -250,17 +291,15 @@ describe('/router status', () => {
       }).config;
     });
     await run('');
-    expect(lastNotice()[0]).toContain(
-      'Jev: enabled · profile opt-in: yes · budget 3000ms · context 2 turns',
-    );
+    expect(lastNotice()[0]).toContain('/router settings');
     expect(lastNotice()[0]).not.toContain('synthetic');
   });
 });
 
-describe('/router <profile> and off', () => {
+describe('/router profile and off', () => {
   it('switches to a configured profile and reports the result', async () => {
     const { run, actions, ctx, lastNotice } = setup();
-    await run('cheap');
+    await run('profile cheap');
     expect(actions.switchToRouterProfile).toHaveBeenCalledWith('cheap', ctx);
     expect(lastNotice()[0]).toContain('Router profile: balanced');
   });
@@ -268,7 +307,7 @@ describe('/router <profile> and off', () => {
   it('does not report success when the switch fails', async () => {
     const { run, actions, ctx } = setup();
     actions.switchToRouterProfile.mockResolvedValueOnce(false);
-    await run('cheap');
+    await run('profile cheap');
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 

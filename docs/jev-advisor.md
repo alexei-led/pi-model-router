@@ -22,7 +22,7 @@ CAUTION: Approve external text transfer before you enable a profile. Selected co
 
 4. Keep the existing model definitions in that profile.
 5. Run `/router reload`.
-6. Run `/router auto`.
+6. Run `/router profile auto`.
 7. Send a new request.
 8. Run `/router` to inspect the advisor result.
 

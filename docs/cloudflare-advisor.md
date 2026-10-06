@@ -87,7 +87,7 @@ This filtering is not redaction. The router sends no images to Clef.
 
 ## Diagnostics
 
-Use `/router`, `/router log`, or `/router-ui classifier`.
+Use `/router`, `/router log`, or `/router settings` → Advanced.
 The route and status use Clef/Clef Flash labels, not Jev labels.
 The inspector displays authorization facts but does not claim backend-login
 attestation; authentication can remain unknown until dispatch.

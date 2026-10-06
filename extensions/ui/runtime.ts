@@ -49,7 +49,19 @@ const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
           latencyMs: metrics.latencyMs,
           httpAttempts: metrics.attempts,
         }
-      : undefined,
+      : decision.advisor === 'classifier' ||
+          decision.advisor === 'classifier-fallback'
+        ? {
+            advisor: 'classifier',
+            outcome:
+              decision.advisor === 'classifier'
+                ? 'selected'
+                : decision.errorClass === 'deadline'
+                  ? 'deadline'
+                  : 'unavailable',
+            latencyMs: decision.routingLatencyMs,
+          }
+        : undefined,
     reuse: decision.reuse,
     generationCostUsd: decision.generation?.reportedCostUsd,
     generationAttempts: decision.generation?.attempts,
@@ -225,6 +237,10 @@ export const createRouterUIRuntime = (
         : {};
     return {
       profile,
+      accumulatedCost: state.accumulatedCost,
+      classifierModel: config.classifierModel?.model,
+      reuse: last?.reuse,
+      bypassReason: last?.bypassReason,
       reason: last?.reasonCode,
       failure:
         sameProfile && lifecycle === 'failed' ? 'request-failed' : undefined,

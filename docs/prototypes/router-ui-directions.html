@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Pi Router — three terminal-native directions</title>
+<style>
+:root{color-scheme:dark;--page:#101416;--surface:#181e21;--terminal:#12191c;--panel:#1c2529;--line:#465359;--text:#e3eae9;--muted:#a5b5b9;--accent:#81decb;--good:#a6d693;--warn:#f4c183;--bad:#ffa5a5;--selected:#293d3d;--mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+body.light{color-scheme:light;--page:#edf0ec;--surface:#fcfcf8;--terminal:#fafbf7;--panel:#f0f3ed;--line:#9ca9a0;--text:#202e2b;--muted:#52655e;--accent:#086955;--good:#386225;--warn:#875000;--bad:#a02a2a;--selected:#d9e9df}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--text);font:15px/1.55 system-ui,sans-serif}
+main{max-width:1280px;margin:auto;padding:2.5rem clamp(1rem,4vw,3.5rem)}
+h1,h2,h3,p{margin:0}
+h1{font-size:clamp(1.9rem,4vw,3rem);font-weight:600;letter-spacing:-.055em;line-height:1.12;margin:.8rem 0}
+h2{font-size:1.1rem;font-weight:600}
+a{color:var(--accent)}
+button,select,input{font:inherit;color:inherit}
+button,select{background:var(--surface);border:1px solid var(--line);padding:.4rem .65rem;border-radius:3px}
+button{cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.muted{color:var(--muted)}.accent{color:var(--accent)}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.eyebrow{font:11px var(--mono);text-transform:uppercase;letter-spacing:.15em;color:var(--accent)}
+.intro{display:flex;justify-content:space-between;gap:2rem;align-items:start}
+.intro p{max-width:720px;color:var(--muted)}
+.tag{font:11px var(--mono);border:1px solid var(--line);padding:.4rem .6rem;white-space:nowrap}
+.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem;border:0;padding:0;margin:1.8rem 0 1rem}
+.choices legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.choice{border:1px solid var(--line);padding:1rem;cursor:pointer;background:var(--surface);display:grid;gap:.3rem;border-radius:5px}
+.choice:has(:checked){border-color:var(--accent);background:var(--selected)}
+.choice strong{font-size:15px;font-weight:600}.choice small{font-size:12px;color:var(--muted)}
+.choice input{accent-color:var(--accent);margin:0 .4rem 0 0}
+.choice em{font-size:10px;color:var(--accent);font-style:normal;float:right;margin-top:.2rem}
+.lab{display:flex;gap:.7rem 1.3rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;font-size:12px}
+.lab label{display:flex;align-items:center;gap:.5rem}
+.lab select{max-width:230px;font-size:12px}
+.lab .spacer{flex:1}
+#intent{font-size:13px;min-height:2rem;color:var(--muted)}
+.terminal{position:relative;background:var(--terminal);border:1px solid var(--line);border-radius:6px;margin:auto;font:13px/1.65 var(--mono);overflow:hidden}
+.terminal.narrow{max-width:76ch}
+.terminal.narrow[data-option] .inspector{inset:0;width:100%;max-width:100%;height:100%;transform:none;border:0}
+.titlebar{padding:.45rem 1rem;border-bottom:1px solid var(--line);color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:.5rem}
+.stage{position:relative;height:560px;overflow:hidden}
+.transcript{padding:1.5rem;max-width:86ch;color:var(--muted)}
+.transcript p{margin:.65rem 0 1.3rem}
+.transcript .prompt{color:var(--text);border-left:2px solid var(--line);padding:.6rem 1rem;background:var(--surface)}
+.tool{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:.5rem .7rem;margin:1.4rem 0;max-width:66ch}
+.inspector{position:absolute;inset:1rem 1rem auto auto;width:54ch;max-width:calc(100% - 2rem);height:calc(100% - 2rem);background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;padding:0 1.2ch}
+.terminal[data-option="quiet"] .inspector{inset:auto auto 1rem 50%;transform:translateX(-50%);width:66ch;height:410px}
+.terminal[data-option="trace"] .inspector{inset:1rem auto auto 50%;transform:translateX(-50%);width:82ch}
+.panel-head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:.65rem 0;gap:1ch}
+.panel-head h2{font:700 13px var(--mono)}
+.terminal button,.terminal select{font:inherit;border-radius:0;padding:0 .5ch;background:transparent}
+.terminal button{border:1px solid transparent}
+.terminal button:focus-visible{outline-offset:0}
+.terminal button:hover{background:var(--selected)}
+.panel-head button{color:var(--muted)}
+.tabs{display:flex;gap:1ch;padding:.45rem 0;border-bottom:1px solid var(--line)}
+.tabs button[aria-pressed="true"]{color:var(--accent);background:var(--selected)}
+.panel-body{overflow:auto;flex:1;padding:.5rem 0;scrollbar-width:thin}
+.panel-body section+section{border-top:1px solid var(--line);margin-top:.5rem;padding-top:.5rem}
+.terminal h3{font:inherit;color:var(--muted);margin-bottom:.35rem}
+.route{font-weight:700;color:var(--accent);overflow-wrap:anywhere}
+.row{display:flex;justify-content:space-between;gap:1ch;flex-wrap:wrap}
+.facts{display:grid;grid-template-columns:12ch 1fr;gap:.2rem 1ch;margin:.55rem 0 0}
+.facts dt{color:var(--muted)}.facts dd{margin:0;overflow-wrap:anywhere}
+.small{font-size:12px}
+.notice{border-left:2px solid currentColor;padding-left:1ch;margin:.65rem 0}
+.terminal pre{font:inherit;margin:.3rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.bars{display:grid;grid-template-columns:8ch 1fr 6ch;gap:.15rem 1ch}
+.bar{color:var(--accent);white-space:nowrap;letter-spacing:0}
+.bar-empty{color:var(--muted)}
+.bar-count{text-align:right}
+.meter{margin:.4rem 0;display:flex;gap:1.5ch;flex-wrap:wrap}
+.meter strong{color:var(--accent);font-weight:400}
+details{margin-top:.6rem}
+summary{cursor:pointer;color:var(--accent)}
+details p{margin:.5rem 0;color:var(--muted)}
+.panel-foot{border-top:1px solid var(--line);padding:.45rem 0;color:var(--muted);font-size:11px}
+.trace-list{margin:.4rem 0;padding:0;list-style:none}
+.trace-list li{display:grid;grid-template-columns:3ch 9ch 1fr;gap:1ch;padding:.1rem 0}
+.control{display:grid;grid-template-columns:1fr 16ch;align-items:center;gap:1ch;margin:.5rem 0}
+.control select{width:100%;border-color:var(--line)}
+.actions{display:flex;gap:1ch;margin-top:.6rem}
+.actions button{border-color:var(--line)}
+.actions button:first-child{color:var(--accent)}
+#draft-message{margin:.6rem 0}
+.bottom{padding:.4rem 1rem .7rem}
+.strip{border-top:1px solid var(--line);padding:.4rem 0;color:var(--text);min-width:0}
+.strip .secondary{color:var(--muted)}
+.strip-line{white-space:pre-wrap;overflow-wrap:anywhere}
+.editor{border-top:1px solid var(--accent);border-bottom:1px solid var(--accent);padding:.65rem .2rem;display:flex;gap:1ch;align-items:center}
+.editor label{color:var(--accent)}
+.editor input{font:inherit;border:0;background:transparent;flex:1;min-width:0;outline-offset:1px}
+.editor button{color:var(--accent);font-size:12px}
+.host{color:var(--muted);padding-top:.5rem;display:flex;justify-content:space-between;gap:1ch;flex-wrap:wrap;font-size:11px}
+#footer-status{padding-top:.3rem}
+.notes{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.5rem;padding:1.2rem 0 2rem;font-size:12px}
+.notes h2{font-size:13px;margin-bottom:.35rem}
+.notes p{color:var(--muted)}
+.command-map{border-top:1px solid var(--line);padding:1.4rem 0;display:grid;grid-template-columns:1fr 1.4fr;gap:2rem}
+.command-map p{color:var(--muted);font-size:13px;margin:.5rem 0}
+.command-map dl{display:grid;grid-template-columns:minmax(15ch,1fr) 1fr;gap:.5rem 1rem;margin:0;font-size:12px}
+.command-map dt{font-family:var(--mono);color:var(--accent)}
+.command-map dd{margin:0;color:var(--muted)}
+.footnote{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:1rem}
+[hidden]{display:none!important}
+@media(max-width:700px){main{padding:1.3rem 1rem}.intro{display:block}.intro .tag{display:inline-block;margin-top:1rem}.choices{grid-template-columns:1fr}.choice{padding:.65rem .8rem}.choice em{float:none;margin-left:.5rem}.lab{gap:.7rem}.lab .spacer{display:none}.notes,.command-map{grid-template-columns:1fr;gap:1rem}.terminal{font-size:12px}.terminal h2{font-size:12px}.stage{height:550px}.inspector,.terminal[data-option="quiet"] .inspector,.terminal[data-option="trace"] .inspector{inset:0;width:100%;max-width:100%;height:100%;transform:none;border:0}.transcript{padding:1rem}.bottom{padding:.4rem .65rem}.bars{grid-template-columns:7ch 1fr 5ch;gap:.2rem .5ch}.command-map dl{grid-template-columns:1fr;gap:.1rem}.command-map dd{margin-bottom:.65rem}.titlebar span:last-child{display:none}}
+</style>
+</head>
+<body>
+<main>
+<header class="intro">
+<div><div class="eyebrow">Pi / model router · design study</div><h1>Less interface.<br>More signal.</h1><p>One command. A clear answer to “what is running, why, and should I act?” Three buildable directions for the terminal—not a web dashboard inside Pi.</p></div>
+<span class="tag">HTML PROTOTYPE · SYNTHETIC DATA</span>
+</header>
+<fieldset class="choices">
+<legend>Design direction</legend>
+<label class="choice"><strong><input type="radio" name="direction" value="quiet">01 / Quiet line</strong><small>Almost invisible until you need it.</small></label>
+<label class="choice"><strong><input type="radio" name="direction" value="signal" checked>02 / Signal panel <em>RECOMMENDED</em></strong><small>A glanceable strip. A focused inspector.</small></label>
+<label class="choice"><strong><input type="radio" name="direction" value="trace">03 / Route trace</strong><small>Understand the last few decisions.</small></label>
+</fieldset>
+<div class="lab" aria-label="Prototype controls, not part of Pi">
+<label>Scenario <select id="scenario">
+<option value="normal">Normal · advice accepted</option><option value="choosing">Choosing · no actual route yet</option>
+<option value="reuse">Tool continuation · route reused</option><option value="timeout">Advisor timeout · baseline used</option>
+<option value="fallback">Generation fallback · same tier</option><option value="budget">Soft budget exceeded</option>
+<option value="pending">Pin queued · next user turn</option><option value="empty">No retained history</option>
+<option value="unknown">Cost unknown · budget unset</option><option value="failed">Generation failed</option><option value="off">Router off</option>
+</select></label>
+<label>Width <select id="width"><option value="wide">Wide terminal</option><option value="narrow">Narrow terminal</option></select></label>
+<label>Theme <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+<span class="spacer"></span><button id="toggle-panel" type="button" aria-expanded="true" aria-controls="inspector">Close inspector</button>
+</div>
+<p id="intent"></p>
+<div id="terminal" class="terminal" data-option="signal">
+<div class="titlebar"><span>pi · model-router / main</span><span>Terminal study · mono text + ANSI-style color</span></div>
+<div class="stage">
+<div class="transcript" aria-label="Illustrative Pi transcript">
+<div class="muted">you</div><p class="prompt">Add a regression test for the route fallback.</p>
+<div class="accent">pi</div><p>The fallback stays in the configured tier. I’ll test the actual generation target, not only the advisor’s choice.</p>
+<div class="tool"><span class="good">✓</span> read extensions/provider.test.ts<br><span class="muted">  Existing cancellation and fallback cases found.</span></div>
+<p>Keep the route visible. Put the diagnostics one command away.</p>
+</div>
+<section id="inspector" class="inspector" aria-label="Router inspector prototype">
+<header class="panel-head"><h2><span class="accent">Router</span> / auto</h2><button id="close" type="button" aria-label="Close inspector">Esc ×</button></header>
+<nav class="tabs" aria-label="Inspector sections"><button type="button" data-view="now" aria-pressed="true">Now</button><button type="button" data-view="usage" aria-pressed="false">Usage</button><button type="button" data-view="settings" aria-pressed="false">Settings</button></nav>
+<div class="panel-body" id="panel-body" tabindex="0">
+<div id="view-now">
+<section><div class="row"><h3 id="route-label">Actual generation</h3><span id="lifecycle" class="good">generating</span></div><p class="route" id="route"></p><p class="muted" id="route-meta"></p><p id="reason" class="notice"></p><p id="next" class="warn" hidden></p></section>
+<section id="budget-section"><h3>Soft generation budget · session</h3><div class="meter"><strong id="budget-bar"></strong><span id="budget-amount"></span></div><p class="muted small">Recorded catalog cost, not a bill or cap.<br>Advisor cost excluded.</p></section>
+<section id="overview-chart"><div class="row"><h3>Observed routes</h3><span class="muted small" id="mini-window"></span></div><div id="mini-bars" class="bars"></div></section>
+<section id="trace-section" hidden><h3>Recent retained decisions · oldest → newest</h3><ol id="trace" class="trace-list"></ol><p class="muted small">Ordinal entries, not timestamps. Reuse ≠ new advice.</p></section>
+<details><summary>Why this route?</summary><dl class="facts"><dt>Advised</dt><dd id="advised"></dd><dt>Actual</dt><dd id="actual-detail"></dd><dt>Advisor</dt><dd id="advice-detail"></dd><dt>Next pin</dt><dd id="pin-detail"></dd></dl><p>No quality score. Advice can differ from generation. Provider identity is shown here without abbreviation.</p></details>
+</div>
+<div id="view-usage" hidden>
+<section><h3 id="history-title">Retained active-branch history</h3><p class="muted small">This profile · up to 50 decisions · not lifetime totals</p><div id="usage-bars" class="bars"></div><p class="muted small" id="unknown-routes"></p></section>
+<section><h3>Advice · unique requests only</h3><dl class="facts"><dt>Accepted</dt><dd id="accepted"></dd><dt>Median</dt><dd id="median"></dd><dt>Reused routes</dt><dd id="reused"></dd></dl><div id="latency-chart" hidden><p class="accent" id="sparkline"></p><p class="muted small">Advisor latency / request order · not generation speed</p></div></section>
+<section><h3>Known cost · retained window</h3><p id="retained-cost"></p><p class="muted small">Catalog estimate; missing values are not zero.<br>Advisor cost unknown (not free).<br>Do not add these values to Pi totals.</p></section>
+</div>
+<div id="view-settings" hidden>
+<section><h3>Next user turn · session overrides</h3><label class="control">Pin tier <select id="pin"><option value="auto">auto</option><option value="micro">micro</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label><p class="muted small">Pin is profile-scoped and persists until cleared.</p>
+<div id="draft-message" class="muted" role="status">No changes.</div><div class="actions"><button type="button" id="apply" disabled>Apply</button><button type="button" id="discard" disabled>Discard</button></div><button type="button" id="advance" hidden>Demo: next user turn</button></section>
+<details><summary>Advanced settings</summary><dl class="facts"><dt>Baseline</dt><dd>medium</dd><dt>Advisor</dt><dd>Jev</dd><dt>Deadline</dt><dd>1,500 ms</dd><dt>Effort</dt><dd>Configured per tier</dd></dl><p>Read-only preview here. A Pi implementation can reuse the existing session controls and compare-and-set undo.</p><p>Credentials and privacy approval stay read-only. Selecting an advisor never grants consent to send context.</p></details>
+<p class="muted small">Only pin editing is interactive in this study. No config files or router state are changed.</p>
+</div>
+</div>
+<footer class="panel-foot">Tab focus · ←→ sections · PgDn scroll · Esc close</footer>
+</section>
+</div>
+<div class="bottom">
+<div id="strip" class="strip"><div id="strip-main" class="strip-line"></div><div id="strip-extra" class="strip-line secondary"></div></div>
+<form id="command-form" class="editor"><label for="command">›</label><input id="command" autocomplete="off" spellcheck="false" placeholder="/router" aria-label="Try a router command"><button type="submit">Enter ↵</button></form>
+<div class="host"><span>Pi footer · branch + token/context stats stay here</span><span>router/auto</span></div>
+<div id="footer-status"></div>
+</div>
+</div>
+<div id="feedback" class="small accent" role="status"></div>
+<div class="notes">
+<section><h2 id="benefit-title"></h2><p id="benefit"></p></section>
+<section><h2>What is real in Pi</h2><p>Monospaced text, theme colors, block bars, keyboard lists and overlays. The surrounding page controls are the prototype lab, not proposed Pi chrome.</p></section>
+<section><h2>What needs wiring</h2><p>The session budget meter needs the existing accumulated-cost counter exposed to the UI snapshot. History charts use retained observations. No new advisor calls or telemetry.</p></section>
+</div>
+<section class="command-map">
+<div><div class="eyebrow">One entry point</div><h2>/router, not /router + /router-ui</h2><p>Open the overview in TUI; return concise text elsewhere. Deep links use the same command. Settings stay behind one layer, not four competing dashboards.</p><p>Try <code>/router</code>, <code>/router usage</code>, <code>/router settings</code>, <code>/router status</code> or <code>/router help</code> in the mock input. Escape closes the inspector.</p></div>
+<dl><dt>/router</dt><dd>Overview / Now</dd><dt>/router usage</dt><dd>Retained-window usage</dd><dt>/router settings</dt><dd>Session controls + advanced details</dd><dt>/router status</dt><dd>Short, non-interactive summary</dd><dt>/router profile &lt;name&gt;</dt><dd>Explicit profile selection; no name collisions</dd><dt>/router pin &lt;tier|auto&gt;</dt><dd>Existing tier pin action</dd><dt>/router off</dt><dd>Restore the previous model</dd><dt>/router help</dt><dd>All actions, including thinking/log/widget/reload</dd></dl>
+</section>
+<p class="footnote">Design prototype for 0.11.0. See the <a href="../user-guide.md#native-inspector">user guide</a> for shipped behavior. Models use <code>demo/model-*</code> fixture identities. Costs, states and history are synthetic. No network requests, saved preferences, SVG charts, animation, quota claims or inferred savings. Read the <a href="router-ui-directions.md">UX analysis and feasibility notes</a>.</p>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const directions = {
+  quiet: { intent: "01 / Quiet line — a single footer status. /router opens a short, centered readout.", title: "Best for staying out of the way", benefit: "Lowest visual footprint. No persistent widget and no repeated route. Less room for trends; usage stays one command away." },
+  signal: { intent: "02 / Signal panel — two calm lines near the editor; a 54-column inspector on demand.", title: "Best everyday balance", benefit: "Actual route first, reason second. One budget meter and small route bars in the inspector. Enough signal without turning Pi into a monitoring console." },
+  trace: { intent: "03 / Route trace — a one-line strip and a wider, history-first inspector.", title: "Best for diagnosing routing", benefit: "See changes, reuses and failed advice in sequence. More useful during investigation, but the wider overlay covers more of the transcript." }
+};
+const base = { tier: "medium", model: "model-medium", effort: "medium", state: "generating", reason: "Jev selected medium · 420 ms", advice: "medium → demo/model-medium", adviceDetail: "Jev · accepted · 420 ms", tone: "accent", spent: .84, budget: 2 };
+const scenarios = {
+  normal: {},
+  choosing: { tier: null, model: null, effort: null, state: "choosing", reason: "Waiting for advice. No generation started.", advice: "not yet observed", adviceDetail: "Jev · request pending" },
+  reuse: { state: "tool continuation", reason: "Reusing this turn’s route · no new advice", adviceDetail: "Jev · 420 ms on original request" },
+  timeout: { state: "generating · baseline", reason: "Jev timed out → eligible baseline", advice: "none · timed out", adviceDetail: "Jev · deadline · 1,500 ms", tone: "warn" },
+  fallback: { model: "model-medium-alt", state: "generating · fallback", reason: "Primary unavailable → explicit fallback", tone: "warn" },
+  budget: { state: "generating · budget policy", reason: "Over soft budget → eligible baseline", advice: "not requested", adviceDetail: "Skipped · budget policy", spent: 2.16, tone: "warn" },
+  pending: { state: "generating", reason: "Jev selected medium · 420 ms" },
+  empty: { state: "idle", reason: "Last observed route · no retained history" },
+  unknown: { spent: null, budget: null },
+  failed: { state: "failed", reason: "Generation failed · inspect /router log", tone: "bad" },
+  off: { tier: null, model: null, effort: null, state: "off", reason: "Router off · Pi uses the restored model", advice: "not active", adviceDetail: "Not requested" }
+};
+const history = [
+  { tier:"micro", cost:.002, id:"a", ms:180, outcome:"selected" },
+  { tier:"low", cost:.006, id:"b", ms:260, outcome:"selected" },
+  { tier:"low", cost:.004, id:"b", ms:260, outcome:"selected", reuse:true },
+  { tier:"medium", cost:.015, id:"c", ms:1500, outcome:"deadline" },
+  { tier:"high", cost:undefined, id:"d", ms:600, outcome:"selected" },
+  { tier:"medium", cost:.013, id:"e", ms:420, outcome:"selected" }
+];
+let direction = "signal", view = "now", panelOpen = true, queuedPin, activePin = "auto", demoRoute;
+const current = () => ({ ...base, ...scenarios[$("scenario").value], ...demoRoute });
+const retained = () => $("scenario").value === "empty" || $("scenario").value === "off" ? [] : history;
+const bar = (fraction, size=10) => {
+  const filled = Math.max(0, Math.min(size, Math.round(fraction * size)));
+  return "█".repeat(filled) + "░".repeat(size-filled);
+};
+const setText = (id, value) => { $(id).textContent = value; };
+const renderBars = (id, entries) => {
+  const root = $(id); root.replaceChildren();
+  if (!entries.length) {
+    const text = document.createElement("p");
+    text.textContent = "No retained decisions.";
+    root.append(text);
+    return;
+  }
+  for (const tier of ["micro","low","medium","high"]) {
+    const count = entries.filter((entry) => entry.tier === tier).length;
+    for (const [value, className] of [[tier,"muted"],[bar(count/entries.length,12),"bar"],[count + "/" + entries.length,"bar-count"]]) {
+      const cell = document.createElement("span"); cell.textContent = value; cell.className = className; root.append(cell);
+    }
+  }
+};
+const setPanel = (open, focus = true) => {
+  panelOpen = open; $("inspector").hidden = !open;
+  $("toggle-panel").setAttribute("aria-expanded", String(open));
+  setText("toggle-panel", open ? "Close inspector" : "Open /router");
+  if (focus) (open ? document.querySelector('[data-view="'+view+'"]') : $("command")).focus();
+};
+const selectView = (nextView) => {
+  view = nextView;
+  for (const name of ["now","usage","settings"]) $("view-"+name).hidden = name !== view;
+  for (const button of document.querySelectorAll("[data-view]")) button.setAttribute("aria-pressed", String(button.dataset.view === view));
+  $("panel-body").scrollTop = 0;
+};
+const render = () => {
+  const s = current(), entries = retained(), narrow = $("width").value === "narrow" || window.innerWidth < 700;
+  $("terminal").dataset.option = direction;
+  $("terminal").classList.toggle("narrow", $("width").value === "narrow");
+  document.body.classList.toggle("light", $("theme").value === "light");
+  setText("intent", directions[direction].intent); setText("benefit-title", directions[direction].title); setText("benefit", directions[direction].benefit);
+  const route = s.model ? s.model : s.state === "off" ? "Not routing" : "No actual route yet";
+  setText("route", route);
+  setText("route-meta", s.tier ? "[" + "▰".repeat(["micro","low","medium","high"].indexOf(s.tier)+1) + "▱".repeat(3-["micro","low","medium","high"].indexOf(s.tier)) + "] tier " + s.tier + " · effort " + s.effort : "Tier and effort appear after generation starts.");
+  setText("route-label", s.state === "idle" ? "Last observed generation" : s.state === "failed" ? "Last attempted generation" : "Actual generation");
+  setText("lifecycle", s.state); $("lifecycle").className = s.tone;
+  setText("reason", s.reason); $("reason").className = "notice " + s.tone;
+  $("next").hidden = !queuedPin; setText("next", queuedPin ? "Next user turn: pin " + queuedPin + ". Actual unchanged." : "");
+  setText("advised", s.advice); setText("actual-detail", s.model ? s.tier + " → demo/" + s.model + " · effort " + s.effort : "none");
+  setText("advice-detail", s.adviceDetail); setText("pin-detail", queuedPin ? queuedPin + " · queued" : activePin);
+  const ratio = s.budget && s.spent !== null ? s.spent/s.budget : null;
+  setText("budget-bar", ratio === null ? "—" : bar(ratio) + " " + Math.round(ratio*100) + "%");
+  $("budget-bar").className = ratio !== null && ratio >= 1 ? "warn" : "accent";
+  setText("budget-amount", s.spent === null ? "Cost unknown · budget unset" : "$"+s.spent.toFixed(2)+" / $"+s.budget.toFixed(2));
+  $("budget-section").hidden = s.state === "off" || direction === "trace";
+  $("overview-chart").hidden = direction !== "signal";
+  $("trace-section").hidden = direction !== "trace";
+  $("latency-chart").hidden = direction !== "trace" || entries.length === 0;
+  setText("mini-window", entries.length + " retained decisions");
+  renderBars("mini-bars", entries); renderBars("usage-bars", entries);
+  setText("history-title", entries.length + " retained active-branch decisions");
+  setText("unknown-routes", entries.length ? "Unknown actual routes: 0" : "Collection may be off or history cleared. /router log on");
+  const requests = [...new Map(entries.map((entry) => [entry.id,entry])).values()];
+  const latencies = requests.map((entry) => entry.ms).sort((a,b) => a-b);
+  setText("accepted", requests.length ? requests.filter((entry) => entry.outcome === "selected").length + "/" + requests.length + " requests" : "— no requests");
+  setText("median", latencies.length ? latencies[Math.floor(latencies.length/2)] + " ms · " + latencies.length + " samples" : "— no samples");
+  setText("reused", String(entries.filter((entry) => entry.reuse).length));
+  const glyphs = "▁▂▃▄▅▆▇█";
+  setText("sparkline", requests.map((entry) => glyphs[Math.min(7,Math.floor(entry.ms/1500*7))]).join(" ") + "   0–1,500 ms");
+  const known = entries.filter((entry) => entry.cost !== undefined);
+  setText("retained-cost", known.length ? "$"+known.reduce((sum,entry)=>sum+entry.cost,0).toFixed(4)+" · coverage "+known.length+"/"+entries.length+" decisions" : "Unknown · no cost observations");
+  $("trace").replaceChildren();
+  entries.forEach((entry,index) => {
+    const li = document.createElement("li");
+    for (const text of [String(index+1).padStart(2,"0"),entry.tier,entry.reuse ? "= tool route reused" : entry.outcome === "deadline" ? "! timeout → baseline" : "advice accepted"]) {
+      const span = document.createElement("span"); span.textContent = text; li.append(span);
+    }
+    if (entry.outcome === "deadline") li.className="warn";
+    $("trace").append(li);
+  });
+  if (!entries.length) { const li = document.createElement("li"); li.textContent = "No retained decisions."; $("trace").append(li); }
+  const pending = queuedPin ? " · next: pin "+queuedPin : "";
+  const identity = s.model ? "auto · "+s.model+" · "+s.tier+" · effort "+s.effort : "router · "+s.state;
+  const compactReason = $("scenario").value === "timeout" && !demoRoute ? "timeout → baseline" : activePin !== "auto" ? "pinned" : s.state === "generating" ? "Jev" : s.state;
+  const firstLine = identity + (direction === "signal" ? "" : " · "+compactReason);
+  $("strip").hidden = direction === "quiet" || s.state === "off";
+  setText("strip-main", firstLine); $("strip-main").className = "strip-line "+s.tone;
+  setText("strip-extra", (direction === "signal" ? s.reason : "") + pending);
+  $("strip-extra").hidden = direction !== "signal" && !queuedPin;
+  $("footer-status").hidden = direction !== "quiet" || s.state === "off";
+  setText("footer-status", identity + " · "+compactReason + pending);
+  $("footer-status").className = s.tone;
+  if (narrow && direction === "signal") setText("strip-main", identity);
+};
+for (const input of document.querySelectorAll('[name="direction"]')) input.addEventListener("change", () => {
+  direction = input.value; selectView("now"); setPanel(true,false); render();
+});
+for (const id of ["width","theme"]) $(id).addEventListener("change",render);
+$("scenario").addEventListener("change",() => {
+  queuedPin = $("scenario").value === "pending" ? "high" : undefined; activePin = "auto"; demoRoute = undefined;
+  $("pin").value = queuedPin ?? activePin; $("apply").disabled = true; $("discard").disabled = true;
+  $("advance").hidden = !queuedPin; setText("draft-message", queuedPin ? "Queued for next user turn. Actual unchanged." : "No changes.");
+  setText("feedback",""); render();
+});
+window.addEventListener("resize",render);
+$("toggle-panel").addEventListener("click",()=>setPanel(!panelOpen));
+$("close").addEventListener("click",()=>setPanel(false));
+for (const button of document.querySelectorAll("[data-view]")) button.addEventListener("click",()=>selectView(button.dataset.view));
+document.querySelector(".tabs").addEventListener("keydown",(event)=>{
+  if (!["ArrowLeft","ArrowRight"].includes(event.key)) return;
+  event.preventDefault();
+  const tabs=["now","usage","settings"]; selectView(tabs[(tabs.indexOf(view)+(event.key==="ArrowRight"?1:2))%3]);
+  document.querySelector('[data-view="'+view+'"]').focus();
+});
+document.addEventListener("keydown",(event)=>{ if(event.key==="Escape" && panelOpen){event.preventDefault();setPanel(false);} });
+$("pin").addEventListener("change",()=>{
+  const dirty = $("pin").value !== (queuedPin ?? activePin);
+  $("apply").disabled = !dirty; $("discard").disabled = !dirty;
+  setText("draft-message",dirty ? "Draft only · not applied." : "No changes.");
+});
+$("apply").addEventListener("click",()=>{
+  queuedPin = $("pin").value; $("apply").disabled = true; $("discard").disabled = true; $("advance").hidden = false;
+  setText("draft-message","Queued for next user turn. Actual unchanged."); render();
+});
+$("discard").addEventListener("click",()=>{
+  $("pin").value = queuedPin ?? activePin; $("apply").disabled = true; $("discard").disabled = true;
+  setText("draft-message","Draft discarded. Actual unchanged.");
+});
+$("advance").addEventListener("click",()=>{
+  activePin = queuedPin ?? activePin; queuedPin = undefined; $("advance").hidden = true;
+  const tier = activePin === "auto" ? "medium" : activePin;
+  demoRoute = { ...base, tier, model:"model-"+tier, effort:tier==="micro"?"off":tier, state:"generating", reason:activePin==="auto" ? "Jev selected medium · 420 ms" : "Pinned "+tier+" · advice skipped", advice:activePin==="auto" ? base.advice : "not requested", adviceDetail:activePin==="auto" ? base.adviceDetail : "Skipped · pin policy" };
+  setText("draft-message","Demo turn started. Pin "+activePin+" is active."); render();
+});
+$("command-form").addEventListener("submit",(event)=>{
+  event.preventDefault(); const command = $("command").value.trim() || "/router";
+  if (command === "/router" || command === "/router now") { selectView("now");setPanel(true);setText("feedback",""); }
+  else if (command === "/router usage" || command === "/router settings") { selectView(command.split(" ")[1]);setPanel(true);setText("feedback",""); }
+  else if (command === "/router status") { setPanel(false); const s=current();setText("feedback","Text status: auto · "+(s.model ?? s.state)+" · "+s.reason); }
+  else if (command === "/router help") setText("feedback","/router [now | usage | settings | status | profile <name> | pin <tier|auto> | thinking <level|auto> | log [on|off|clear] | widget | off | reload | help]");
+  else setText("feedback","Not simulated. Try /router, /router usage, /router settings, /router status or /router help.");
+});
+render();
+</script>
+</body>
+</html>

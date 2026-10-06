@@ -141,18 +141,6 @@ export interface RouterConfig {
   models?: Record<string, ModelDefinition> | undefined;
 }
 
-export interface RouterStatusState {
-  statusLine?: StatusLineMode | undefined;
-  routerEnabled: boolean;
-  selectedProfile: string | undefined;
-  pinnedTierByProfile: RouterPinByProfile;
-  lastDecision: RoutingDecision | undefined;
-  lastNonRouterModel: string | undefined;
-  accumulatedCost: number;
-  widgetEnabled: boolean;
-  maxSessionBudget: number | undefined;
-}
-
 export interface RoutePair {
   tier: RouterTier;
   model: string;
@@ -417,6 +405,7 @@ export interface ParsedConfigFile {
 }
 
 export type RouterUIAdvisorId = 'jev' | 'clef' | 'clef-flash';
+export type RouterUIView = 'now' | 'usage' | 'settings';
 export type RouterUILifecycle =
   | 'choosing'
   | 'generating'
@@ -460,7 +449,7 @@ export interface RouterUIRoute {
   thinking: ThinkingLevel;
 }
 export interface RouterUIAdviceObservation {
-  advisor: RouterUIAdvisorId;
+  advisor: RouterUIAdvisorId | 'classifier';
   requestId?: string | undefined;
   outcome: JevOutcome;
   latencyMs?: number | undefined;
@@ -479,6 +468,11 @@ export interface RouterUIHistoryEntry {
 export interface RouterUISnapshot {
   profile: string;
   lifecycle: RouterUILifecycle;
+  /** Recorded catalog costs only, not a complete billing ledger. */
+  accumulatedCost?: number | undefined;
+  classifierModel?: string | undefined;
+  reuse?: RoutingDecision['reuse'];
+  bypassReason?: BypassReason | undefined;
   reason?: RoutingReasonCode | undefined;
   failure?: 'request-failed' | undefined;
   actual?: RouterUIRoute | undefined;
@@ -524,6 +518,7 @@ export interface RouterUIPendingControls {
 }
 export interface RouterUIRuntimeState {
   currentConfig: RouterConfig;
+  readonly accumulatedCost?: number | undefined;
   readonly selectedProfile: string | undefined;
   readonly routerEnabled: boolean;
   readonly pinnedTierByProfile: RouterPinByProfile;

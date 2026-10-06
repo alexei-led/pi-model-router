@@ -1,8 +1,7 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { truncateToWidth } from '@earendil-works/pi-tui';
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import type {
   RouterPinByProfile,
-  RouterStatusState,
   RouterThinkingByProfile,
   RouterUIPreferences,
   RouterUISnapshot,
@@ -15,6 +14,7 @@ import {
   JEV_OUTCOMES,
   ROUTER_TIERS,
 } from './types';
+import { routeReason, routerTone } from './ui/presentation';
 
 export { openRouterInspector } from './ui/inspector';
 
@@ -357,136 +357,64 @@ export const formatModelRef = (ref: string | undefined): string => {
   return ref ?? 'none';
 };
 
-export const updateStatus = (
-  ctx: ExtensionContext,
-  state: RouterStatusState,
-) => {
-  const {
-    routerEnabled,
-    selectedProfile,
-    pinnedTierByProfile,
-    lastDecision,
-    lastNonRouterModel,
-    accumulatedCost,
-    widgetEnabled,
-    maxSessionBudget,
-  } = state;
-  const activeRouterProfile = routerEnabled ? selectedProfile : undefined;
-  const statusProfile = selectedProfile ?? 'none';
-  const activePin =
-    selectedProfile && Object.hasOwn(pinnedTierByProfile, selectedProfile)
-      ? pinnedTierByProfile[selectedProfile]
-      : undefined;
-  const pinLabel = activePin ? ` [pin:${activePin}]` : '';
-
-  if (activeRouterProfile) {
-    const matchesProfile =
-      lastDecision && lastDecision.profile === activeRouterProfile;
-    const matchesPin = !activePin || lastDecision?.tier === activePin;
-
-    let statusText: string;
-    if (lastDecision && matchesProfile && matchesPin) {
-      const route =
-        state.statusLine === 'detailed'
-          ? `router:${activeRouterProfile}${pinLabel} -> ${lastDecision.tier} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`
-          : `${activeRouterProfile}${pinLabel} · ${lastDecision.tier} → ${lastDecision.targetModelId}/${lastDecision.thinking}`;
-      const generation = lastDecision.generation;
-      const cache =
-        state.statusLine === 'detailed' && generation
-          ? ` · cache r${generation.cacheReadTokens}/w${generation.cacheWriteTokens} · ${generation.transition}`
-          : '';
-      statusText = `${route}${lastDecision.isFallback ? ' [fallback]' : ''}${formatAdvisorFooter(lastDecision, state.statusLine)}${cache}`;
-    } else {
-      statusText = `router:${activeRouterProfile}${pinLabel} -> waiting`;
-    }
-    ctx.ui.setStatus('router', `🚥 ${statusText}`);
-  } else {
-    ctx.ui.setStatus('router', undefined);
-  }
-
-  if (!widgetEnabled) {
-    ctx.ui.setWidget('router', undefined);
-    return;
-  }
-
-  const observed =
-    lastDecision?.profile === statusProfile ? lastDecision : undefined;
-  ctx.ui.setWidget('router', (_tui, theme) => ({
-    invalidate: () => {},
-    render: (width: number) => {
-      const actual = observed
-        ? `${observed.tier} → ${observed.targetModelId} · ${observed.thinking}${observed.isFallback ? ' [fallback]' : ''}`
-        : routerEnabled
-          ? 'waiting / no observed route'
-          : (lastNonRouterModel ?? 'off');
-      const lines = [
-        theme.fg(
-          'accent',
-          `Router / ${truncateToWidth(statusProfile, Math.max(4, Math.min(16, width - 32)))} · ${actual}`,
-        ),
-        theme.fg(
-          'muted',
-          `${routerEnabled ? 'enabled' : 'off'} · next pin ${activePin ?? 'auto'} · catalog $${accumulatedCost.toFixed(4)}${maxSessionBudget ? ` / $${maxSessionBudget}` : ''}${observed ? formatAdvisorFooter(observed, state.statusLine) : ''}`,
-        ),
-      ];
-      if (state.statusLine === 'detailed' && observed?.generation) {
-        lines.push(
-          theme.fg(
-            'dim',
-            `cache r${observed.generation.cacheReadTokens}/w${observed.generation.cacheWriteTokens} · ${observed.generation.transition} · /router-ui`,
-          ),
-        );
-      }
-      return lines.map((line) => truncateToWidth(line, Math.max(1, width)));
-    },
-  }));
-};
-
-/** Optional lifecycle strip override after updateStatus; does not replace Pi's chrome. */
 export const updateRouterUIStrip = (
   ctx: ExtensionContext,
   snapshot: RouterUISnapshot,
   preferences: RouterUIPreferences,
 ): void => {
   if (ctx.mode !== 'tui') return;
-  if (!preferences.widgetEnabled) {
+  const tone = routerTone(snapshot);
+  const pending = snapshot.pendingControls;
+  const reason = routeReason(snapshot);
+  const state = snapshot.lifecycle === 'idle' ? 'last' : snapshot.lifecycle;
+  const identity = (width: number): string => {
+    const route = snapshot.actual;
+    const suffix = ` · ${state}`;
+    if (!route)
+      return truncateToWidth(`Router / ${snapshot.profile} · ${state}`, width);
+    const detail =
+      width >= 70 ? ` · ${route.tier} · effort ${route.thinking}` : '';
+    const modelWidth = Math.max(1, width - visibleWidth(suffix + detail));
+    const model =
+      preferences.statusLine === 'detailed'
+        ? `${route.provider}/${route.model}`
+        : route.model;
+    return truncateToWidth(model, modelWidth) + detail + suffix;
+  };
+  if (snapshot.lifecycle === 'off') {
+    ctx.ui.setStatus('router', undefined);
     ctx.ui.setWidget('router', undefined);
     return;
   }
+  if (!preferences.widgetEnabled) {
+    ctx.ui.setWidget('router', undefined);
+    const suffix = pending ? ' · pending settings' : ` · ${reason}`;
+    const width = Math.max(1, process.stdout.columns ?? 80);
+    ctx.ui.setStatus(
+      'router',
+      ctx.ui.theme.fg(
+        tone,
+        truncateToWidth(
+          identity(Math.max(1, width - (pending ? visibleWidth(suffix) : 0))) +
+            suffix,
+          width,
+        ),
+      ),
+    );
+    return;
+  }
+  ctx.ui.setStatus('router', undefined);
   ctx.ui.setWidget('router', (_tui, theme) => ({
     invalidate: () => {},
     render: (width: number): string[] => {
-      const actual = snapshot.actual;
-      const identity = actual
-        ? `${actual.tier} → ${actual.model} · ${actual.thinking}`
-        : 'no observed generation';
-      const warning = [
-        'timeout',
-        'cancelled',
-        'failed',
-        'fallback',
-        'budget',
-      ].includes(snapshot.lifecycle);
-      const controls = snapshot.pendingControls ?? snapshot.controls;
-      const advice = snapshot.advice;
-      const lines = [
-        theme.fg(
-          warning ? 'warning' : 'accent',
-          `${identity} · ${snapshot.lifecycle}`,
-        ),
-        theme.fg(
-          'muted',
-          `${snapshot.profile} · ${advice ? `${advice.advisor}: ${advice.outcome}${advice.latencyMs === undefined ? '' : ` · ${Math.round(advice.latencyMs)} ms`}` : (snapshot.reason ?? 'advice not observed')} · next pin ${controls.pin}${snapshot.pendingControls ? ' (pending)' : ''} · /router-ui`,
-        ),
+      const w = Math.max(1, width);
+      const next = pending
+        ? `Next user turn: ${pending.pin !== snapshot.controls.pin ? 'pin ' + pending.pin : 'settings changed'} (pending) · ${reason}`
+        : `${reason} · ${snapshot.profile}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
+      return [
+        theme.fg(tone, truncateToWidth(identity(w), w)),
+        theme.fg(pending ? 'warning' : 'muted', truncateToWidth(next, w)),
       ];
-      if (preferences.statusLine === 'detailed')
-        lines.push(
-          theme.fg(
-            'dim',
-            `Next: baseline ${controls.baseline} · budget ${controls.budget === undefined ? 'unset' : `$${controls.budget}`} · ${controls.advisor} / ${controls.timeout} ms`,
-          ),
-        );
-      return lines.map((line) => truncateToWidth(line, Math.max(1, width)));
     },
   }));
 };

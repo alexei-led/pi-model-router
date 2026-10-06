@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.0] - 2026-10-06
+
+Unify routing controls under `/router` and add the advisor-neutral Signal Panel.
+
+### Changes
+
+- Open Now, Usage and Settings from one command family. Settings starts with pin; Advanced contains advisor, budget and effort controls. Keep deferred apply/discard/undo and read-only privacy approval.
+- Show actual model/effort and readable routing reasons in two lines. Hiding the widget uses one compact footer status instead, without replacing Pi's footer.
+- Add recorded-cost budget and retained-tier bars with explicit unknown/partial-cost labels. New sessions enable the strip; restored sessions keep their preference.
+- Show Jev, Clef, Clef Flash and the optional Pi classifier by their observed names. Routing policy, authentication and consent are unchanged.
+- Keep profile names addressable even when they match a command. Add short status output for print, JSON and RPC without inference.
+
+### Upgrade
+
+1. After upgrading, restart Pi. Replace `/router-ui` with `/router`, `/router-ui usage` with `/router usage`, and Routing/Classifier shortcuts with `/router settings`. The removed command no longer opens an inspector.
+2. Replace `/router <profile>` with `/router profile <name>`. Old shorthand gives a migration hint instead of switching.
+3. Use `/router status` for short text. Detailed status stays within two widget lines; cache and probability diagnostics remain in `/router log`.
+
+See [migration](docs/user-guide.md#from-010x-to-0110) and
+[actual Pi/agterm validation](docs/testing/signal-panel-acceptance.md).
+
 ## [0.10.0] - 2026-10-06
 
 Add a native router inspector, Cloudflare advisors, and Pi-managed Jev authentication.

@@ -1,8 +1,12 @@
-/** Active command names are reserved profile names. */
+/** Profile names are explicit arguments, so command names remain valid profiles. */
 export const ROUTER_COMMANDS = [
+  { name: 'status', desc: 'Short text status' },
+  { name: 'usage', desc: 'Retained history and known costs' },
+  { name: 'settings', desc: 'Session routing controls' },
+  { name: 'profile', desc: 'Select a router profile' },
   { name: 'pin', desc: 'Pin the active profile to a tier, or auto' },
   { name: 'thinking', desc: 'Override thinking for every tier, or auto' },
-  { name: 'log', desc: 'Recent decisions and Jev stats; on, off or clear' },
+  { name: 'log', desc: 'Recent decisions and advisor stats; on, off or clear' },
   { name: 'widget', desc: 'Toggle the status widget' },
   { name: 'off', desc: 'Leave the router and restore the previous model' },
   { name: 'reload', desc: 'Reload model-router.json' },

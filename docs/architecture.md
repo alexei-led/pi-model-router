@@ -193,7 +193,12 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 `provider.ts` calls policy and advisor modules. Advisors do not own provider state or UI behavior.
 State and UI do not call advisors. Generation and all structured classification use Pi's registry rather than a parallel authentication layer.
 
-The native inspector reads a sanitized presentation snapshot. Provider observations distinguish
+The Signal Panel reads a sanitized presentation snapshot through one `/router`
+command family. `ui/presentation.ts` formats fixed local reasons and bounded bars;
+it makes no advisor calls. The widget and fallback footer status are mutually
+exclusive; the host footer stays intact. Now, Usage and Settings share one draft.
+Recorded session cost is projected separately from retained-window history.
+Provider observations distinguish
 selected advice from attempted/actual generation and cannot affect routing or retries.
 A request epoch rejects stale UI observations after a newer request or session reset.
 Pending session controls use field-level compare-and-set, activate before the next user run,

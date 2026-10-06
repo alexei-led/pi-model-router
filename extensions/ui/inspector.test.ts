@@ -105,12 +105,35 @@ const fixture = () => {
   };
 };
 
+describe('Signal Panel', () => {
+  it('uses three sections with no edit actions while browsing', () => {
+    const f = fixture();
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('Now');
+    expect(text).toContain('Usage');
+    expect(text).toContain('Settings');
+    expect(text).not.toContain('Classifier');
+    expect(text).not.toContain('Apply');
+    expect(text).not.toContain('Discard');
+    f.panel.dispose();
+  });
+  it('starts Settings with only pin visible until Advanced is opened', () => {
+    const f = fixture();
+    f.panel.selectTab('settings');
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('Pin tier');
+    expect(text).toContain('Advanced');
+    expect(text).not.toContain('thinkingHigh');
+    f.panel.dispose();
+  });
+});
+
 describe('ui/inspector.ts', () => {
   it.each([40, 60, 80, 120])(
     'fits Unicode at %i columns and short heights',
     (width) => {
       const f = fixture();
-      for (const tab of [0, 1, 2, 3]) {
+      for (const tab of [0, 1, 2]) {
         if (tab) f.panel.handleInput('\x1b[C');
         const lines = f.panel.render(width);
         expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
@@ -148,11 +171,11 @@ describe('ui/inspector.ts', () => {
     const f = fixture();
     const custom = vi.fn();
     const ctx = { mode: 'rpc', ui: { custom } } as unknown as ExtensionContext;
-    expect(await openRouterInspector(ctx, f.adapters, 'classifier')).toContain(
+    expect(await openRouterInspector(ctx, f.adapters, 'settings')).toContain(
       'Cloudflare approval: false',
     );
-    expect(await openRouterInspector(ctx, f.adapters, 'routing')).toContain(
-      'thinkingHigh:',
+    expect(await openRouterInspector(ctx, f.adapters, 'settings')).toContain(
+      'High effort:',
     );
     expect(await openRouterInspector(ctx, f.adapters, 'usage')).toContain(
       'Retained active-branch history:',
@@ -164,16 +187,16 @@ describe('ui/inspector.ts', () => {
     const f = fixture();
     f.panel.handleInput('1');
     expect(f.panel.render(80).join('\n')).toContain('Actual generation');
-    f.panel.handleInput('\x1b[C'); // Routing
+    f.panel.selectTab('settings');
     f.panel.handleInput('\t'); // pin
     f.panel.handleInput('\r');
     expect(f.draft.draft.pin).toBe('high');
     expect(f.adapters.getSnapshot().controls.pin).toBe('auto');
     f.panel.handleInput('[Z'); // back to tabs
-    f.panel.handleInput('[C'); // Classifier
-    expect(f.panel.render(80).join('\n')).toContain('Cloudflare');
-    f.panel.handleInput('[D'); // Routing
-    expect(f.panel.render(80).join('\n')).toContain('pin: high');
+    f.panel.selectTab('usage');
+    expect(f.panel.render(80).join('\n')).toContain('retained');
+    f.panel.selectTab('settings');
+    expect(f.panel.render(80).join('\n')).toContain('Pin tier: high');
     expect(f.draft.draft.pin).toBe('high');
     expect(f.adapters.applyControls).not.toHaveBeenCalled();
     f.panel.dispose();
@@ -281,9 +304,9 @@ describe('ui/inspector.ts', () => {
       },
     });
     const text = f.panel.render(80).join('\n');
-    expect(text).toContain('State: fallback');
+    expect(text).toContain('Actual generation · fallback');
     expect(text).toContain('Advised (not actual): high');
-    expect(text).toContain('Actual generation: medium');
+    expect(text).toContain('Tier medium');
     expect(f.draft.draft.pin).toBe('high');
     f.panel.dispose();
   });
@@ -339,7 +362,7 @@ describe('ui/inspector.ts', () => {
   });
   it('scrolls read-only usage and handles responsive reopening', async () => {
     const f = fixture();
-    f.panel.handleInput('\x1b[D'); // Usage
+    f.panel.selectTab('usage');
     Object.assign(f.tui.terminal, { rows: 10 });
     const before = f.panel.render(40).join('\n');
     f.panel.handleInput('\x1b[6~');
@@ -352,7 +375,8 @@ describe('ui/inspector.ts', () => {
   });
   it('numeric controls use native Input and retain invalid drafts without applying', () => {
     const f = fixture();
-    f.panel.handleInput('\x1b[C');
+    f.panel.selectTab('settings');
+    f.panel.advanced = true;
     for (let i = 0; i < 3; i++) f.panel.handleInput('\t');
     f.panel.handleInput('\x0b'); // Input starts at column zero: delete to end
     f.panel.handleInput('0');

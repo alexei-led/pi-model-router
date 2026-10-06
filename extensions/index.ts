@@ -27,7 +27,7 @@ import type {
   RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
-import { openRouterInspector, updateRouterUIStrip, updateStatus } from './ui';
+import { openRouterInspector, updateRouterUIStrip } from './ui';
 import { createRouterUIRuntime } from './ui/runtime';
 
 const hasExplicitCliModel = () =>
@@ -43,7 +43,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   let debugEnabled = false;
   let routerEnabled = false;
   let selectedProfile: string | undefined;
-  let widgetEnabled = false;
+  let widgetEnabled = true;
   let lastRegisteredModels = '';
   const pinnedTierByProfile: RouterPinByProfile = {};
   const thinkingByProfile: RouterThinkingByProfile = {};
@@ -221,17 +221,6 @@ const routerExtension = (pi: ExtensionAPI) => {
     persistState,
     syncPiThinkingLevel: setThinkingLevelInternally,
     updateStatus: (ctx: ExtensionContext) => {
-      updateStatus(ctx, {
-        statusLine: currentConfig.ui?.statusLine,
-        routerEnabled,
-        selectedProfile,
-        pinnedTierByProfile,
-        lastDecision,
-        lastNonRouterModel,
-        accumulatedCost,
-        widgetEnabled,
-        maxSessionBudget: currentConfig.maxSessionBudget,
-      });
       updateRouterUIStrip(ctx, routerUI.adapters.getSnapshot(), {
         widgetEnabled,
         statusLine: currentConfig.ui?.statusLine,
@@ -355,7 +344,7 @@ const routerExtension = (pi: ExtensionAPI) => {
     for (const key of Object.keys(thinkingByProfile)) {
       delete thinkingByProfile[key];
     }
-    widgetEnabled = false;
+    widgetEnabled = true;
     debugHistory = [];
     accumulatedCost = 0;
     lastNonRouterModel =
