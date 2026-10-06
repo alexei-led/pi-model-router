@@ -5,7 +5,9 @@ This procedure is for maintainers. Use npm and the Node.js version selected by `
 ## Prepare
 
 1. Start with a clean branch from `main`.
-2. Run `npm version patch --no-git-tag-version` for a patch release.
+2. Run `npm version patch --no-git-tag-version` for a patch release, or
+   `npm version minor --no-git-tag-version` for a minor release. Review any
+   credential/configuration migration before selecting the version.
 3. Update `CHANGELOG.md` with the release changes.
 4. Run the local gates:
 

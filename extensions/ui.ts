@@ -1,8 +1,11 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { truncateToWidth } from '@earendil-works/pi-tui';
 import type {
   RouterPinByProfile,
   RouterStatusState,
   RouterThinkingByProfile,
+  RouterUIPreferences,
+  RouterUISnapshot,
   RoutingDecision,
   StatusLineMode,
 } from './types';
@@ -12,6 +15,8 @@ import {
   JEV_OUTCOMES,
   ROUTER_TIERS,
 } from './types';
+
+export { openRouterInspector } from './ui/inspector';
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
@@ -56,6 +61,10 @@ export const formatAdvisorLabel = (
       const reason = formatBypassReason(decision);
       return reason ? `advice skipped: ${reason}` : 'advice bypassed';
     }
+    case 'cloudflare':
+      return `🧭 ${decision.cloudflare?.model === '@cf/cloudflare/clef-flash' ? 'Clef Flash' : 'Clef'} ✓`;
+    case 'cloudflare-fallback':
+      return `🧭 ${decision.cloudflare?.model === '@cf/cloudflare/clef-flash' ? 'Clef Flash' : 'Clef'} ↪ base`;
     case 'jev':
       return '🧭 Jev ✓';
     case 'jev-fallback':
@@ -82,7 +91,12 @@ export const formatAdvisorDetail = (
 ): string | undefined => {
   const label = formatAdvisorLabel(decision);
   if (!label) return undefined;
-  const metrics = decision.jev;
+  const metrics = decision.cloudflare ?? decision.jev;
+  const service = decision.cloudflare
+    ? metrics?.model === '@cf/cloudflare/clef-flash'
+      ? 'Clef Flash'
+      : 'Clef'
+    : 'Jev';
   const latencyMs = metrics?.latencyMs ?? decision.routingLatencyMs;
   const parts = [label];
   if (metrics) {
@@ -93,7 +107,7 @@ export const formatAdvisorDetail = (
     if (time) parts.push(`started=${time}`);
     parts.push(
       metrics.outcome === 'uncertain'
-        ? 'No tier chosen: Jev could not judge the required capability from the supplied context; baseline used.'
+        ? `No tier chosen: ${service} could not judge the required capability from the supplied context; baseline used.`
         : metrics.outcome,
     );
     if (metrics.choice && metrics.choice !== 'uncertain')
@@ -133,18 +147,24 @@ export const formatAdvisorDetail = (
     if (metrics.estimatedInputTokens !== undefined)
       parts.push(`request≈${metrics.estimatedInputTokens} tokens`);
     if (metrics.actualInputTokens !== undefined)
-      parts.push(`Jev usage=${metrics.actualInputTokens} input tokens`);
+      parts.push(`${service} usage=${metrics.actualInputTokens} input tokens`);
     if (metrics.httpStatus !== undefined)
       parts.push(`HTTP ${metrics.httpStatus}`);
     if (metrics.attempts !== undefined && metrics.attempts > 1)
       parts.push(`attempts=${metrics.attempts}`);
     if (metrics.responseIssue) parts.push(`response=${metrics.responseIssue}`);
     if (metrics.httpStatus === 401)
-      parts.push('Check the user-config Jev API key.');
+      parts.push(
+        decision.cloudflare
+          ? 'Check Cloudflare authentication through Pi.'
+          : 'Check TypeSafe authentication through Pi (/login typesafe).',
+      );
     if (metrics.httpStatus === 422)
-      parts.push('Jev rejected the request shape.');
+      parts.push(`${service} rejected the request shape.`);
     if (metrics.httpStatus === 429 || metrics.httpStatus === 529)
-      parts.push('Transient Jev limit; the router retried once within budget.');
+      parts.push(
+        `Transient ${service} limit; retries are bounded by the advisory budget.`,
+      );
   } else if (decision.errorClass) {
     parts.push(decision.errorClass);
   }
@@ -160,7 +180,12 @@ export const formatAdvisorFooter = (
 ): string => {
   const label = formatAdvisorLabel(decision);
   if (!label) return '';
-  const metrics = decision.jev;
+  const metrics = decision.cloudflare ?? decision.jev;
+  const service = decision.cloudflare
+    ? metrics?.model === '@cf/cloudflare/clef-flash'
+      ? 'Clef Flash'
+      : 'Clef'
+    : 'Jev';
   if (!metrics)
     return ` · ${label}${decision.errorClass ? `: ${decision.errorClass}` : ''}`;
   const confidence =
@@ -212,17 +237,19 @@ export const formatAdvisorFooter = (
     mode === 'detailed'
       ? `${metrics.probability !== undefined ? ` · ${metrics.outcome === 'uncertain' ? 'abstain ' : ''}p${Math.round(metrics.probability * 100)}%` : ''}${time ? ` @${time}` : ''}`
       : '';
-  return ` · 🧭 Jev${summary.startsWith(':') ? '' : ' '}${summary} · ${latency}${extra}${reuse}`;
+  return ` · 🧭 ${service}${summary.startsWith(':') ? '' : ' '}${summary} · ${latency}${extra}${reuse}`;
 };
 
-export const formatJevStats = (
+const formatAdvisorStats = (
   history: readonly RoutingDecision[],
+  field: 'jev' | 'cloudflare',
+  service: string,
 ): string[] => {
   const requests = new Map<string, NonNullable<RoutingDecision['jev']>>();
   let legacy = 0;
   for (const decision of history) {
-    if (!decision.jev) continue;
-    const metrics = decision.jev;
+    const metrics = decision[field];
+    if (!metrics) continue;
     if (!metrics.requestId) {
       legacy += 1;
       continue;
@@ -249,7 +276,7 @@ export const formatJevStats = (
       ] as const,
   );
   return [
-    `Jev stats: ${samples.length} unique HTTP requests in ${history.length} retained decisions (not session lifetime).`,
+    `${service} stats: ${samples.length} unique HTTP requests in ${history.length} retained decisions (not session lifetime).`,
     `Advised tiers: ${ROUTER_TIERS.map((tier) => `${tier}=${samples.filter((entry) => entry.choice === tier).length}`).join(', ')}.`,
     ...outcomes
       .filter(([, count]) => count > 0)
@@ -257,7 +284,7 @@ export const formatJevStats = (
         ([outcome, count]) =>
           `${outcome}: ${count}/${samples.length} (${((100 * count) / samples.length).toFixed(1)}%)`,
       ),
-    `Median Jev latency: ${median === undefined ? 'n/a' : `${Math.round(median)}ms`}. Reused decisions are not new requests.`,
+    `Median ${service} latency: ${median === undefined ? 'n/a' : `${Math.round(median)}ms`}. Reused decisions are not new requests.`,
     ...(legacy
       ? [
           `${legacy} decisions without request IDs excluded (legacy or no HTTP request).`,
@@ -265,6 +292,12 @@ export const formatJevStats = (
       : []),
   ];
 };
+
+export const formatJevStats = (history: readonly RoutingDecision[]): string[] =>
+  formatAdvisorStats(history, 'jev', 'Jev');
+export const formatCloudflareStats = (
+  history: readonly RoutingDecision[],
+): string[] => formatAdvisorStats(history, 'cloudflare', 'Cloudflare');
 
 export const formatGenerationDetail = (
   decision: RoutingDecision,
@@ -376,33 +409,84 @@ export const updateStatus = (
     return;
   }
 
-  const widgetLines = [
-    `Router: ${routerEnabled ? 'enabled' : 'disabled'}`,
-    `Profile: ${statusProfile}${activeRouterProfile ? ' (active)' : ''}`,
-    `Pin: ${activePin ?? 'auto'}`,
-    `Estimated cost (catalog): $${accumulatedCost.toFixed(4)}` +
-      (maxSessionBudget ? ` / $${maxSessionBudget.toFixed(2)}` : ''),
-  ];
-  if (lastDecision && lastDecision.profile === statusProfile) {
-    const flags = getDecisionFlags(lastDecision);
-    const flagsStr = flags.length > 0 ? ` [${flags.join(',')}]` : '';
-    const advisorDetail = formatAdvisorDetail(lastDecision);
-    const generationDetail = formatGenerationDetail(lastDecision);
+  const observed =
+    lastDecision?.profile === statusProfile ? lastDecision : undefined;
+  ctx.ui.setWidget('router', (_tui, theme) => ({
+    invalidate: () => {},
+    render: (width: number) => {
+      const actual = observed
+        ? `${observed.tier} → ${observed.targetModelId} · ${observed.thinking}${observed.isFallback ? ' [fallback]' : ''}`
+        : routerEnabled
+          ? 'waiting / no observed route'
+          : (lastNonRouterModel ?? 'off');
+      const lines = [
+        theme.fg(
+          'accent',
+          `Router / ${truncateToWidth(statusProfile, Math.max(4, Math.min(16, width - 32)))} · ${actual}`,
+        ),
+        theme.fg(
+          'muted',
+          `${routerEnabled ? 'enabled' : 'off'} · next pin ${activePin ?? 'auto'} · catalog $${accumulatedCost.toFixed(4)}${maxSessionBudget ? ` / $${maxSessionBudget}` : ''}${observed ? formatAdvisorFooter(observed, state.statusLine) : ''}`,
+        ),
+      ];
+      if (state.statusLine === 'detailed' && observed?.generation) {
+        lines.push(
+          theme.fg(
+            'dim',
+            `cache r${observed.generation.cacheReadTokens}/w${observed.generation.cacheWriteTokens} · ${observed.generation.transition} · /router-ui`,
+          ),
+        );
+      }
+      return lines.map((line) => truncateToWidth(line, Math.max(1, width)));
+    },
+  }));
+};
 
-    widgetLines.push(
-      `Route: ${lastDecision.tier}${flagsStr} -> ${lastDecision.targetProvider}/${lastDecision.targetModelId} (${lastDecision.thinking})`,
-      `Source: ${formatDecisionSource(lastDecision) || 'unknown'}`,
-      ...(advisorDetail ? [advisorDetail] : []),
-      ...(generationDetail ? [generationDetail] : []),
-    );
-  } else if (!routerEnabled && lastNonRouterModel) {
-    widgetLines.push(`Fallback: ${lastNonRouterModel}`);
+/** Optional lifecycle strip override after updateStatus; does not replace Pi's chrome. */
+export const updateRouterUIStrip = (
+  ctx: ExtensionContext,
+  snapshot: RouterUISnapshot,
+  preferences: RouterUIPreferences,
+): void => {
+  if (ctx.mode !== 'tui') return;
+  if (!preferences.widgetEnabled) {
+    ctx.ui.setWidget('router', undefined);
+    return;
   }
-  if (Object.keys(pinnedTierByProfile).length > 1) {
-    widgetLines.push(`Pins: ${formatPinSummary(pinnedTierByProfile)}`);
-  }
-  ctx.ui.setWidget(
-    'router',
-    widgetLines.map((line) => ctx.ui.theme.fg('dim', line)),
-  );
+  ctx.ui.setWidget('router', (_tui, theme) => ({
+    invalidate: () => {},
+    render: (width: number): string[] => {
+      const actual = snapshot.actual;
+      const identity = actual
+        ? `${actual.tier} → ${actual.model} · ${actual.thinking}`
+        : 'no observed generation';
+      const warning = [
+        'timeout',
+        'cancelled',
+        'failed',
+        'fallback',
+        'budget',
+      ].includes(snapshot.lifecycle);
+      const controls = snapshot.pendingControls ?? snapshot.controls;
+      const advice = snapshot.advice;
+      const lines = [
+        theme.fg(
+          warning ? 'warning' : 'accent',
+          `${identity} · ${snapshot.lifecycle}`,
+        ),
+        theme.fg(
+          'muted',
+          `${snapshot.profile} · ${advice ? `${advice.advisor}: ${advice.outcome}${advice.latencyMs === undefined ? '' : ` · ${Math.round(advice.latencyMs)} ms`}` : (snapshot.reason ?? 'advice not observed')} · next pin ${controls.pin}${snapshot.pendingControls ? ' (pending)' : ''} · /router-ui`,
+        ),
+      ];
+      if (preferences.statusLine === 'detailed')
+        lines.push(
+          theme.fg(
+            'dim',
+            `Next: baseline ${controls.baseline} · budget ${controls.budget === undefined ? 'unset' : `$${controls.budget}`} · ${controls.advisor} / ${controls.timeout} ms`,
+          ),
+        );
+      return lines.map((line) => truncateToWidth(line, Math.max(1, width)));
+    },
+  }));
 };

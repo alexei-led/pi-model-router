@@ -6,12 +6,18 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import routerExtension from './index';
-import { done, events, message, model } from './test/fixtures';
-import type { RouterConfig } from './types';
+import {
+  done,
+  events,
+  message,
+  model,
+  nativeJevRegistry,
+} from './test/fixtures';
+import type { RawRouterConfig } from './types';
 import * as ui from './ui';
 
 const stateMocks = vi.hoisted(() => ({
-  advisors: {} as Pick<RouterConfig, 'jev' | 'classifierModel'>,
+  advisors: {} as Pick<RawRouterConfig, 'jev' | 'classifierModel'>,
   loadLastRouterProfile: vi.fn(),
   saveLastRouterProfile: vi.fn(),
 }));
@@ -88,6 +94,7 @@ describe('index.ts (orchestrator)', () => {
   const buildMockCtx = () => ({
     cwd: '/mock/cwd',
     modelRegistry: {
+      ...nativeJevRegistry(),
       find: vi
         .fn()
         .mockImplementation((provider: string, id: string) =>
@@ -306,8 +313,6 @@ describe('index.ts (orchestrator)', () => {
         stateMocks.advisors = {
           jev: {
             enabled: true,
-            apiKey: privateText,
-            endpoint: 'https://api.typesafe.ai/v1/systemone',
             model: 'jev-1.13.0',
             timeoutMs: 750,
             confidenceThreshold: 0.65,
@@ -344,7 +349,10 @@ describe('index.ts (orchestrator)', () => {
           delegate.mockReturnValueOnce(
             done(`Tier: high\nReasoning: ${privateText}`),
           );
-        Object.assign(ctx.modelRegistry, { streamSimple: delegate });
+        Object.assign(ctx.modelRegistry, {
+          ...nativeJevRegistry(privateText),
+          streamSimple: delegate,
+        });
         for (const handler of handlersFor('session_start'))
           await handler({ reason: 'new' }, ctx);
         const command = mockPi.registerCommand.mock.calls.find(
@@ -718,8 +726,6 @@ describe('index.ts (orchestrator)', () => {
         stateMocks.advisors = {
           jev: {
             enabled: true,
-            apiKey: 'synthetic',
-            endpoint: 'https://router-test.invalid/choice',
             model: 'jev-1.13.0',
             timeoutMs: 750,
             confidenceThreshold: 0.65,

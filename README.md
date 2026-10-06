@@ -8,7 +8,7 @@
 
 Keep one profile in [Pi](https://github.com/earendil-works/pi/tree/main/packages/coding-agent).
 `pi-model-router` can select a different model and reasoning effort for each new turn.
-Optional Jev advice uses task context. You choose the available models and retain control.
+Optional Jev, Clef, or Clef Flash advice uses bounded task context. You choose the available models and retain control.
 
 ## Why use it?
 
@@ -43,9 +43,19 @@ flowchart LR
     class Light,Strong generation
 ```
 
-Jev needs your API key and approval for each profile. Selected text can contain private data.
+Jev needs TypeSafe authentication through Pi (`/login typesafe`) and approval for each profile. Selected text can contain private data.
 Without an advisor, the router uses a compatible default route from your profile.
 [Enable Jev and review the privacy boundary →](docs/jev-advisor.md)
+
+## Inspect routing in Pi
+
+Run `/router widget` for the above-editor strip and `/router-ui` for the native inspector.
+It shows the actual route, pending controls, classifier status, and retained-history usage.
+
+![Native Pi router inspector with an above-editor route strip](docs/assets/router-ui/router-now-dark.png)
+
+Captured from the local dev extension in Pi inside agterm, using synthetic fixture data.
+[Inspector controls](docs/user-guide.md#native-inspector) · [Cloudflare setup](docs/cloudflare-advisor.md)
 
 ## A turn in Pi
 
@@ -62,10 +72,18 @@ For the next user turn, the router can select a different route.
 Recent records cover 1,967 Pi responses across 25 sessions. They show route use, not guaranteed savings.
 [See the chart, cost calculations, and limits →](docs/evaluation.md)
 
+## Upgrading to 0.10.0
+
+**Jev credentials now belong to Pi.** Authenticate with `/login typesafe` before
+upgrading. After updating and restarting Pi, remove `jev.apiKey` and `jev.endpoint`
+from your user router config. Keep existing model pins and profile consent.
+Custom endpoints require migration into Pi first.
+[Follow the migration steps →](docs/jev-advisor.md#migrate-the-old-router-fields)
+
 ## Install
 
 Requires Pi **1.0.2 or later in the 1.x series** and Node.js **22.19.0+**.
-The test suite checks Pi 1.0.2 types and isolated RPC provider startup without model calls.
+The test suite checks Pi 1.0.2 types and isolated RPC startup. The native UI was also exercised in Pi 1.0.4 inside agterm; see the [acceptance evidence](docs/testing/router-ui-agterm-acceptance.md).
 
 ```sh
 pi install npm:@alexeiled/pi-model-router

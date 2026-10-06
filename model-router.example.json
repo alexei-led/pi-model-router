@@ -1,10 +1,18 @@
 {
   "debug": false,
+  "advisor": "jev",
+  "cloudflare": {
+    "enabled": false,
+    "timeoutMs": 1500,
+    "confidenceThreshold": 0.65,
+    "probabilityThreshold": 0.8,
+    "maxStateTokens": 3000,
+    "retry": { "maxAttempts": 2, "backoffMs": 400 },
+    "mode": "advisory"
+  },
   "ui": { "statusLine": "compact" },
   "jev": {
     "enabled": false,
-    "apiKey": "<rendered by chezmoi/1Password in user config only>",
-    "endpoint": "https://api.typesafe.ai/v1/systemone",
     "model": "jev-1.13.0",
     "timeoutMs": 1500,
     "confidenceThreshold": 0.65,
@@ -47,6 +55,7 @@
     "auto": {
       "baselineTier": "medium",
       "jev": { "enabled": false },
+      "cloudflare": { "enabled": false },
       "high": {
         "model": "gpt-pro",
         "thinking": "high",

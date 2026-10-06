@@ -17,9 +17,14 @@ import {
   failure,
   message,
   model,
+  nativeJevRegistry,
   required,
 } from './test/fixtures';
-import type { JevConfig, JevContextState } from './types';
+import type {
+  JevConfig,
+  JevContextState,
+  RouterRequestObservation,
+} from './types';
 
 type State = Parameters<typeof registerRouterProvider>[1];
 type MutableState = { -readonly [K in keyof State]: State[K] };
@@ -35,6 +40,7 @@ const setup = () => {
     () => done(),
   );
   const registry = {
+    ...nativeJevRegistry(),
     find: (provider: string, id: string) =>
       models.find((m) => m.provider === provider && m.id === id),
     streamSimple: delegate,
@@ -71,6 +77,9 @@ const setup = () => {
     recordDebugDecision: vi.fn(),
     updateStatus: vi.fn(),
     syncPiThinkingLevel: vi.fn(),
+    beginRequest: vi.fn<
+      NonNullable<Parameters<typeof registerRouterProvider>[2]['beginRequest']>
+    >(() => () => undefined),
   };
   const stream = (
     context: Context = {
@@ -500,7 +509,12 @@ describe('router provider', () => {
   it('preserves cancellation instead of trying another model', async () => {
     const s = setup();
     s.delegate.mockReturnValueOnce(failure('aborted'));
+    const observe = vi.fn<(event: RouterRequestObservation) => void>();
+    s.actions.beginRequest.mockReturnValue(observe);
     expect((await consume(s.stream())).result.stopReason).toBe('aborted');
+    expect(observe).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stage: 'cancelled' }),
+    );
     expect(s.delegate).toHaveBeenCalledOnce();
   });
 
@@ -867,8 +881,6 @@ describe('four-level provider routing', () => {
 
 const jevConfig: JevConfig = {
   enabled: true,
-  apiKey: 'private-test-key',
-  endpoint: 'https://api.typesafe.ai/v1/systemone',
   model: 'jev-1.13.0',
   timeoutMs: 750,
   confidenceThreshold: 0.65,
@@ -1182,7 +1194,9 @@ describe('Jev provider integration', () => {
           metrics.toolTokens,
       ).toBeLessThanOrEqual(75);
       expect(JSON.stringify(body)).not.toContain('PRIVATE_SYSTEM');
-      expect(JSON.stringify(body)).not.toContain(jevConfig.apiKey);
+      expect(JSON.stringify(body)).not.toContain(
+        'synthetic-private-key-never-log',
+      );
     },
   );
 
@@ -1266,11 +1280,11 @@ describe('Jev provider integration', () => {
   });
 
   it.each([true, false])(
-    'missing Jev key uses only the configured compatibility path (classifier=%s)',
+    'disabled Jev uses only the configured compatibility path (classifier=%s)',
     async (classifier) => {
       const s = setup();
       enableAdvisors(s);
-      required(s.state.currentConfig.jev).apiKey = '';
+      required(s.state.currentConfig.jev).enabled = false;
       const fetch = mockChoice();
       if (classifier) {
         required(s.state.currentConfig.profiles.balanced).micro = {
@@ -1289,6 +1303,36 @@ describe('Jev provider integration', () => {
       });
     },
   );
+
+  it('missing Pi TypeSafe authentication uses baseline without a second advisor', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    const fetch = mockChoice();
+    const classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
+      async (target) => ({
+        api: target.api,
+        provider: target.provider,
+        model: target.id,
+        answers: {},
+        stopReason: 'error',
+        errorMessage: 'private-auth-sentinel',
+        timestamp: 1,
+      }),
+    );
+    Object.assign(s.registry, { classify });
+    await consume(s.stream(userContext()));
+    expect(classify).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'baseline',
+      advisor: 'jev-fallback',
+    });
+    expect(
+      JSON.stringify(s.actions.recordDebugDecision.mock.calls),
+    ).not.toContain('private-auth-sentinel');
+  });
 
   it.each(['uncertain', 'unknown', 'micro'])(
     'uses baseline for unavailable classifier choice %s',
@@ -2591,4 +2635,277 @@ describe('Jev provider integration', () => {
       expect(router.thinkingLevelMap).toEqual(expected);
     },
   );
+});
+
+const cloudflareSetup = () => {
+  const s = setup();
+  enableAdvisors(s);
+  s.state.currentConfig.advisor = 'clef';
+  s.state.currentConfig.cloudflare = required(
+    normalizeConfig({ cloudflare: { enabled: true }, profiles: {} }).config
+      .cloudflare,
+  );
+  required(s.state.currentConfig.profiles.balanced).cloudflare = {
+    enabled: true,
+  };
+  s.registry.findOfType = vi.fn(() => ({
+    type: 'classifier',
+    api: 'cloudflare-workers-ai-system-one',
+    provider: 'cloudflare-workers-ai',
+    id: '@cf/cloudflare/clef',
+  })) as unknown as ExtensionContext['modelRegistry']['findOfType'];
+  const classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
+    async (_model, context) => {
+      const id = required(
+        Object.keys(required(context.questions.route).criteria).find((id) =>
+          id.startsWith('high|'),
+        ),
+      );
+      return {
+        api: 'cloudflare-workers-ai-system-one',
+        provider: 'cloudflare-workers-ai',
+        model: '@cf/cloudflare/clef',
+        timestamp: 1,
+        stopReason: 'stop',
+        answers: {
+          route: {
+            type: 'choice',
+            choice: id,
+            confidence: 0.9,
+            probabilities: { [id]: 1 },
+          },
+        },
+      };
+    },
+  );
+  s.registry.classify = classify;
+  return { ...s, classify };
+};
+
+describe('Cloudflare provider integration', () => {
+  it('uses the selected Cloudflare advisor, never Jev/chat, and reuses same-turn advice', async () => {
+    const s = cloudflareSetup();
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    vi.stubGlobal('fetch', fetch);
+    await consume(s.stream(userContext()));
+    await consume(s.stream(userContext()));
+    expect(s.classify).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      reasonCode: 'cloudflare',
+      advisor: 'cloudflare',
+      reuse: 'same-turn',
+      cloudflare: { model: '@cf/cloudflare/clef', outcome: 'selected' },
+    });
+    expect(s.state.lastDecision?.jev).toBeUndefined();
+  });
+
+  it.each([
+    'global-consent',
+    'profile-consent',
+    'registry-unavailable',
+    'auth-error',
+    'invalid-advice',
+  ] as const)(
+    'falls directly to baseline when %s; never a second advisor',
+    async (mode) => {
+      const s = cloudflareSetup();
+      if (mode === 'global-consent')
+        required(s.state.currentConfig.cloudflare).enabled = false;
+      if (mode === 'profile-consent')
+        required(s.state.currentConfig.profiles.balanced).cloudflare =
+          undefined;
+      if (mode === 'registry-unavailable')
+        s.registry.findOfType = vi.fn(() => undefined);
+      if (mode === 'auth-error')
+        s.classify.mockRejectedValue(new Error('secret auth error'));
+      if (mode === 'invalid-advice')
+        s.classify.mockResolvedValue({
+          stopReason: 'stop',
+          answers: {
+            route: {
+              type: 'choice',
+              choice: 'foreign',
+              confidence: 1,
+              probabilities: { foreign: 1 },
+            },
+          },
+        } as unknown as Awaited<ReturnType<typeof s.classify>>);
+      const fetch = vi.fn<typeof globalThis.fetch>();
+      vi.stubGlobal('fetch', fetch);
+      await consume(s.stream(userContext()));
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'medium',
+        advisor: 'cloudflare-fallback',
+      });
+      expect(s.delegate).toHaveBeenCalledOnce();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(s.state.lastDecision?.jev).toBeUndefined();
+      expect(JSON.stringify(s.state.lastDecision)).not.toContain('secret');
+    },
+  );
+
+  it.each(['pin', 'budget', 'tool-continuation'] as const)(
+    'preserves advisor bypass for %s',
+    async (mode) => {
+      const s = cloudflareSetup();
+      if (mode === 'pin') s.state.pinnedTierByProfile.balanced = 'low';
+      if (mode === 'budget') {
+        s.state.currentConfig.maxSessionBudget = 1;
+        s.state.accumulatedCost = 2;
+      }
+      await consume(
+        s.stream(
+          mode === 'tool-continuation'
+            ? toolContext(userContext())
+            : userContext(),
+        ),
+      );
+      expect(s.classify).not.toHaveBeenCalled();
+      expect(s.delegate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('revalidates live capabilities before generation', async () => {
+    const s = cloudflareSetup();
+    const original = s.classify.getMockImplementation();
+    s.classify.mockImplementation(async (...args) => {
+      const result = await required(original)(...args);
+      // High primary vanishes while the request is in flight. Medium fallback survives.
+      s.models.shift();
+      return result;
+    });
+    await consume(s.stream(userContext()));
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      advisor: 'cloudflare-fallback',
+      cloudflare: { outcome: 'unavailable' },
+    });
+    expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
+  });
+
+  it('rejects advice from a replaced config without poisoning the new-config turn cache', async () => {
+    const s = cloudflareSetup();
+    const original = s.classify.getMockImplementation();
+    s.classify.mockImplementationOnce(async (...args) => {
+      const result = await required(original)(...args);
+      s.state.currentConfig = { ...s.state.currentConfig };
+      return result;
+    });
+    await consume(s.stream(userContext()));
+    expect(s.state.lastDecision).toMatchObject({
+      advisor: 'cloudflare-fallback',
+      cloudflare: { outcome: 'unavailable' },
+    });
+    await consume(s.stream(userContext()));
+    expect(s.classify).toHaveBeenCalledTimes(2);
+    expect(s.state.lastDecision?.advisor).toBe('cloudflare');
+  });
+
+  it('shares a flight and cancels only the departing waiter', async () => {
+    const s = cloudflareSetup();
+    const original = s.classify.getMockImplementation();
+    let complete = () => {};
+    let transportSignal: AbortSignal | undefined;
+    s.classify.mockImplementation(
+      (...args) =>
+        new Promise((resolve) => {
+          transportSignal = args[2]?.signal;
+          complete = () => {
+            void required(original)(...args).then(resolve);
+          };
+        }),
+    );
+    const controller = new AbortController();
+    const first = consume(s.stream(userContext(), controller.signal));
+    const second = consume(s.stream(userContext()));
+    await vi.waitFor(() => expect(s.classify).toHaveBeenCalledOnce());
+    controller.abort();
+    expect((await first).result.stopReason).toBe('aborted');
+    expect(transportSignal?.aborted).toBe(false);
+    expect(s.delegate).not.toHaveBeenCalled();
+    complete();
+    await second;
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision).toMatchObject({
+      advisor: 'cloudflare',
+      reuse: 'shared',
+    });
+  });
+
+  it('aborts the final waiter transport and never generates for native aborted stopReason', async () => {
+    const s = cloudflareSetup();
+    let transportSignal: AbortSignal | undefined;
+    s.classify.mockImplementation((_model, _context, options) => {
+      transportSignal = options?.signal;
+      return new Promise(() => {});
+    });
+    const controller = new AbortController();
+    const pending = consume(s.stream(userContext(), controller.signal));
+    await vi.waitFor(() => expect(s.classify).toHaveBeenCalledOnce());
+    controller.abort();
+    expect((await pending).result.stopReason).toBe('aborted');
+    expect(transportSignal?.aborted).toBe(true);
+    expect(s.delegate).not.toHaveBeenCalled();
+    s.classify.mockResolvedValue({
+      stopReason: 'aborted',
+      answers: {},
+    } as unknown as Awaited<ReturnType<typeof s.classify>>);
+    expect(
+      (await consume(s.stream(userContext('next', 2)))).result.stopReason,
+    ).toBe('aborted');
+    expect(s.delegate).not.toHaveBeenCalled();
+  });
+});
+
+describe('Cloudflare reuse and authorization edges', () => {
+  it('reuses the validated tool route without a second advisor', async () => {
+    const s = cloudflareSetup();
+    const assistant = toolMessage();
+    s.delegate.mockReturnValueOnce(finishTool(assistant));
+    await consume(s.stream(userContext()));
+    await consume(s.stream(toolContext(userContext(), assistant)));
+    expect(s.classify).toHaveBeenCalledOnce();
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      reasonCode: 'continuation',
+      advisor: 'cloudflare',
+      reuse: 'continuation',
+    });
+  });
+
+  it('bypasses advice with only one eligible tier candidate', async () => {
+    const s = cloudflareSetup();
+    const profile = required(s.state.currentConfig.profiles.balanced);
+    profile.high = undefined;
+    profile.low = undefined;
+    await consume(s.stream(userContext()));
+    expect(s.classify).not.toHaveBeenCalled();
+    expect(s.state.lastDecision).toMatchObject({
+      advisor: 'bypassed',
+      bypassReason: 'single-candidate',
+    });
+  });
+
+  it('does not accept stale advice after in-place consent revocation', async () => {
+    const s = cloudflareSetup();
+    const original = s.classify.getMockImplementation();
+    s.classify.mockImplementationOnce(async (...args) => {
+      const result = await required(original)(...args);
+      required(s.state.currentConfig.cloudflare).enabled = false;
+      return result;
+    });
+    await consume(s.stream(userContext()));
+    expect(s.state.lastDecision).toMatchObject({
+      advisor: 'cloudflare-fallback',
+      cloudflare: { outcome: 'unavailable' },
+    });
+    await consume(s.stream(userContext()));
+    expect(s.classify).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision?.cloudflare?.outcome).toBe('unavailable');
+    expect(s.state.lastDecision?.reuse).not.toBe('same-turn');
+  });
 });

@@ -176,7 +176,10 @@ const snapshotContextMetrics = (
   return result;
 };
 
-const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
+const snapshotJev = (
+  value: unknown,
+  cloudflare = false,
+): JevDiagnostics | undefined => {
   if (!isObjectRecord(value)) return undefined;
   const outcome = JEV_OUTCOMES.find((entry) => entry === value.outcome);
   if (!outcome || !isFiniteNumber(value.latencyMs) || value.latencyMs < 0)
@@ -191,10 +194,13 @@ const snapshotJev = (value: unknown): JevDiagnostics | undefined => {
     result.requestId = value.requestId;
   if (
     typeof value.model === 'string' &&
-    /^(?:jev-latest|jev-\d+(?:\.\d+){1,3})$/.test(value.model)
+    (cloudflare
+      ? /^@cf\/cloudflare\/clef(?:-flash)?$/.test(value.model)
+      : /^(?:jev-latest|jev-\d+(?:\.\d+){1,3})$/.test(value.model))
   )
     result.model = value.model;
   if (
+    !cloudflare &&
     typeof value.resolvedModel === 'string' &&
     /^jev-\d+(?:\.\d+){1,3}$/.test(value.resolvedModel)
   )
@@ -327,6 +333,7 @@ export const snapshotDecision = (
     ? decision.bypassReason
     : undefined,
   jev: snapshotJev(decision.jev),
+  cloudflare: snapshotJev(decision.cloudflare, true),
   generation: snapshotGeneration(decision.generation),
   reuse:
     decision.reuse === 'same-turn' ||

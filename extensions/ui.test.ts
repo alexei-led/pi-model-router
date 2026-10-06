@@ -1,7 +1,13 @@
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ExtensionContext, Theme } from '@earendil-works/pi-coding-agent';
+import type { TUI } from '@earendil-works/pi-tui';
+import { visibleWidth } from '@earendil-works/pi-tui';
 import { describe, expect, it, vi } from 'vitest';
 import { required } from './test/fixtures';
-import type { RouterStatusState, RoutingDecision } from './types';
+import type {
+  RouterStatusState,
+  RouterUISnapshot,
+  RoutingDecision,
+} from './types';
 import {
   formatAdvisorDetail,
   formatAdvisorFooter,
@@ -11,6 +17,7 @@ import {
   formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
+  updateRouterUIStrip,
   updateStatus,
 } from './ui';
 
@@ -50,6 +57,13 @@ const render = (
     maxSessionBudget: undefined,
     ...state,
   });
+
+const widget = (ctx: ExtensionContext): string[] => {
+  const content = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
+  if (typeof content === 'function')
+    return content({} as TUI, ctx.ui.theme as Theme).render(120);
+  return content ?? [];
+};
 
 describe('ui.ts', () => {
   it.each(['constructor', 'toString', 'hasOwnProperty'])(
@@ -119,9 +133,7 @@ describe('ui.ts', () => {
     expect(vi.mocked(compact.ui.setStatus).mock.calls[0]?.[1]).not.toContain(
       'cache',
     );
-    expect(
-      JSON.stringify(vi.mocked(compact.ui.setWidget).mock.calls),
-    ).toContain('cache-read=800');
+    expect(formatGenerationDetail(routed)).toContain('cache-read=800');
     const detailed = context();
     render(detailed, { lastDecision: routed, statusLine: 'detailed' });
     expect(vi.mocked(detailed.ui.setStatus).mock.calls[0]?.[1]).toContain(
@@ -191,8 +203,8 @@ describe('ui.ts', () => {
         errorClass: 'deadline',
       } as unknown as RoutingDecision,
     });
-    const lines = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1] ?? [];
-    expect(lines).toContain('🧭 Jev ↪ base · deadline · 750ms');
+    const lines = widget(ctx).join('\n');
+    expect(lines).toContain('🧭 Jev ↪ base: deadline');
     expect(lines).not.toContain('Routing: 750ms');
     expect(lines).not.toContain('Routing error: deadline');
   });
@@ -229,7 +241,7 @@ describe('ui.ts', () => {
     const ctx = context();
     render(ctx, { statusLine: 'detailed', lastDecision: routed });
     expect(vi.mocked(ctx.ui.setStatus).mock.calls[0]?.[1]).toContain(detailed);
-    const widget = JSON.stringify(vi.mocked(ctx.ui.setWidget).mock.calls);
+    const widget = formatAdvisorDetail(routed) ?? '';
     expect(widget).toContain('confidence=35.0%');
     expect(widget).toContain('selected=high');
     expect(widget).toContain('basis=probability');
@@ -379,10 +391,11 @@ describe('ui.ts', () => {
       'router',
       '🚥 p [pin:medium] · medium → model/medium',
     );
-    const lines = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
-    expect(lines).toContain('Router: enabled');
-    expect(lines).toContain('Route: medium -> test/model (medium)');
-    expect(lines).toContain('Source: baseline');
+    const lines = widget(ctx).join('\n');
+    expect(lines).toContain('Router / p · medium → model · medium');
+    expect(lines).toContain(
+      'enabled · next pin medium · catalog $0.5000 / $10',
+    );
   });
 
   it.each(['pinned', 'budget'] as const)(
@@ -418,8 +431,9 @@ describe('ui.ts', () => {
       lastDecision: undefined,
       lastNonRouterModel: 'openai/gpt-4o',
     });
-    const lines = vi.mocked(disabled.ui.setWidget).mock.calls[0]?.[1];
-    expect(lines).toContain('Fallback: openai/gpt-4o');
+    const lines = widget(disabled).join('\n');
+    expect(lines).toContain('openai/gpt-4o');
+    expect(lines).toContain('off');
   });
 
   it('does not render remote or legacy explanation text', () => {
@@ -431,9 +445,132 @@ describe('ui.ts', () => {
       apiKey: 'secret',
     } as unknown as RoutingDecision;
     render(ctx, { lastDecision: tainted });
-    const rendered = JSON.stringify(vi.mocked(ctx.ui.setWidget).mock.calls);
+    const rendered = widget(ctx).join('\n');
     expect(rendered).not.toContain('private key');
     expect(rendered).not.toContain('legacy');
     expect(rendered).not.toContain('secret');
+  });
+});
+
+describe('ui.ts compact strip', () => {
+  it.each([40, 60, 80, 120])(
+    'uses a width-aware strip at %i columns',
+    (width) => {
+      const ctx = context();
+      render(ctx, {
+        selectedProfile: '仕事👨‍👩‍👧‍👦',
+        lastDecision: {
+          ...decision,
+          profile: '仕事👨‍👩‍👧‍👦',
+          targetModelId: '漢字🚀',
+        },
+      });
+      const content = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
+      if (typeof content !== 'function')
+        throw new Error('Expected native widget factory');
+      const component = content({} as TUI, ctx.ui.theme);
+      const lines = component.render(width);
+      expect(lines).toHaveLength(2);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(lines[0]).toContain('medium');
+      component.invalidate();
+      expect(component.render(width)).toEqual(lines);
+    },
+  );
+  it('keeps the observed route visible when a new pin is pending', () => {
+    const ctx = context();
+    render(ctx, { pinnedTierByProfile: { p: 'high' } });
+    const text = widget(ctx).join('\n');
+    expect(text).toContain('medium → model');
+    expect(text).toContain('next pin high');
+  });
+  it('shows at most three lines in detailed mode and honors widget toggle', () => {
+    const ctx = context();
+    render(ctx, {
+      statusLine: 'detailed',
+      lastDecision: {
+        ...decision,
+        generation: {
+          transition: 'initial',
+          contextTruncated: false,
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          attempts: 1,
+        },
+      },
+    });
+    expect(widget(ctx)).toHaveLength(3);
+    const disabled = context();
+    render(disabled, { widgetEnabled: false });
+    expect(disabled.ui.setWidget).toHaveBeenCalledWith('router', undefined);
+  });
+});
+
+describe('ui.ts lifecycle strip', () => {
+  const snapshot: RouterUISnapshot = {
+    profile: 'p',
+    lifecycle: 'choosing',
+    controls: {
+      pin: 'auto',
+      baseline: 'medium',
+      budget: undefined,
+      advisor: 'jev',
+      timeout: 1500,
+      thinkingHigh: undefined,
+      thinkingMedium: undefined,
+      thinkingLow: undefined,
+      thinkingMicro: undefined,
+    },
+    eligible: {},
+    history: [],
+    privacy: {
+      jevApproved: undefined,
+      cloudflareApproved: undefined,
+      auth: 'unknown',
+    },
+  };
+  it.each([40, 60, 80, 120])(
+    'prioritizes actual routes and fits %i columns',
+    (width) => {
+      const ctx = context();
+      Object.assign(ctx, { mode: 'tui' });
+      updateRouterUIStrip(
+        ctx,
+        {
+          ...snapshot,
+          lifecycle: 'fallback',
+          actual: {
+            tier: 'high',
+            provider: 'test',
+            model: '漢字🚀fallback',
+            thinking: 'high',
+          },
+        },
+        { widgetEnabled: true, statusLine: 'detailed' },
+      );
+      const content = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
+      if (typeof content !== 'function')
+        throw new Error('Expected strip component');
+      const lines = content({} as TUI, ctx.ui.theme).render(width);
+      expect(lines).toHaveLength(3);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(lines[0]).toContain('high → 漢字🚀fallback');
+    },
+  );
+  it('renders choosing without a stale route, preserves widget toggles and avoids RPC', () => {
+    const ctx = context();
+    Object.assign(ctx, { mode: 'tui' });
+    updateRouterUIStrip(ctx, snapshot, { widgetEnabled: true });
+    expect(widget(ctx).join('\n')).toContain(
+      'no observed generation · choosing',
+    );
+    updateRouterUIStrip(ctx, snapshot, { widgetEnabled: false });
+    expect(ctx.ui.setWidget).toHaveBeenLastCalledWith('router', undefined);
+    const rpc = context();
+    Object.assign(rpc, { mode: 'rpc' });
+    updateRouterUIStrip(rpc, snapshot, { widgetEnabled: true });
+    expect(rpc.ui.setWidget).not.toHaveBeenCalled();
   });
 });

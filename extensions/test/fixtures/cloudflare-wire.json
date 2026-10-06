@@ -1,0 +1,11 @@
+{
+  "source": "https://developers.cloudflare.com/workers-ai/models/clef/schema-input.json",
+  "requiredInnerFields": ["model", "state", "questions"],
+  "requests": {
+    "clef": { "model": "@cf/cloudflare/clef", "input": { "model": "clef" } },
+    "clef-flash": {
+      "model": "@cf/cloudflare/clef-flash",
+      "input": { "model": "clef-flash" }
+    }
+  }
+}

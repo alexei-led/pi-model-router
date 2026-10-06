@@ -5,6 +5,30 @@ import {
   createAssistantMessageEventStream,
   type Model,
 } from '@earendil-works/pi-ai';
+import { classify as classifyTypeSafe } from '@earendil-works/pi-ai/api/typesafe-system-one';
+import type { ChoiceRegistry } from '../types';
+
+/** Mock only the public registry/auth boundary; native Pi owns the HTTP conversion. */
+export const nativeJevRegistry = (
+  apiKey = 'synthetic-private-key-never-log',
+): ChoiceRegistry => ({
+  findOfType: (_type, provider, id) =>
+    provider === 'typesafe'
+      ? {
+          type: 'classifier',
+          provider,
+          id,
+          name: id,
+          api: 'typesafe-system-one',
+          baseUrl: 'https://api.typesafe.ai/v1/',
+          input: ['text'],
+          contextWindow: 64000,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        }
+      : undefined,
+  classify: (model, context, options) =>
+    classifyTypeSafe(model, context, { ...options, apiKey }),
+});
 
 export const required = <T>(value: T | undefined, label = 'value'): T => {
   if (value === undefined) throw new Error(`Missing ${label}`);
