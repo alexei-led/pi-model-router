@@ -13,30 +13,26 @@ import {
   ROUTER_TIERS,
   THINKING_LEVELS,
 } from './config';
-import { DEFAULT_JEV_CONTEXT, ROUTER_COMMANDS as VERBS } from './constants';
+import { ROUTER_COMMANDS as VERBS } from './constants';
 import { effortAdjustments, preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
   RouterPinByProfile,
   RouterThinkingByProfile,
+  RouterUIView,
   RoutingDecision,
 } from './types';
 import {
-  formatAdvisorDetail,
   formatCloudflareStats,
   formatDecision,
   formatDecisionSource,
-  formatGenerationDetail,
   formatJevStats,
-  formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
 } from './ui';
 
 /** Removed verbs answer with the replacement instead of acting. */
 const RETIRED_VERBS: Record<string, string> = {
-  status: '/router',
-  profile: '/router <profile>',
   disable: '/router off',
   fix: '/router pin <tier>',
   debug: '/router log',
@@ -47,16 +43,18 @@ const LOG_ACTIONS = ['on', 'off', 'clear'] as const;
 const THINKING_VALUES = ['auto', ...THINKING_LEVELS] as const;
 
 const USAGE = [
-  '/router                        status',
-  '/router <profile>              switch profile (enables the router)',
+  '/router                        overview (text outside TUI)',
+  '/router status                 short text status',
+  '/router usage                  retained usage and known costs',
+  '/router settings               session controls',
+  '/router profile <name>         switch profile (enables the router)',
   '/router off                    leave the router; restore the previous model',
   '/router pin <tier|auto>        pin the active profile to high|medium|low|micro, or clear',
   '/router thinking <level|auto>  override thinking for every tier, or clear',
-  '/router log [on|off|clear]     recent decisions and Jev stats; control collection',
+  '/router log [on|off|clear]     recent decisions and advisor stats; control collection',
   '/router widget                 toggle the status widget',
   '/router reload                 reload model-router.json',
   '/router help                   this text',
-  '/router-ui [now|routing|classifier|usage]  native inspector',
 ].join('\n');
 
 export const registerCommands = (
@@ -90,43 +88,15 @@ export const registerCommands = (
     ) => Promise<boolean>;
     syncPiThinkingLevel: (level: ThinkingLevel) => void;
   },
-  openUI?: (
-    ctx: ExtensionContext,
-    tab: 'now' | 'routing' | 'classifier' | 'usage',
-  ) => Promise<void>,
+  openUI?: (ctx: ExtensionContext, tab: RouterUIView) => Promise<void>,
 ) => {
-  if (openUI)
-    pi.registerCommand('router-ui', {
-      description:
-        'Inspect routing, session controls, advisors and retained usage',
-      getArgumentCompletions: (prefix) =>
-        ['now', 'routing', 'classifier', 'usage']
-          .filter((tab) => tab.startsWith(prefix))
-          .map((tab) => ({ value: tab, label: tab })),
-      handler: async (args, ctx) => {
-        const tab = args.trim() || 'now';
-        if (
-          tab !== 'now' &&
-          tab !== 'routing' &&
-          tab !== 'classifier' &&
-          tab !== 'usage'
-        ) {
-          ctx.ui.notify(
-            'Usage: /router-ui [now|routing|classifier|usage]',
-            'error',
-          );
-          return;
-        }
-        await openUI(ctx, tab);
-      },
-    });
   const usage = (ctx: ExtensionContext, line: string) =>
     ctx.ui.notify(`Usage: ${line}`, 'error');
 
   const activeProfile = (ctx: ExtensionContext): string | undefined => {
     if (!state.selectedProfile)
       ctx.ui.notify(
-        'No router profile is active. Run /router <profile> first.',
+        'No router profile is active. Run /router profile <name> first.',
         'error',
       );
     return state.selectedProfile;
@@ -135,43 +105,38 @@ export const registerCommands = (
   const showStatus = (ctx: ExtensionContext) => {
     const profile = state.selectedProfile;
     const config = state.currentConfig;
-    const jev = config.jev;
-    const context = jev?.context ?? DEFAULT_JEV_CONTEXT;
     const cost =
       `$${state.accumulatedCost.toFixed(4)}` +
       (config.maxSessionBudget
-        ? ` / $${config.maxSessionBudget.toFixed(2)}`
+        ? ` / $${config.maxSessionBudget.toFixed(2)} soft budget`
         : '');
+    const last =
+      state.lastDecision?.profile === profile ? state.lastDecision : undefined;
     const lines = [
       `Router: ${state.routerEnabled ? 'on' : 'off'} · profile ${profile ?? 'none'} · available: ${profileNames(config).join(', ')}`,
-      `Pin: ${formatPinSummary(state.pinnedTierByProfile)} · thinking override: ${formatThinkingSummary(state.thinkingByProfile)}`,
-      `Baseline: ${profile ? (config.profiles[profile]?.baselineTier ?? 'automatic') : 'none'} · estimated cost (catalog): ${cost} · widget: ${state.widgetEnabled ? 'on' : 'off'} · log: ${state.debugEnabled ? 'on' : 'off'} (${state.debugHistory.length} decisions)`,
-      jev
-        ? `Jev: ${jev.enabled ? 'enabled' : 'disabled'} · profile opt-in: ${profile && config.profiles[profile]?.jev?.enabled ? 'yes' : 'no'} · budget ${jev.timeoutMs}ms · context ${context.previousTurns} turns / ≈${context.maxHistoryTokens} history / ${context.toolResults} ≈${context.maxToolTokens} tool / ≈${jev.maxStateTokens} state tokens`
-        : 'Jev: not configured',
-      `Selected advisor: ${config.advisor ?? 'jev'} · Cloudflare: ${config.cloudflare?.enabled ? 'enabled' : 'disabled'} · profile opt-in: ${profile && config.profiles[profile]?.cloudflare?.enabled ? 'yes' : 'no'}`,
-      `Previous model: ${formatModelRef(state.lastNonRouterModel)}`,
-      ...formatJevStats(state.debugHistory),
-      ...formatCloudflareStats(state.debugHistory),
+      `Pin: ${formatPinSummary(state.pinnedTierByProfile)} · effort: ${formatThinkingSummary(state.thinkingByProfile)}`,
+      `Recorded catalog cost: ${cost} (not billing; excludes advice)`,
+      ...(last && state.routerEnabled
+        ? [
+            `Last: ${last.tier} → ${last.targetProvider}/${last.targetModelId} (${last.thinking}) · ${formatDecisionSource(last)}`,
+          ]
+        : []),
+      'Details: /router · /router usage · /router settings',
+      ...state.lastConfigWarnings,
     ];
-    const last = state.lastDecision;
-    if (last) {
-      const source = formatDecisionSource(last);
-      const advisor = formatAdvisorDetail(last);
-      const generation = formatGenerationDetail(last);
-      lines.push(
-        `Last: ${last.tier} → ${last.targetProvider}/${last.targetModelId} (${last.thinking})${source ? ` · ${source}` : ''}`,
-        ...(advisor ? [advisor] : []),
-        ...(generation ? [generation] : []),
+    const text = lines.join('\n');
+    if (ctx.mode === 'print') process.stderr.write(`${text}\n`);
+    else if (ctx.mode === 'json')
+      pi.sendMessage(
+        {
+          customType: 'router-status',
+          content: text,
+          display: true,
+          details: undefined,
+        },
+        { triggerTurn: false },
       );
-    }
-    if (state.lastConfigWarnings.length > 0)
-      lines.push(
-        '',
-        '⚠️ Configuration warnings:',
-        ...state.lastConfigWarnings.map((warning) => `  - ${warning}`),
-      );
-    ctx.ui.notify(lines.join('\n'), 'info');
+    else ctx.ui.notify(text, 'info');
     actions.updateStatus(ctx);
   };
 
@@ -372,30 +337,32 @@ export const registerCommands = (
   };
 
   pi.registerCommand('router', {
-    description: 'Model router: profile, pin, thinking, log',
+    description: 'Router: overview, usage, settings, profile and pin',
     getArgumentCompletions: (prefix) => {
       const text = prefix.trimStart();
       const parts = text.length > 0 ? text.split(/\s+/) : [];
       const trailing = /\s$/.test(prefix);
       if (parts.length === 0 || (parts.length === 1 && !trailing)) {
         const token = parts[0] ?? '';
-        const profiles = items(
-          profileNames(state.currentConfig),
-          token,
-          (name) => `Switch to profile ${name}`,
-        );
         const verbs = items(
           VERBS.map((verb) => verb.name),
           token,
           (name) => VERBS.find((verb) => verb.name === name)?.desc ?? name,
         );
-        const all = [...(profiles ?? []), ...(verbs ?? [])];
+        const all = verbs ?? [];
         return all.length > 0 ? all : null;
       }
       const [verb, ...rest] = parts;
       const token = trailing && rest.length === 0 ? '' : (rest[0] ?? '');
       if (rest.length > 1) return null;
       switch (verb) {
+        case 'profile':
+          return items(
+            profileNames(state.currentConfig),
+            token,
+            (name) => `Switch to profile ${name}`,
+            'profile ',
+          );
         case 'pin':
           return items(
             ROUTER_PIN_VALUES,
@@ -436,7 +403,8 @@ export const registerCommands = (
       const parts = args?.trim().split(/\s+/).filter(Boolean) ?? [];
       const [verb, ...rest] = parts;
       if (!verb) {
-        showStatus(ctx);
+        if (openUI) await openUI(ctx, 'now');
+        else showStatus(ctx);
         return;
       }
       const noArgs = (line: string) => {
@@ -447,6 +415,20 @@ export const registerCommands = (
         return true;
       };
       switch (verb) {
+        case 'status':
+          if (noArgs('/router status')) showStatus(ctx);
+          return;
+        case 'usage':
+        case 'settings':
+          if (noArgs(`/router ${verb}`)) {
+            if (openUI) await openUI(ctx, verb);
+            else showStatus(ctx);
+          }
+          return;
+        case 'profile':
+          if (rest.length !== 1) usage(ctx, '/router profile <name>');
+          else await handleProfile(rest[0] ?? '', ctx);
+          return;
         case 'pin':
           handlePin(rest, ctx);
           return;
@@ -472,7 +454,10 @@ export const registerCommands = (
           break;
       }
       if (Object.hasOwn(state.currentConfig.profiles, verb)) {
-        if (noArgs(`/router ${verb}`)) await handleProfile(verb, ctx);
+        ctx.ui.notify(
+          `Use /router profile ${verb} to select this profile.`,
+          'error',
+        );
         return;
       }
       const replacement = Object.hasOwn(RETIRED_VERBS, verb)

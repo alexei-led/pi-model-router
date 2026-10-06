@@ -26,83 +26,103 @@ This example uses illustrative model references. Replace them with models and ef
 ```
 
 5. Run `/router reload`.
-6. Run `/router auto`.
+6. Run `/router profile auto`.
 7. Send a short request, such as `Reply with ready.`
 8. Run `/router` to inspect the result.
 
-With this profile and no active advisor or pin, the compact footer has this form:
+With this profile and no active advisor or pin, the completed route has this
+illustrative two-line strip:
 
 ```text
-🚥 auto · high → gpt-6-astra/high · local baseline
+gpt-6-astra · high · effort high · last
+Local eligible baseline · auto
 ```
 
-The high route is the configured default, called the baseline. Prompt words do not select a cheaper local route.
-If no route appears, use the [problem table](#common-problems).
+The baseline is the configured default, not a tier inferred from prompt words.
 
 ## Understand the result
 
-| Footer field | Meaning |
+| Field | Meaning |
 | --- | --- |
-| `auto` | The selected profile name. It stays selected across model changes. |
-| `high` | The tier used for this request. |
-| `gpt-6-astra/high` | The model and reasoning effort selected for generation. |
-| `local baseline` | No advisor selected the route. |
-| `🧭 Jev → low c91% · 807ms` | Jev selected low with 91% confidence in this illustrative example. The advisor took 807 ms. |
-| `reuse` | The router reused advice. The displayed advisor metrics belong to the original request. |
-| `[fallback]` | Generation used an explicit alternative model. |
+| Model ID | The actual generation target, not just the advisor's choice. |
+| Tier / effort | The configured tier and reasoning effort that ran. Narrow strips omit secondary fields first. |
+| `last` | The last completed route, not a currently running request. |
+| Advisor name | Jev, Clef, Clef Flash or Pi classifier. Naming follows the observed advisor. |
+| `Tool route reused` | No new advisor request. Prior latency is not presented as a new request. |
+| `timed out → baseline` | Advice failed but an eligible generation baseline ran. |
+| `Explicit generation fallback` | Another configured generation target ran, possibly in the same tier. |
+| `Next user turn` | Applied controls waiting for a user turn; actual generation is unchanged. |
 
-Confidence is not the probability of a correct answer.
-`/router` shows more detail. The [Jev guide](jev-advisor.md#diagnostics) explains probability selection, abstention, and advisor errors.
+The strip uses two lines. Hide it with `/router widget` to use one compact footer
+status instead. The router never replaces Pi's footer or repeats its own route
+in both places. Warning colors mark recovered problems and budget policy;
+generation failure uses the error color. Colors always have text labels.
 
 ## Native inspector
 
-Run `/router-ui`, or open a section directly:
-`/router-ui now`, `routing`, `classifier`, or `usage`.
+Run **`/router`**, **`/router usage`** or **`/router settings`**.
 
-- **Now:** current lifecycle, actual generation versus advice, pending settings and recent decisions.
-- **Routing:** profile pin, baseline, soft generation budget and per-tier effort overrides.
-- **Classifier:** Jev, Clef or Clef Flash selection, deadline and read-only authorization facts.
-- **Usage:** at most 50 retained decisions, with explicit cost and request coverage.
+- **Now:** actual model and effort, routing explanation, recorded-cost budget
+  gauge and route-mix bars. Expand **Why this route?** for full model identities.
+- **Usage:** up to 50 retained decisions, unique advisor requests and cost
+  coverage. Bars show observed tiers, not answer quality.
+- **Settings:** pin first. **Advanced** exposes baseline, budget, per-tier effort
+  and Jev / Clef / Clef Flash selection with its deadline and read-only consent.
+  The separate Pi classifier path is shown when configured.
 
-Use Left/Right on the tab row to switch sections. Tab/Shift+Tab moves focus.
-On a selector, Left/Right or Enter changes its value. Numeric fields use normal
-text editing. Page Up/Down scrolls. Focus Apply, Discard, Undo or Done and press
-Enter. Escape closes the inspector and returns input to Pi.
+Use Left/Right on the tab row to change sections. Tab/Shift+Tab changes focus.
+On a selector, Left/Right or Enter changes the value. Numeric fields use normal
+text editing. Page Up/Down scrolls. Enter activates the focused action.
+Apply/Discard appear only with a changed draft. Undo appears after applying.
+Escape closes the inspector and discards unapplied edits.
 
-The inspector is a right-side overlay at 100 columns or wider. It covers,
-rather than reflows, the transcript. Narrow terminals use a custom screen.
-Resizing preserves the draft. Mouse input is not required. RPC and print modes
-receive text instead of terminal components. Print mode writes diagnostics to stderr
-(`pi --print '/router-ui usage' 2>&1`); JSON emits a `router-inspector` custom
-message without starting inference. RPC uses the notification channel.
+The inspector is a content-sized right overlay at 100 columns or wider. It
+covers rather than reflows the transcript. Narrow terminals use a custom
+screen. Resizing preserves the draft, section and expanded details; focus
+returns to the section row. Mouse input is not required.
 
-![Classifier settings and a pending session draft in actual Pi](assets/router-ui/router-classifier-draft.png)
+Outside TUI, the same commands return text without inference. Print writes to
+stderr (`pi --print '/router usage' 2>&1`). JSON emits a `router-inspector`
+message; RPC uses notifications. `/router status` always returns short text
+(JSON: `router-status`).
 
-Edits share one draft across tabs. **Apply queues changed fields for the next
-user turn**, not the next tool request. It never changes the displayed actual
-route retroactively. Discard affects only the draft. Undo reverses only
-unchanged editor-owned fields; conflicting external edits are rejected.
+![Signal Panel in actual Pi, dark theme](assets/router-ui/signal-now-dark.png)
 
-Pin, effort and baseline are profile-scoped and activate on that profile's next
-user turn. Advisor selection, deadline and budget are session-wide and activate
-on the next user turn even if you switch profiles. Nothing is written to a config file.
-Activated pins/effort use existing branch-safe session persistence.
-Pending edits and baseline/advisor/deadline/budget overrides reset on config
-reload, session replacement or restart. Use the user configuration for durable settings.
+**Apply queues changed fields for the next user turn**, not the next tool
+request. It does not change the displayed actual route. Discard affects only
+the draft. Undo reverses only unchanged editor-owned fields. Conflicting edits
+are rejected rather than overwritten.
+
+Pin, effort and baseline are profile-scoped. Advisor, deadline and budget are
+session-wide and activate on the next user turn even after a profile switch.
+No configuration files are written. Activated pins/effort use branch-safe
+session persistence. Pending edits and baseline/advisor/deadline/budget
+overrides reset on reload, session replacement or restart. Use configuration
+for durable settings.
+
+![Queued controls in actual Pi](assets/router-ui/signal-settings-dark.png)
 
 Credentials and privacy consent are read-only. Selecting Clef does not authorize
 sending context to Cloudflare. See [Cloudflare advisors](cloudflare-advisor.md).
+The Pi chat classifier remains a separate configured path when external advice
+is inactive, never a second advisor after failed external advice.
 
-![Retained-history statistics in the light theme](assets/router-ui/router-usage-light.png)
+![Retained usage in actual Pi, light theme](assets/router-ui/signal-usage-light.png)
 
-Usage is **not lifetime accounting**. Run `/router log on` to collect decisions;
-turning it off stops collection, and clearing it clears this view's source.
-Advice is deduplicated by local request ID. HTTP attempts, generation attempts
-and route reuses are different counts. Missing cost remains unknown. Host totals
-overlap these observations and must not be added to them.
+Usage is **not lifetime accounting**. `/router log on` starts collection;
+turning it off preserves existing history, and clearing it clears this view.
+Advice is deduplicated by local request ID. Pi chat-classifier observations
+without those IDs are excluded from HTTP-request totals. Attempts and reuses
+are separate counts. Missing costs are unknown, not zero. Do not add these
+observations to overlapping host totals.
 
-The images are actual Pi/agterm captures with deterministic synthetic data,
-not the HTML prototype or live cost measurements.
+The session gauge uses **recorded catalog cost**, not an invoice or precise
+remaining allowance. Missing reports can leave it partial. The fill stops at
+100%, while the percentage can exceed 100%. No budget means no percentage.
+Advisor charges are excluded; the budget is not a hard cap.
+
+These images are real Pi/agterm captures using synthetic local fixtures,
+not the HTML prototype. See [validation evidence](testing/signal-panel-acceptance.md).
 
 ## Try Jev next
 
@@ -167,8 +187,11 @@ Use `/router thinking auto` to clear the override.
 
 | Command | Action |
 | --- | --- |
-| `/router` | Show the current profile, route, costs, and diagnostics. |
-| `/router <profile>` | Select a profile and enable the router. |
+| `/router` | Open Now, or return text outside TUI. |
+| `/router usage` | Inspect retained decisions and known costs. |
+| `/router settings` | Inspect and edit session controls in TUI. |
+| `/router status` | Return short text status. |
+| `/router profile <name>` | Select a profile and enable the router. |
 | `/router off` | Restore the previous non-router model. |
 | `/router pin <tier\|auto>` | Pin a tier or return to automatic selection. |
 | `/router thinking <level\|auto>` | Override effort for the profile or clear the override. |
@@ -176,10 +199,10 @@ Use `/router thinking auto` to clear the override.
 | `/router widget` | Toggle the status widget. |
 | `/router reload` | Load the configuration again. |
 | `/router help` | Show command help. |
-| `/router-ui [now\|routing\|classifier\|usage]` | Open the native inspector, or return text outside TUI. |
 
 Per-tier effort can be set in the profile configuration or as a session override in the inspector.
-Removed commands such as `status`, `profile`, `fix`, and `debug` show their replacements unless a configured profile has that name.
+The old bare profile shorthand returns a migration hint without switching. Use
+explicit `profile <name>`, including profiles whose names match commands.
 
 ## Configuration reference
 
@@ -192,7 +215,8 @@ Removed commands such as `status`, `profile`, `fix`, and `debug` show their repl
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
 
 A profile needs at least one tier. A partial profile is valid.
-Profile names must be nonempty, contain no whitespace, and not match an active command: `pin`, `thinking`, `log`, `widget`, `off`, `reload`, or `help`. Invalid names are ignored with a warning; rename these profiles before reloading.
+Profile names must be nonempty, contain no whitespace and not be `__proto__`.
+Command names such as `usage` are valid profiles: use `/router profile usage`.
 The router filters unavailable models and unsupported input before selection. An unsupported effort runs at the nearest supported level.
 `baselineTier` prefers a configured tier. Without it, the preference is `medium`, `high`, `low`, then `micro`.
 The [complete example](../model-router.example.json) shows aliases, all four tiers, and explicit fallbacks.
@@ -204,7 +228,7 @@ The [complete example](../model-router.example.json) shows aliases, all four tie
 | `advisor` | User-only `jev` (default), `clef`, or `clef-flash`. See [Cloudflare advisors](cloudflare-advisor.md). |
 | `cloudflare` | User-only Cloudflare enablement and bounded tuning; per-profile approval is separate. |
 | `models` | Aliases with a `model` reference and optional `contextWindow` and `maxTokens`. |
-| `ui.statusLine` | `compact` by default. `detailed` adds advisor probability, request time, and cache counters. |
+| `ui.statusLine` | `compact` by default. `detailed` adds the full provider/model reference and recorded catalog cost, still within two widget lines. |
 
 Budgets and model capacities must be positive, finite numbers. Invalid values are ignored with a warning.
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
@@ -214,7 +238,7 @@ User or project configuration can set `classifierModel`. It sends bounded recent
 
 ## Read costs and cache data
 
-After a terminal response, detailed status and the log expose:
+After a terminal response, `/router log` exposes:
 
 - Input, output, cache-read, and cache-write tokens for the last terminal attempt.
 - The model transition and the total attempt count.
@@ -242,6 +266,21 @@ A restored router snapshot does not restore a server cache.
 
 ## Migration
 
+### From 0.10.x to 0.11.0
+
+1. After upgrading, restart Pi. Replace `/router-ui` and `/router-ui now` with
+   `/router`; use `/router usage` for usage and `/router settings` for both old
+   Routing and Classifier sections. The removed command no longer opens a UI.
+2. Replace `/router auto` (or another bare profile) with `/router profile auto`.
+   Old shorthand gives a migration hint instead of switching. Command-named
+   profiles stay accessible through the explicit profile argument.
+3. Use `/router status` for the short text summary. New sessions show the strip
+   by default; restored sessions retain their widget preference. Use
+   `/router widget` for a quiet footer instead. Detailed status stays at two
+   lines; cache/probability diagnostics remain in `/router log`.
+
+Routing policy, advisor configuration and privacy consent are unchanged.
+
 ### From 0.9.x to 0.10.0
 
 Jev authentication has moved to Pi. Before upgrading, run `/login typesafe` or
@@ -250,7 +289,8 @@ and follow the [Jev field migration](jev-advisor.md#migrate-the-old-router-field
 Without a Pi credential, enabled Jev falls back to baseline, not the chat classifier.
 A custom legacy endpoint stays disabled until explicitly migrated.
 
-The native inspector is `/router-ui`; existing `/router` commands remain.
+Version 0.10.0 introduced `/router-ui`; use the 0.11.0 command mapping above
+when upgrading to the current release.
 Cloudflare is opt-in and does not inherit Jev approval.
 
 

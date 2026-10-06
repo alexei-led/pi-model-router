@@ -151,18 +151,7 @@ vi.mock('node:fs', () => ({
 }));
 
 describe('config.ts', () => {
-  it.each([
-    'help',
-    'off',
-    'pin',
-    'thinking',
-    'log',
-    'widget',
-    'reload',
-    '',
-    'two words',
-    ' leading',
-  ])(
+  it.each(['', 'two words', ' leading'])(
     'rejects profile names that cannot be selected by the command: %j',
     (name) => {
       const { config, warnings } = normalizeConfig({
@@ -173,13 +162,30 @@ describe('config.ts', () => {
       });
       expect(Object.keys(config.profiles)).toEqual(['valid']);
       expect(warnings).toContain(
-        'Ignored router profile with an invalid or reserved name.',
+        'Ignored router profile with an invalid name.',
       );
     },
   );
 
-  it.each(['status', 'profile', 'disable', 'fix', 'debug', '?', 'constructor'])(
-    'preserves selectable profile names even when they match retired verbs: %s',
+  it.each([
+    'status',
+    'profile',
+    'usage',
+    'settings',
+    'help',
+    'off',
+    'pin',
+    'thinking',
+    'log',
+    'widget',
+    'reload',
+    'disable',
+    'fix',
+    'debug',
+    '?',
+    'constructor',
+  ])(
+    'preserves explicit profile names even when they match command verbs: %s',
     (name) => {
       const { config, warnings } = normalizeConfig({
         profiles: { [name]: { medium: { model: 'test/primary' } } },

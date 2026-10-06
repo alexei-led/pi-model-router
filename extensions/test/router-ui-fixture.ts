@@ -1,5 +1,10 @@
 import {
   type AssistantMessage,
+  type ClassifierApi,
+  type ClassifierContext,
+  type ClassifierModel,
+  type ClassifierOptions,
+  type ClassifierResult,
   createAssistantMessageEventStream,
 } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
@@ -48,15 +53,17 @@ export default (pi: ExtensionAPI) => {
     api: 'router-fixture-api',
     apiKey: 'local-fixture-no-network',
     baseUrl: 'fixture://local',
-    models: ['micro', 'low', 'medium', 'high', 'fallback'].map((id) => ({
-      id,
-      name: `Fixture ${id}`,
-      reasoning: true,
-      input: ['text'],
-      contextWindow: 128000,
-      maxTokens: 1024,
-      cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 },
-    })),
+    models: ['micro', 'low', 'medium', 'high', 'fallback', 'classifier'].map(
+      (id) => ({
+        id,
+        name: `Fixture ${id}`,
+        reasoning: true,
+        input: ['text'],
+        contextWindow: 128000,
+        maxTokens: 1024,
+        cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 },
+      }),
+    ),
     streamSimple: (model, context, options) => {
       const stream = createAssistantMessageEventStream();
       const usage = {
@@ -123,11 +130,9 @@ export default (pi: ExtensionAPI) => {
           return;
         }
         const text =
-          'Local fixture complete. Route: ' +
-          model.provider +
-          '/' +
-          model.id +
-          '. No external inference was used.';
+          model.id === 'classifier'
+            ? 'Tier: medium\nReasoning: Local semantic classifier fixture.'
+            : `Local fixture complete. Route: ${model.provider}/${model.id}. No external inference was used.`;
         message.content = [{ type: 'text', text }];
         stream.push({ type: 'start', partial: message });
         stream.push({ type: 'text_start', contentIndex: 0, partial: message });
@@ -161,57 +166,65 @@ export default (pi: ExtensionAPI) => {
       return stream;
     },
   });
-  pi.registerProvider('cloudflare-workers-ai', {
-    apiKey: 'local-fixture-no-network',
-    models: ['clef', 'clef-flash'].map((id) => ({
-      type: 'classifier',
-      id: `@cf/cloudflare/${id}`,
-      name: `Fixture ${id}`,
-      api: 'cloudflare-workers-ai-system-one',
-      baseUrl: 'https://fixture.invalid/ai',
-      input: ['text'],
-      contextWindow: 65536,
-      cost: { input: 0.24, output: 0, cacheRead: 0, cacheWrite: 0 },
-    })),
-    classifiers: {
-      'cloudflare-workers-ai-system-one': {
-        classify: async (model, context, options) => {
-          if (scenario === 'advisor-timeout')
-            await new Promise<void>((resolve) => {
-              if (options?.signal?.aborted) resolve();
-              else
-                options?.signal?.addEventListener('abort', () => resolve(), {
-                  once: true,
-                });
-            });
-          const question = context.questions.route;
-          const keys =
-            question?.type === 'choice' ? Object.keys(question.criteria) : [];
-          const choice =
-            keys.find((key) => key.startsWith('medium|')) ??
-            keys[0] ??
-            'uncertain';
-          return {
-            api: model.api,
-            provider: model.provider,
-            model: model.id,
-            timestamp: Date.now(),
-            stopReason: options?.signal?.aborted ? 'aborted' : 'stop',
-            answers: {
-              route: {
-                type: 'choice',
-                choice: scenario === 'advisor-invalid' ? 'foreign' : choice,
-                confidence: 1,
-                probabilities: Object.fromEntries(
-                  keys.map((key) => [key, key === choice ? 1 : 0]),
-                ),
-              },
-            },
-          };
+  const classifyFixture = async (
+    model: ClassifierModel<ClassifierApi>,
+    context: ClassifierContext,
+    options?: ClassifierOptions,
+  ): Promise<ClassifierResult> => {
+    if (scenario === 'advisor-timeout')
+      await new Promise<void>((resolve) => {
+        if (options?.signal?.aborted) resolve();
+        else
+          options?.signal?.addEventListener('abort', () => resolve(), {
+            once: true,
+          });
+      });
+    const question = context.questions.route;
+    const keys =
+      question?.type === 'choice' ? Object.keys(question.criteria) : [];
+    const choice =
+      keys.find((key) => key.startsWith('medium|')) ?? keys[0] ?? 'uncertain';
+    return {
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      timestamp: Date.now(),
+      stopReason: options?.signal?.aborted ? 'aborted' : 'stop',
+      answers: {
+        route: {
+          type: 'choice',
+          choice: scenario === 'advisor-invalid' ? 'foreign' : choice,
+          confidence: 1,
+          probabilities: Object.fromEntries(
+            keys.map((key) => [key, key === choice ? 1 : 0]),
+          ),
         },
       },
-    },
-  });
+    };
+  };
+  for (const [provider, api, ids] of [
+    [
+      'cloudflare-workers-ai',
+      'cloudflare-workers-ai-system-one',
+      ['@cf/cloudflare/clef', '@cf/cloudflare/clef-flash'],
+    ],
+    ['typesafe', 'typesafe-system-one', ['jev-latest', 'jev-1.13.0']],
+  ] as const) {
+    pi.registerProvider(provider, {
+      apiKey: 'local-fixture-no-network',
+      models: ids.map((id) => ({
+        type: 'classifier',
+        id,
+        name: `Fixture ${id}`,
+        api,
+        baseUrl: 'https://fixture.invalid/ai',
+        input: ['text'],
+        contextWindow: 65536,
+        cost: { input: 0.24, output: 0, cacheRead: 0, cacheWrite: 0 },
+      })),
+      classifiers: { [api]: { classify: classifyFixture } },
+    });
+  }
   pi.registerCommand('router-demo-check', {
     description: 'Check the local classifier registration, without network',
     handler: async (_args, ctx) => {
@@ -235,6 +248,17 @@ export default (pi: ExtensionAPI) => {
         },
       });
       ctx.ui.notify(JSON.stringify(result), 'info');
+    },
+  });
+  pi.registerCommand('router-demo-theme', {
+    description: 'Switch the fixture between Pi dark and light themes',
+    handler: async (args, ctx) => {
+      if (args !== 'dark' && args !== 'light') return;
+      const result = ctx.ui.setTheme(args);
+      ctx.ui.notify(
+        result.success ? `Fixture theme: ${args}` : 'Theme switch failed',
+        result.success ? 'info' : 'error',
+      );
     },
   });
   pi.registerCommand('router-demo-size', {

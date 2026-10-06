@@ -92,6 +92,7 @@ describe('index.ts (orchestrator)', () => {
   });
 
   const buildMockCtx = () => ({
+    mode: 'tui',
     cwd: '/mock/cwd',
     modelRegistry: {
       ...nativeJevRegistry(),
@@ -120,7 +121,7 @@ describe('index.ts (orchestrator)', () => {
       ([name]) => name === 'router',
     )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1] | undefined;
     if (!command) throw new Error('Missing router command');
-    for (const args of ['', 'log'])
+    for (const args of ['status', 'log'])
       await command.handler(args, ctx as unknown as ExtensionCommandContext);
     expect(ctx.ui.notify).toHaveBeenCalled();
   };
@@ -139,7 +140,7 @@ describe('index.ts (orchestrator)', () => {
         mode: 'advisory',
       },
     };
-    const status = vi.spyOn(ui, 'updateStatus');
+    const status = vi.spyOn(ui, 'updateRouterUIStrip');
     try {
       routerExtension(mockPi);
       const ctx = buildMockCtx();
@@ -147,7 +148,7 @@ describe('index.ts (orchestrator)', () => {
         await handler({}, ctx);
       expect(status).toHaveBeenCalled();
       for (const [, projection] of status.mock.calls) {
-        expect(projection).toHaveProperty('maxSessionBudget');
+        expect(projection).toHaveProperty('controls.budget');
         expect(projection).not.toHaveProperty('currentConfig');
         expect(JSON.stringify(projection)).not.toContain(
           'private-key-sentinel',

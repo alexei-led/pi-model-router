@@ -12,10 +12,18 @@ import type {
   RouterUIControlChange,
   RouterUIControls,
   RouterUIHistoryEntry,
-  RouterUIRoute,
   RouterUISnapshot,
+  RouterUIView,
 } from '../types';
 import { ROUTER_TIERS } from '../types';
+import {
+  advisorName,
+  budgetLines,
+  formatRoute as route,
+  routeMix,
+  routeReason,
+  routerTone,
+} from './presentation';
 
 const keys = [
   'pin',
@@ -28,11 +36,18 @@ const keys = [
   'thinkingLow',
   'thinkingMicro',
 ] as const;
-const tabs = ['Now', 'Routing', 'Classifier', 'Usage'] as const;
-const route = (value: RouterUIRoute | undefined): string =>
-  value
-    ? `${value.tier} → ${value.provider}/${value.model} · ${value.thinking}`
-    : 'unknown / no observed generation';
+const tabs = ['Now', 'Usage', 'Settings'] as const;
+const fieldNames: Record<keyof RouterUIControls, string> = {
+  pin: 'Pin tier',
+  baseline: 'Baseline',
+  budget: 'Soft budget ($)',
+  advisor: 'Advisor',
+  timeout: 'Advisor deadline (ms)',
+  thinkingHigh: 'High effort',
+  thinkingMedium: 'Medium effort',
+  thinkingLow: 'Low effort',
+  thinkingMicro: 'Micro effort',
+};
 const display = (value: unknown): string =>
   value === undefined ? 'default / unknown' : String(value);
 const money = (value: number | undefined): string =>
@@ -104,65 +119,58 @@ export const formatRouterUIUsage = (
       2
     : undefined;
   return [
-    `Retained active-branch history: ${retained.length} decisions (at most 50), not session lifetime.`,
-    `Known generation cost: ${costs.length ? money(costs.reduce((sum, cost) => sum + cost, 0)) : 'unknown'} · coverage ${costs.length}/${retained.length} (partial/catalog, not invoice).`,
-    `Generation attempts: ${generationAttempts.length ? generationAttempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${generationAttempts.length}/${retained.length} decisions.`,
-    `Unique advice requests: ${samples.length} · local request-ID dedupe.`,
-    `HTTP attempts: ${attempts.length ? attempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${attempts.length}/${samples.length} requests.`,
-    `Advice accepted: ${samples.filter((entry) => entry.outcome === 'selected').length}/${samples.length} requests · deadline: ${samples.filter((entry) => entry.outcome === 'deadline').length} · abstained: ${samples.filter((entry) => entry.outcome === 'uncertain').length}.`,
-    `Median advisory latency: ${median === undefined ? 'unknown' : `${Math.round(median)} ms`} · samples ${latencies.length}/${samples.length}.`,
-    `Route reuses: ${retained.filter((entry) => entry.reuse !== undefined).length} (not new requests).`,
-    `Advice without local IDs: ${retained.filter((entry) => entry.advice && !entry.advice.requestId).length} excluded from request totals.`,
-    `Advisor known cost: ${advisorCosts.length ? money(advisorCosts.reduce((sum, cost) => sum + cost, 0)) : 'unknown (not free)'} · coverage ${advisorCosts.length}/${samples.length}. Excluded from generation budget.`,
-    ...ROUTER_TIERS.map(
-      (tier) =>
-        `${tier}: ${retained.filter((entry) => entry.actual?.tier === tier).length} observed actual routes`,
-    ),
-    `Unknown actual route: ${retained.filter((entry) => !entry.actual).length}`,
-    'Host totals overlap these observations: never add them together. No savings estimate.',
+    `Retained active-branch history: ${retained.length} decisions`,
+    'At most 50; not session lifetime.',
+    '',
+    `Known generation cost: ${costs.length ? money(costs.reduce((sum, cost) => sum + cost, 0)) : 'unknown'} · coverage ${costs.length}/${retained.length}`,
+    'Catalog only, not an invoice.',
+    `Generation attempts: ${generationAttempts.length ? generationAttempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${generationAttempts.length}/${retained.length}`,
+    '',
+    `Unique advice requests: ${samples.length}`,
+    `HTTP attempts: ${attempts.length ? attempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${attempts.length}/${samples.length}`,
+    `Advice accepted: ${samples.length ? samples.filter((entry) => entry.outcome === 'selected').length + '/' + samples.length : 'unknown'}`,
+    `Timeouts: ${samples.filter((entry) => entry.outcome === 'deadline').length} · abstained: ${samples.filter((entry) => entry.outcome === 'uncertain').length}`,
+    `Median advisory latency: ${median === undefined ? 'unknown' : `${Math.round(median)} ms`} · samples ${latencies.length}/${samples.length}`,
+    `Route reuses: ${retained.filter((entry) => entry.reuse !== undefined).length} (not new requests)`,
+    `Advice without local IDs: ${retained.filter((entry) => entry.advice && !entry.advice.requestId).length} excluded`,
+    '',
+    `Advisor known cost: ${advisorCosts.length ? money(advisorCosts.reduce((sum, cost) => sum + cost, 0)) : 'unknown (not free)'} · coverage ${advisorCosts.length}/${samples.length}`,
+    'Advice excluded from generation budget.',
+    'Host totals overlap. Do not add; no savings estimate.',
   ];
 };
 
 export const formatRouterUISnapshot = (
   snapshot: RouterUISnapshot,
-  tab: 'now' | 'routing' | 'classifier' | 'usage' = 'now',
+  tab: RouterUIView = 'now',
 ): string =>
   [
     `Router / ${snapshot.profile} · ${snapshot.lifecycle}`,
     `Actual: ${route(snapshot.actual)}`,
-    `Advised (not actual): ${route(snapshot.advised)}`,
-    `Next user turn: pin ${snapshot.controls.pin} · baseline ${snapshot.controls.baseline} · ${snapshot.controls.advisor} · ${snapshot.controls.timeout} ms`,
+    routeReason(snapshot),
     ...(snapshot.pendingControls
       ? [
-          `Pending: pin ${snapshot.pendingControls.pin} · ${snapshot.pendingControls.advisor} (actual unchanged)`,
+          `Next user turn: pin ${snapshot.pendingControls.pin} (pending; actual unchanged)`,
         ]
       : []),
     ...(tab === 'usage'
-      ? formatRouterUIUsage(snapshot.history)
-      : tab === 'classifier'
+      ? [
+          ...routeMix(snapshot.history),
+          ...formatRouterUIUsage(snapshot.history),
+        ]
+      : tab === 'settings'
         ? [
-            `Selected advisor: ${snapshot.controls.advisor}`,
-            `Deadline: ${snapshot.controls.timeout} ms`,
+            ...keys.map(
+              (key) =>
+                `${fieldNames[key]}: ${display((snapshot.pendingControls ?? snapshot.controls)[key])}`,
+            ),
+            `Pi classifier: ${snapshot.classifierModel ?? 'not configured'} (used only when external advice is inactive)`,
             `TypeSafe approval: ${display(snapshot.privacy.jevApproved)}`,
             `Cloudflare approval: ${display(snapshot.privacy.cloudflareApproved)}`,
-            `Host auth capability: ${snapshot.privacy.auth}`,
-            'Credentials and consent are read-only. Cloudflare selection does not grant approval.',
-            'Failure → eligible baseline; never a second advisor.',
+            'Credentials and consent are read-only. Selecting an advisor does not grant approval.',
+            'Session edits activate on the next user turn. No configuration file writes.',
           ]
-        : tab === 'routing'
-          ? [
-              ...keys.map(
-                (key) => `${key}: ${display(snapshot.controls[key])}`,
-              ),
-              ...ROUTER_TIERS.map(
-                (tier) => `${tier}: ${route(snapshot.eligible[tier])}`,
-              ),
-              'Session drafts activate on the next user turn. No configuration file writes.',
-            ]
-          : [
-              `Advisor outcome: ${snapshot.advice?.outcome ?? 'not observed'}`,
-              ...(snapshot.failure ? [`Failure: ${snapshot.failure}`] : []),
-            ]),
+        : [...budgetLines(snapshot)]),
     'Terminal inspector requires TUI mode. Use /router help for text-mode commands.',
   ].join('\n');
 
@@ -186,6 +194,7 @@ export class RouterUIDraft {
     this.message = 'Draft discarded. Actual route unchanged.';
   };
   dirty = (): RouterUIControlChange[] => changes(this.base, this.draft);
+  canUndo = (): boolean => this.undoChanges.length > 0;
   apply = async (): Promise<void> => {
     if (this.busy) return;
     const invalid = validateRouterUIControls(this.draft);
@@ -260,6 +269,8 @@ export class RouterUIDraft {
 export class RouterUIInspector implements Component {
   focused = false;
   private tab = 0;
+  advanced = false;
+  details = false;
   private focus = 0;
   private scroll = 0;
   private disposed = false;
@@ -288,8 +299,7 @@ export class RouterUIInspector implements Component {
     adapters.signal?.addEventListener('abort', this.abort, { once: true });
     if (adapters.signal?.aborted) this.close('close');
   }
-  currentTab = () =>
-    (['now', 'routing', 'classifier', 'usage'] as const)[this.tab] ?? 'now';
+  currentTab = () => (['now', 'usage', 'settings'] as const)[this.tab] ?? 'now';
   selectTab = (name: string): void => {
     this.tab = Math.max(
       0,
@@ -320,19 +330,20 @@ export class RouterUIInspector implements Component {
     this.timeoutInput.setValue(String(this.editor.draft.timeout));
   };
   private fields = (): readonly (keyof RouterUIControls)[] =>
-    this.tab === 1
+    this.tab === 2 ? (this.advanced ? keys : ['pin']) : [];
+  private actions = (): string[] => [
+    ...(this.tab === 0 ? ['Why this route?'] : []),
+    ...(this.tab === 2
       ? [
-          'pin',
-          'baseline',
-          'budget',
-          'thinkingHigh',
-          'thinkingMedium',
-          'thinkingLow',
-          'thinkingMicro',
+          this.advanced ? 'Less settings' : 'Advanced',
+          ...(this.editor.dirty().length ? ['Apply', 'Discard'] : []),
+          ...(this.editor.canUndo() && !this.editor.dirty().length
+            ? ['Undo']
+            : []),
         ]
-      : this.tab === 2
-        ? ['advisor', 'timeout']
-        : [];
+      : []),
+    'Done',
+  ];
   private close = (result: 'close' | 'resize'): void => {
     if (this.disposed) return;
     this.dispose();
@@ -358,14 +369,14 @@ export class RouterUIInspector implements Component {
     const fields = this.fields();
     const field = fields[this.focus - 1];
     if (matchesKey(data, 'tab') || matchesKey(data, 'shift+tab')) {
+      const count = fields.length + this.actions().length + 1;
       this.focus =
-        (this.focus + (matchesKey(data, 'tab') ? 1 : fields.length + 4)) %
-        (fields.length + 5);
+        (this.focus + (matchesKey(data, 'tab') ? 1 : count - 1)) % count;
     } else if (
       (matchesKey(data, 'left') || matchesKey(data, 'right')) &&
       this.focus === 0
     ) {
-      this.tab = (this.tab + (matchesKey(data, 'right') ? 1 : 3)) % 4;
+      this.tab = (this.tab + (matchesKey(data, 'right') ? 1 : 2)) % 3;
       this.scroll = 0;
     } else if (
       matchesKey(data, 'pageUp') ||
@@ -408,26 +419,32 @@ export class RouterUIInspector implements Component {
         ];
       Object.assign(this.editor.draft, { [field]: value });
     } else if (matchesKey(data, 'return')) {
-      const action = this.focus - fields.length - 1;
-      if (action === 0)
+      const action = this.actions()[this.focus - fields.length - 1];
+      if (action === 'Why this route?') this.details = !this.details;
+      if (action === 'Advanced' || action === 'Less settings') {
+        this.advanced = !this.advanced;
+        this.focus = this.advanced ? 2 : 1;
+        this.scroll = 0;
+      }
+      if (action === 'Apply')
         void this.editor.apply().then(() => {
           if (!this.disposed) {
             this.syncInputs();
             this.refresh();
           }
         });
-      if (action === 1) {
+      if (action === 'Discard') {
         this.editor.discard();
         this.syncInputs();
       }
-      if (action === 2)
+      if (action === 'Undo')
         void this.editor.undo().then(() => {
           if (!this.disposed) {
             this.syncInputs();
             this.refresh();
           }
         });
-      if (action === 3) {
+      if (action === 'Done') {
         this.close('close');
         return;
       }
@@ -436,59 +453,102 @@ export class RouterUIInspector implements Component {
   };
   private content = (): string[] => {
     const s = this.snapshot;
-    if (this.tab === 0)
+    const muted = (text: string) => this.theme.fg('muted', text);
+    const heading = (text: string) => this.theme.fg('accent', text);
+    if (this.tab === 0) {
+      const actual = s.lifecycle === 'off' ? undefined : s.actual;
+      const differs =
+        s.advised &&
+        (s.advised.model !== actual?.model ||
+          s.advised.provider !== actual?.provider ||
+          s.advised.thinking !== actual?.thinking ||
+          s.advised.tier !== actual?.tier);
       return [
-        `State: ${s.lifecycle} · source: ${s.reason ?? 'pending'}`,
-        ...(s.failure ? [`Failure: ${s.failure}`] : []),
-        `Actual generation: ${route(s.actual)}`,
-        `Advised (not actual): ${route(s.advised)}`,
-        `Advisor: ${s.advice?.advisor ?? 'unknown'} · ${s.advice?.outcome ?? 'not observed'} · ${s.advice?.latencyMs === undefined ? 'latency unknown' : `${Math.round(s.advice.latencyMs)} ms`}`,
-        'Next user turn (actual remains unchanged):',
-        `Pin: ${s.controls.pin} · baseline: ${s.controls.baseline}`,
-        `Advisor: ${s.controls.advisor} · deadline: ${s.controls.timeout} ms`,
-        `Generation budget: ${s.controls.budget === undefined ? 'not configured' : money(s.controls.budget)}`,
-        `Thinking: ${ROUTER_TIERS.map((tier) => `${tier}=${s.controls[({ high: 'thinkingHigh', medium: 'thinkingMedium', low: 'thinkingLow', micro: 'thinkingMicro' } as const)[tier]] ?? 'configured'}`).join(' · ')}`,
+        muted(
+          `${s.lifecycle === 'idle' ? 'Last generation' : 'Actual generation'} · ${s.lifecycle}`,
+        ),
+        heading(actual ? actual.model : 'unknown / no observed generation'),
+        ...(actual ? [`Tier ${actual.tier} · effort ${actual.thinking}`] : []),
+        this.theme.fg(routerTone(s), routeReason(s)),
+        ...(differs ? [`Advised (not actual): ${route(s.advised)}`] : []),
         ...(s.pendingControls
           ? [
-              'Applied pending controls:',
-              ...keys
-                .filter((key) => s.pendingControls?.[key] !== s.controls[key])
-                .map((key) => `${key}: ${display(s.pendingControls?.[key])}`),
+              this.theme.fg(
+                'warning',
+                `Next user turn: ${changes(s.controls, s.pendingControls)
+                  .map(
+                    (change) =>
+                      `${fieldNames[change.key]} ${display(change.after)}`,
+                  )
+                  .join(' · ')} (pending)`,
+              ),
             ]
           : []),
-        'Pins persist until cleared; they are not one-shot.',
-        'Recent retained decisions:',
-        ...s.history
-          .slice(-8)
-          .reverse()
-          .map(
-            (entry) =>
-              `${route(entry.actual)} · ${entry.reuse ? `reuse ${entry.reuse}` : (entry.advice?.outcome ?? 'baseline / unknown')}`,
-          ),
+        '',
+        ...budgetLines(s).map((line, i) =>
+          i === 1
+            ? this.theme.fg(
+                s.controls.budget !== undefined &&
+                  (s.accumulatedCost ?? 0) >= s.controls.budget
+                  ? 'warning'
+                  : 'accent',
+                line,
+              )
+            : muted(line),
+        ),
+        '',
+        muted(
+          `Observed routes · ${Math.min(50, s.history.length)} retained decisions`,
+        ),
+        ...routeMix(s.history),
+        ...(this.details
+          ? [
+              '',
+              `Actual: ${route(actual)}`,
+              `Advised (not actual): ${route(s.advised)}`,
+              `Next pin: ${(s.pendingControls ?? s.controls).pin}`,
+              'Advice is not generation. Tier is not a quality score.',
+            ]
+          : []),
       ];
+    }
     if (this.tab === 1)
       return [
-        'Pin/thinking/baseline are profile-scoped. Advisor/budget are session-wide. No file writes.',
-        'Soft generation budget excludes advisor costs; not a spending cap.',
-        'Text-capable routes (generation rechecks input/context):',
-        ...ROUTER_TIERS.map(
-          (tier) =>
-            `${tier}: ${s.eligible[tier] ? route(s.eligible[tier]) : 'not eligible / unknown'}`,
-        ),
+        heading('Observed routes · retained active branch'),
+        ...routeMix(s.history),
+        '',
+        ...this.usage,
       ];
-    if (this.tab === 2)
-      return [
-        'Jev: TypeSafe / user-configured model pin',
-        'Clef: cloudflare-workers-ai/@cf/cloudflare/clef',
-        'Clef Flash: cloudflare-workers-ai/@cf/cloudflare/clef-flash',
-        `TypeSafe profile approval: ${display(s.privacy.jevApproved)}`,
-        `Cloudflare profile approval: ${display(s.privacy.cloudflareApproved)}`,
-        `Host auth capability: ${s.privacy.auth} (not backend-login attestation)`,
-        'Selecting Cloudflare does not consent. Credentials and approval are read-only.',
-        'Bounded recent dialogue/tool output can contain private data. Filtering is not redaction.',
-        'Failure → eligible baseline; never a second advisor.',
-      ];
-    return this.usage;
+    return [
+      muted('Pin / effort / baseline: this profile.'),
+      muted('Advisor / deadline / budget: session-wide.'),
+      muted('Apply queues the next user turn; not tool turns.'),
+      ...(this.advanced
+        ? [
+            '',
+            heading('Text-capable routes (generation rechecks fit)'),
+            ...(['micro', 'low', 'medium', 'high'] as const).map(
+              (tier) =>
+                `${tier}: ${s.eligible[tier] ? route(s.eligible[tier]) : 'not eligible / unknown'}`,
+            ),
+            '',
+            heading('Advisor authorization · read-only'),
+            `Jev approval: ${display(s.privacy.jevApproved)}`,
+            `Cloudflare approval: ${display(s.privacy.cloudflareApproved)}`,
+            `Pi classifier: ${s.classifierModel ?? 'not configured'}`,
+            'Pi classifier is used only when external advice is inactive.',
+            'Selecting an advisor does not grant consent.',
+            'Recent text can contain private data. Filtering is not redaction.',
+            'Advisor failure → baseline, never a second advisor.',
+            'Soft budget excludes advice; not a spending cap.',
+            'Session overrides only. No config file writes.',
+          ]
+        : [
+            muted(
+              'Pins persist until cleared. Advanced: advisor, budget, effort.',
+            ),
+          ]),
+    ];
   };
   render = (width: number): string[] => {
     if (this.tui.terminal.columns >= 100 !== this.wide) {
@@ -498,15 +558,16 @@ export class RouterUIInspector implements Component {
     const w = Math.max(1, width - (framed ? 4 : 0));
     // A non-overlay custom component replaces the editor, not Pi's footer/widgets.
     const chromeRows = this.wide ? 2 : 8;
-    const height = Math.max(
+    let height = Math.max(
       1,
       this.tui.terminal.rows - chromeRows - (framed ? 2 : 0),
     );
     const fields = this.fields();
+    this.focus = Math.min(this.focus, fields.length + this.actions().length);
     const color = (selected: boolean, text: string): string =>
       this.theme.fg(selected ? 'accent' : 'muted', text);
     const header = [
-      this.theme.fg('accent', `Router inspector / ${this.snapshot.profile}`),
+      this.theme.fg('accent', `Router / ${this.snapshot.profile}`),
       tabs
         .map((tab, i) =>
           color(
@@ -522,8 +583,16 @@ export class RouterUIInspector implements Component {
         ? 'Draft pending · next user turn'
         : this.editor.message || 'Browse only · no changes');
     const footer = [
-      this.theme.fg('warning', this.editor.busy ? 'Applying…' : status),
-      ['Apply', 'Discard', 'Undo', 'Done']
+      ...(this.tab === 2 &&
+      (this.editor.dirty().length || this.editor.message || this.editor.busy)
+        ? [
+            this.theme.fg(
+              this.editor.dirty().length ? 'warning' : 'muted',
+              this.editor.busy ? 'Applying…' : status,
+            ),
+          ]
+        : []),
+      this.actions()
         .map((action, i) =>
           color(
             this.focus === fields.length + i + 1,
@@ -549,13 +618,13 @@ export class RouterUIInspector implements Component {
       if ((field === 'budget' || field === 'timeout') && selected) {
         const input = field === 'budget' ? this.budgetInput : this.timeoutInput;
         input.focused = this.focused;
-        body.push(color(true, `›${field}:`), ...input.render(w));
+        body.push(color(true, `›${fieldNames[field]}:`), ...input.render(w));
       } else {
         body.push(
           ...wrapTextWithAnsi(
             color(
               selected,
-              `${selected ? '›' : ' '}${field}: ${display(this.editor.draft[field])}`,
+              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor) : display(this.editor.draft[field])}`,
             ),
             w,
           ),
@@ -569,12 +638,20 @@ export class RouterUIInspector implements Component {
     body.push(...this.content().flatMap((line) => wrapTextWithAnsi(line, w)));
     if (height < 7) {
       header.splice(0, header.length);
+      const action = this.actions()[this.focus - fields.length - 1];
       footer.splice(
         0,
         footer.length,
-        this.theme.fg('dim', 'Tab focus · Esc close'),
+        this.theme.fg(
+          action ? 'accent' : 'muted',
+          action
+            ? `›${action} · Enter · Tab · Esc`
+            : `Tab: ${this.actions().join('/')} · Esc`,
+        ),
       );
     }
+    if (this.wide && height >= 7)
+      height = Math.min(height, header.length + body.length + footer.length);
     const bodyHeight = Math.max(1, height - header.length - footer.length);
     this.scroll = Math.min(this.scroll, Math.max(0, body.length - bodyHeight));
     // Keep focused controls visible without resetting manually scrolled read-only content.
@@ -611,13 +688,15 @@ export class RouterUIInspector implements Component {
 export const openRouterInspector = async (
   ctx: ExtensionContext,
   adapters: RouterUIAdapters,
-  initialTab: 'now' | 'routing' | 'classifier' | 'usage' = 'now',
+  initialTab: RouterUIView = 'now',
 ): Promise<string | undefined> => {
   if (ctx.mode !== 'tui')
     return formatRouterUISnapshot(adapters.getSnapshot(), initialTab);
   const editor = new RouterUIDraft(adapters);
   let terminal: TUI['terminal'] | undefined;
   let repeat = true;
+  let advanced = false;
+  let details = false;
   while (repeat && !adapters.signal?.aborted) {
     let component: RouterUIInspector | undefined;
     const wide = (terminal?.columns ?? process.stdout.columns ?? 80) >= 100;
@@ -635,6 +714,8 @@ export const openRouterInspector = async (
             (data) => keybindings.matches(data, 'app.interrupt'),
           );
           component.selectTab(initialTab);
+          component.advanced = advanced;
+          component.details = details;
           return component;
         },
         {
@@ -650,6 +731,8 @@ export const openRouterInspector = async (
       );
       repeat = result === 'resize';
       initialTab = component?.currentTab() ?? initialTab;
+      advanced = component?.advanced ?? advanced;
+      details = component?.details ?? details;
     } finally {
       component?.dispose();
     }

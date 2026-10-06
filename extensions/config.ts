@@ -12,7 +12,6 @@ import {
   MAX_JEV_BACKOFF_MS,
   MAX_JEV_CONTEXT_TURNS,
   MAX_JEV_STATE_TOKENS,
-  ROUTER_COMMANDS,
 } from './constants';
 import type {
   ClassifierConfig,
@@ -647,12 +646,8 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     isObjectRecord(raw.profiles) ? raw.profiles : {},
   )) {
     if (name === '__proto__') continue;
-    if (
-      !name ||
-      /\s/.test(name) ||
-      ROUTER_COMMANDS.some((command) => command.name === name)
-    ) {
-      warnings.push('Ignored router profile with an invalid or reserved name.');
+    if (!name || /\s/.test(name)) {
+      warnings.push('Ignored router profile with an invalid name.');
       continue;
     }
     const profileRecord = isObjectRecord(profile) ? profile : {};
