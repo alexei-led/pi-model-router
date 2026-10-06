@@ -54,6 +54,56 @@ If no route appears, use the [problem table](#common-problems).
 Confidence is not the probability of a correct answer.
 `/router` shows more detail. The [Jev guide](jev-advisor.md#diagnostics) explains probability selection, abstention, and advisor errors.
 
+## Native inspector
+
+Run `/router-ui`, or open a section directly:
+`/router-ui now`, `routing`, `classifier`, or `usage`.
+
+- **Now:** current lifecycle, actual generation versus advice, pending settings and recent decisions.
+- **Routing:** profile pin, baseline, soft generation budget and per-tier effort overrides.
+- **Classifier:** Jev, Clef or Clef Flash selection, deadline and read-only authorization facts.
+- **Usage:** at most 50 retained decisions, with explicit cost and request coverage.
+
+Use Left/Right on the tab row to switch sections. Tab/Shift+Tab moves focus.
+On a selector, Left/Right or Enter changes its value. Numeric fields use normal
+text editing. Page Up/Down scrolls. Focus Apply, Discard, Undo or Done and press
+Enter. Escape closes the inspector and returns input to Pi.
+
+The inspector is a right-side overlay at 100 columns or wider. It covers,
+rather than reflows, the transcript. Narrow terminals use a custom screen.
+Resizing preserves the draft. Mouse input is not required. RPC and print modes
+receive text instead of terminal components. Print mode writes diagnostics to stderr
+(`pi --print '/router-ui usage' 2>&1`); JSON emits a `router-inspector` custom
+message without starting inference. RPC uses the notification channel.
+
+![Classifier settings and a pending session draft in actual Pi](assets/router-ui/router-classifier-draft.png)
+
+Edits share one draft across tabs. **Apply queues changed fields for the next
+user turn**, not the next tool request. It never changes the displayed actual
+route retroactively. Discard affects only the draft. Undo reverses only
+unchanged editor-owned fields; conflicting external edits are rejected.
+
+Pin, effort and baseline are profile-scoped and activate on that profile's next
+user turn. Advisor selection, deadline and budget are session-wide and activate
+on the next user turn even if you switch profiles. Nothing is written to a config file.
+Activated pins/effort use existing branch-safe session persistence.
+Pending edits and baseline/advisor/deadline/budget overrides reset on config
+reload, session replacement or restart. Use the user configuration for durable settings.
+
+Credentials and privacy consent are read-only. Selecting Clef does not authorize
+sending context to Cloudflare. See [Cloudflare advisors](cloudflare-advisor.md).
+
+![Retained-history statistics in the light theme](assets/router-ui/router-usage-light.png)
+
+Usage is **not lifetime accounting**. Run `/router log on` to collect decisions;
+turning it off stops collection, and clearing it clears this view's source.
+Advice is deduplicated by local request ID. HTTP attempts, generation attempts
+and route reuses are different counts. Missing cost remains unknown. Host totals
+overlap these observations and must not be added to them.
+
+The images are actual Pi/agterm captures with deterministic synthetic data,
+not the HTML prototype or live cost measurements.
+
 ## Try Jev next
 
 1. Review the [privacy boundary](jev-advisor.md#privacy-boundary).
@@ -126,16 +176,17 @@ Use `/router thinking auto` to clear the override.
 | `/router widget` | Toggle the status widget. |
 | `/router reload` | Load the configuration again. |
 | `/router help` | Show command help. |
+| `/router-ui [now\|routing\|classifier\|usage]` | Open the native inspector, or return text outside TUI. |
 
-Per-tier effort belongs in the profile configuration.
+Per-tier effort can be set in the profile configuration or as a session override in the inspector.
 Removed commands such as `status`, `profile`, `fix`, and `debug` show their replacements unless a configured profile has that name.
 
 ## Configuration reference
 
 | File | Purpose |
 | --- | --- |
-| `~/.pi/agent/model-router.json` | User configuration and Jev approval. A custom Pi agent directory changes this location. |
-| `.pi/model-router.json` | Project overrides for routes, the Pi classifier, and display. Project Jev configuration has no effect. |
+| `~/.pi/agent/model-router.json` | User configuration and external-advisor approval. A custom Pi agent directory changes this location. |
+| `.pi/model-router.json` | Project overrides for routes, the Pi classifier, and display. Project Jev, Cloudflare, advisor-selection and advisor-consent settings have no effect. |
 | `~/.pi/agent/model-router-state.json` | Last selected profile. The extension manages this file. |
 
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
@@ -149,7 +200,9 @@ The [complete example](../model-router.example.json) shows aliases, all four tie
 | Field | Behavior |
 | --- | --- |
 | `maxSessionBudget` | Soft threshold for reported generation cost. Unpinned requests skip advisors and prefer eligible medium-or-lower tiers after this threshold. |
-| `classifierModel` | Optional Pi classifier, active only when Jev is inactive. Accepts a model reference or `{ "model", "thinking", "timeoutMs" }`. |
+| `classifierModel` | Optional chat-based Pi classifier, active only on the default Jev path when Jev is inactive. Accepts a model reference or `{ "model", "thinking", "timeoutMs" }`. |
+| `advisor` | User-only `jev` (default), `clef`, or `clef-flash`. See [Cloudflare advisors](cloudflare-advisor.md). |
+| `cloudflare` | User-only Cloudflare enablement and bounded tuning; per-profile approval is separate. |
 | `models` | Aliases with a `model` reference and optional `contextWindow` and `maxTokens`. |
 | `ui.statusLine` | `compact` by default. `detailed` adds advisor probability, request time, and cache counters. |
 
@@ -161,7 +214,7 @@ User or project configuration can set `classifierModel`. It sends bounded recent
 
 ## Read costs and cache data
 
-After a terminal response, the widget and log show:
+After a terminal response, detailed status and the log expose:
 
 - Input, output, cache-read, and cache-write tokens for the last terminal attempt.
 - The model transition and the total attempt count.
@@ -188,6 +241,18 @@ When Pi starts on the router provider, a new session uses the last profile.
 A restored router snapshot does not restore a server cache.
 
 ## Migration
+
+### From 0.9.x to 0.10.0
+
+Jev authentication has moved to Pi. Before upgrading, run `/login typesafe` or
+provide `TYPESAFE_API_KEY` to Pi. After installing 0.10.0, start a new Pi session
+and follow the [Jev field migration](jev-advisor.md#migrate-the-old-router-fields).
+Without a Pi credential, enabled Jev falls back to baseline, not the chat classifier.
+A custom legacy endpoint stays disabled until explicitly migrated.
+
+The native inspector is `/router-ui`; existing `/router` commands remain.
+Cloudflare is opt-in and does not inherit Jev approval.
+
 
 CAUTION: Do not load this fork and the upstream extension together. Both register the `router` provider.
 

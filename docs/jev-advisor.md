@@ -7,13 +7,15 @@ The router validates that advice. Pi runs the selected model and all tools.
 
 CAUTION: Approve external text transfer before you enable a profile. Selected conversation text can contain secrets or private data.
 
-1. Get a TypeSafe API key.
+1. Run `/login typesafe` in Pi and enter your TypeSafe API key there.
+   In the generic `/login` menu, choose **Sign in with an API key**, not the account/OAuth list.
 2. Add these fields to your user `model-router.json` and its existing `auto` profile.
-3. Replace the key placeholder.
+3. Do not put the API key in this file.
 
 ```json
 {
-  "jev": { "enabled": true, "apiKey": "<your-api-key>" },
+  "advisor": "jev",
+  "jev": { "enabled": true },
   "profiles": { "auto": { "jev": { "enabled": true } } }
 }
 ```
@@ -34,9 +36,28 @@ Project Jev fields have no effect. Work profiles have no automatic approval.
 
 ### Store the key
 
-Keep the rendered configuration out of Git. Restrict file access to its owner, for example with mode `0600`.
-A secret manager can render `apiKey` before Pi starts.
-The extension does not run secret-lookup commands or require an environment variable.
+Pi owns the credential. Use `/login typesafe`, or set `TYPESAFE_API_KEY` before
+starting Pi. A secret manager can supply it through Pi's supported credential
+configuration. The router does not read Pi's auth store or copy keys between files.
+
+Check readiness without printing credentials:
+
+```sh
+pi auth check --provider typesafe --no-refresh --json
+```
+
+### Migrate the old router fields
+
+After installing the migrated extension, remove `jev.apiKey` and `jev.endpoint`
+from user `model-router.json`. They are obsolete and excluded from normalized
+configuration; a value-free warning points to `/login typesafe`.
+Removing them from a live installation of the older router would disable its
+Jev path, so update the extension before cleaning that installed configuration.
+
+A legacy custom endpoint disables Jev until you migrate that endpoint into
+Pi's TypeSafe provider configuration and remove the old field. It is not silently
+redirected to the default service. Keep existing profile consent, model pins,
+timeouts and thresholds unchanged. No key or privacy approval is migrated automatically.
 
 ## Privacy boundary
 
@@ -74,8 +95,7 @@ Invalid values or unknown nested keys reject the Jev configuration with a value-
 
 | Field | Default | Range or behavior |
 | --- | --- | --- |
-| `enabled` | `false` | Needs `apiKey` and explicit profile approval. |
-| `endpoint` | `https://api.typesafe.ai/v1/systemone` | HTTPS only. No embedded credentials, query, or fragment. |
+| `enabled` | `false` | Needs explicit profile approval and a TypeSafe credential resolved by Pi at request time. |
 | `model` | `jev-1.13.0` | A versioned ID keeps the model fixed. `jev-latest` can change without a configuration edit. |
 | `timeoutMs` | `1500` | Total advisory budget. Positive milliseconds, at most 2147483647. |
 | `confidenceThreshold` | `0.65` | From 0 through 1. Controls direct acceptance of the top option. |
@@ -89,10 +109,26 @@ Invalid values or unknown nested keys reject the Jev configuration with a value-
 | `retry.backoffMs` | `400` | Initial delay, from 0 through 60000 milliseconds. |
 | `mode` | `"advisory"` | The only supported mode. |
 
-The same deadline covers request preparation, HTTP, response reading, and retry delays.
+The same deadline covers request preparation, Pi authentication, HTTP, response reading, and retry delays.
+Native Pi retries are disabled; only the router's bounded retry policy runs.
+Success bodies are limited to 65,536 bytes, and remote error bodies are discarded.
 Only `408`, `429`, and `5xx` qualify for retries. A retry needs enough remaining time for a full round trip.
 The delay doubles per retry and respects `Retry-After`.
 Permanent errors, invalid response bodies, and caller cancellation do not trigger retries.
+
+### Model pins and provider configuration
+
+The router calls Pi's `classify()` API, not a chat model. A configured version
+such as `jev-1.13.0` stays in the actual request. If Pi has no separate catalog
+entry for that version, the router borrows the `jev-latest` TypeSafe transport
+metadata but substitutes the **requested version ID**, not the latest alias.
+An exact registered version takes priority, including its provider-owned URL.
+A rejected version leads to baseline; the router never retries another advisor
+or silently switches the pin to `jev-latest`.
+
+URLs, credentials and model-specific provider overrides belong to Pi. Router
+configuration retains only advisory tuning, model selection and privacy approval.
+The shared adapter preserves Jev's structured routing rubric and strict acceptance.
 
 ## Context selection
 
@@ -185,9 +221,10 @@ Raw response text does not enter the log.
 | Symptom | Action |
 | --- | --- |
 | Only one tier is eligible | Make sure that the other tiers' models exist in `/model` and support the input. |
-| Missing user API key | Add the rendered key to user configuration, not project configuration. |
+| Missing TypeSafe authentication | Run `/login typesafe`, or supply `TYPESAFE_API_KEY` to Pi. Do not add a key to router config. |
+| Legacy credential/endpoint warning | Update the extension, then remove the obsolete router fields; migrate custom URLs to Pi first. |
 | Frequent deadlines | Increase `timeoutMs`, for example to 3000. This permits more delay before fallback. |
-| HTTP `401` | Make sure that the key is correct and active. |
+| HTTP `401` | Check the TypeSafe credential through Pi; replace it with `/login typesafe` if needed. |
 | HTTP `422` | Report the local diagnostics. Do not attach private request text. |
 | HTTP `429` or `529` after retry | Reduce request rate or retry later. The provider reports a limit or overload. |
 | Invalid response | Report the local response code. A longer timeout does not correct a schema error. |

@@ -16,6 +16,7 @@ import {
 } from './constants';
 import type {
   ClassifierConfig,
+  CloudflareConfig,
   ConfigLoadResult,
   JevConfig,
   JevContextConfig,
@@ -141,6 +142,7 @@ export const mergeConfig = (
       low: mergeRawValue(existing.low, profile.low),
       micro: mergeRawValue(existing.micro, profile.micro),
       jev: mergeRawValue(existing.jev, profile.jev),
+      cloudflare: mergeRawValue(existing.cloudflare, profile.cloudflare),
     };
   }
 
@@ -157,9 +159,30 @@ export const mergeConfig = (
   const jev = isObjectRecord(mergedJev)
     ? { ...mergedJev, context: nestedJev('context'), retry: nestedJev('retry') }
     : mergedJev;
+  const mergedCloudflare = mergeRawValue(base.cloudflare, override.cloudflare);
+  const cloudflare = isObjectRecord(mergedCloudflare)
+    ? {
+        ...mergedCloudflare,
+        ...Object.fromEntries(
+          (['context', 'retry'] as const).map((key) => [
+            key,
+            mergeRawValue(
+              isObjectRecord(base.cloudflare)
+                ? base.cloudflare[key]
+                : undefined,
+              isObjectRecord(override.cloudflare)
+                ? override.cloudflare[key]
+                : undefined,
+            ),
+          ]),
+        ),
+      }
+    : mergedCloudflare;
   return {
     ui: mergeRawValue(base.ui, override.ui),
     jev,
+    advisor: override.advisor ?? base.advisor,
+    cloudflare,
     debug: override.debug ?? base.debug,
     classifierModel: override.classifierModel ?? base.classifierModel,
     phaseBias: override.phaseBias ?? base.phaseBias,
@@ -410,7 +433,6 @@ export const normalizeTierConfig = (
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export const DEFAULT_JEV_CONFIG = {
-  endpoint: 'https://api.typesafe.ai/v1/systemone',
   model: 'jev-1.13.0',
   timeoutMs: 1500,
   confidenceThreshold: 0.65,
@@ -501,7 +523,7 @@ export const normalizeJevConfig = (
   if (!retry) return invalid();
   if (
     (value.enabled !== undefined && typeof value.enabled !== 'boolean') ||
-    !isJevEndpoint(value.endpoint) ||
+    (value.endpoint !== undefined && !isJevEndpoint(value.endpoint)) ||
     typeof value.model !== 'string' ||
     !/^[a-zA-Z0-9._-]{1,128}$/.test(value.model) ||
     typeof value.timeoutMs !== 'number' ||
@@ -525,14 +547,20 @@ export const normalizeJevConfig = (
       (typeof value.apiKey !== 'string' || /[\r\n]/.test(value.apiKey)))
   )
     return invalid();
-  const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
-  if (value.enabled === true && !apiKey) {
-    warnings.push('Jev disabled: missing user-config API key.');
+  if (Object.hasOwn(raw, 'apiKey') || Object.hasOwn(raw, 'endpoint')) {
+    warnings.push(
+      'Jev credentials and endpoint are now managed by Pi. Use /login typesafe and remove jev.apiKey/jev.endpoint from router config.',
+    );
   }
+  const customEndpoint =
+    value.endpoint !== undefined &&
+    value.endpoint !== 'https://api.typesafe.ai/v1/systemone';
+  if (customEndpoint)
+    warnings.push(
+      'Jev disabled: migrate the custom endpoint to Pi provider configuration before removing the legacy endpoint field.',
+    );
   return {
-    enabled: value.enabled === true && apiKey.length > 0,
-    apiKey,
-    endpoint: value.endpoint,
+    enabled: value.enabled === true && !customEndpoint,
     model: value.model,
     timeoutMs: value.timeoutMs,
     confidenceThreshold: value.confidenceThreshold,
@@ -544,23 +572,61 @@ export const normalizeJevConfig = (
   };
 };
 
+/** Reuse the existing bounded tuning policy without accepting credentials/endpoints. */
+export const normalizeCloudflareConfig = (
+  raw: unknown,
+  warnings: string[],
+): CloudflareConfig | undefined => {
+  if (raw === undefined) return undefined;
+  const allowed = [
+    'enabled',
+    'timeoutMs',
+    'confidenceThreshold',
+    'probabilityThreshold',
+    'maxStateTokens',
+    'context',
+    'retry',
+    'mode',
+  ];
+  if (
+    !isObjectRecord(raw) ||
+    Object.keys(raw).some((key) => !allowed.includes(key))
+  ) {
+    warnings.push('Ignored invalid Cloudflare configuration.');
+    return undefined;
+  }
+  const normalized = normalizeJevConfig(raw, []);
+  if (!normalized || (normalized.retry?.maxAttempts ?? 2) > 2) {
+    warnings.push('Ignored invalid Cloudflare configuration.');
+    return undefined;
+  }
+  const { model: _model, ...tuning } = normalized;
+  return tuning;
+};
+
 // Remove every project Jev setting before merging with user-owned credentials.
 export const stripProjectJevConfig = (
   raw: RawRouterConfig,
   warnings: string[],
 ): RawRouterConfig => {
-  const { jev: ignored, ...project } = raw;
+  const { jev: ignored, advisor, cloudflare, ...project } = raw;
+  let cloudflareFound = advisor !== undefined || cloudflare !== undefined;
   let found = ignored !== undefined;
   if (isObjectRecord(project.profiles)) {
     project.profiles = Object.fromEntries(
       Object.entries(project.profiles).map(([name, profile]) => {
         if (!isObjectRecord(profile)) return [name, profile];
-        const { jev, ...tiers } = profile;
+        const { jev, cloudflare, ...tiers } = profile;
+        if (cloudflare !== undefined) cloudflareFound = true;
         if (jev !== undefined) found = true;
         return [name, tiers];
       }),
     );
   }
+  if (cloudflareFound)
+    warnings.push(
+      'Ignored project Cloudflare/advisor settings: configure only in user config.',
+    );
   if (found)
     warnings.push(
       'Ignored project Jev settings: configure Jev only in user config.',
@@ -650,6 +716,9 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       low,
       micro,
       jev,
+      cloudflare: isObjectRecord(profileRecord.cloudflare)
+        ? { enabled: profileRecord.cloudflare.enabled === true }
+        : undefined,
     };
   }
 
@@ -734,6 +803,11 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     config: {
       ui: { statusLine: statusLine === 'detailed' ? 'detailed' : 'compact' },
       jev: normalizeJevConfig(raw.jev, warnings),
+      advisor:
+        raw.advisor === 'clef' || raw.advisor === 'clef-flash'
+          ? raw.advisor
+          : 'jev',
+      cloudflare: normalizeCloudflareConfig(raw.cloudflare, warnings),
       debug: typeof raw.debug === 'boolean' ? raw.debug : false,
       classifierModel,
       maxSessionBudget,

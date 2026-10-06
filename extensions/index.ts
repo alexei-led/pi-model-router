@@ -27,7 +27,8 @@ import type {
   RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
-import { updateStatus } from './ui';
+import { openRouterInspector, updateRouterUIStrip, updateStatus } from './ui';
+import { createRouterUIRuntime } from './ui/runtime';
 
 const hasExplicitCliModel = () =>
   process.argv
@@ -70,6 +71,9 @@ const routerExtension = (pi: ExtensionAPI) => {
     },
     get currentConfig() {
       return currentConfig;
+    },
+    set currentConfig(value: RouterConfig) {
+      currentConfig = value;
     },
     get currentModelRegistry() {
       return currentModelRegistry;
@@ -128,6 +132,10 @@ const routerExtension = (pi: ExtensionAPI) => {
       return lastConfigWarnings;
     },
   };
+
+  const routerUI = createRouterUIRuntime(runtimeState, () => {
+    if (lastExtensionContext) actions.updateStatus(lastExtensionContext);
+  });
 
   const setModelInternally = async (
     model: NonNullable<ExtensionContext['model']>,
@@ -212,7 +220,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   const actions = {
     persistState,
     syncPiThinkingLevel: setThinkingLevelInternally,
-    updateStatus: (ctx: ExtensionContext) =>
+    updateStatus: (ctx: ExtensionContext) => {
       updateStatus(ctx, {
         statusLine: currentConfig.ui?.statusLine,
         routerEnabled,
@@ -223,11 +231,18 @@ const routerExtension = (pi: ExtensionAPI) => {
         accumulatedCost,
         widgetEnabled,
         maxSessionBudget: currentConfig.maxSessionBudget,
-      }),
+      });
+      updateRouterUIStrip(ctx, routerUI.adapters.getSnapshot(), {
+        widgetEnabled,
+        statusLine: currentConfig.ui?.statusLine,
+      });
+      routerUI.publish();
+    },
     reloadConfig: (
       ctx?: ExtensionContext,
       options?: { preserveDebug?: boolean },
     ) => {
+      routerUI.reset();
       const loaded = loadRouterConfig(currentCwd);
       currentConfig = loaded.config;
       lastConfigWarnings = loaded.warnings;
@@ -305,6 +320,7 @@ const routerExtension = (pi: ExtensionAPI) => {
         recordDebugDecision,
         updateStatus: actions.updateStatus,
         syncPiThinkingLevel: setThinkingLevelInternally,
+        beginRequest: routerUI.beginRequest,
       });
     },
   };
@@ -439,7 +455,33 @@ const routerExtension = (pi: ExtensionAPI) => {
     actions.updateStatus(ctx);
   };
 
-  registerCommands(pi, runtimeState, actions);
+  registerCommands(pi, runtimeState, actions, async (ctx, tab) => {
+    const text = await openRouterInspector(ctx, routerUI.adapters, tab);
+    if (!text) return;
+    if (ctx.mode === 'print') process.stderr.write(`${text}\n`);
+    else if (ctx.mode === 'json')
+      pi.sendMessage(
+        {
+          customType: 'router-inspector',
+          content: text,
+          display: true,
+          details: undefined,
+        },
+        { triggerTurn: false },
+      );
+    else ctx.ui.notify(text, 'info');
+  });
+
+  pi.on('before_agent_start', (_event, ctx) => {
+    if (!routerUI.activatePending())
+      ctx.ui.notify(
+        'Pending router controls discarded: configuration changed or route became unavailable.',
+        'warning',
+      );
+    persistState();
+    actions.updateStatus(ctx);
+  });
+  pi.on('session_shutdown', () => routerUI.reset());
 
   pi.on('session_start', async (event, ctx) => {
     isInitialized = true;
