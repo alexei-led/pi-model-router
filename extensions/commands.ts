@@ -23,6 +23,7 @@ import type {
 } from './types';
 import {
   formatAdvisorDetail,
+  formatCloudflareStats,
   formatDecision,
   formatDecisionSource,
   formatGenerationDetail,
@@ -55,6 +56,7 @@ const USAGE = [
   '/router widget                 toggle the status widget',
   '/router reload                 reload model-router.json',
   '/router help                   this text',
+  '/router-ui [now|routing|classifier|usage]  native inspector',
 ].join('\n');
 
 export const registerCommands = (
@@ -88,7 +90,36 @@ export const registerCommands = (
     ) => Promise<boolean>;
     syncPiThinkingLevel: (level: ThinkingLevel) => void;
   },
+  openUI?: (
+    ctx: ExtensionContext,
+    tab: 'now' | 'routing' | 'classifier' | 'usage',
+  ) => Promise<void>,
 ) => {
+  if (openUI)
+    pi.registerCommand('router-ui', {
+      description:
+        'Inspect routing, session controls, advisors and retained usage',
+      getArgumentCompletions: (prefix) =>
+        ['now', 'routing', 'classifier', 'usage']
+          .filter((tab) => tab.startsWith(prefix))
+          .map((tab) => ({ value: tab, label: tab })),
+      handler: async (args, ctx) => {
+        const tab = args.trim() || 'now';
+        if (
+          tab !== 'now' &&
+          tab !== 'routing' &&
+          tab !== 'classifier' &&
+          tab !== 'usage'
+        ) {
+          ctx.ui.notify(
+            'Usage: /router-ui [now|routing|classifier|usage]',
+            'error',
+          );
+          return;
+        }
+        await openUI(ctx, tab);
+      },
+    });
   const usage = (ctx: ExtensionContext, line: string) =>
     ctx.ui.notify(`Usage: ${line}`, 'error');
 
@@ -118,8 +149,10 @@ export const registerCommands = (
       jev
         ? `Jev: ${jev.enabled ? 'enabled' : 'disabled'} · profile opt-in: ${profile && config.profiles[profile]?.jev?.enabled ? 'yes' : 'no'} · budget ${jev.timeoutMs}ms · context ${context.previousTurns} turns / ≈${context.maxHistoryTokens} history / ${context.toolResults} ≈${context.maxToolTokens} tool / ≈${jev.maxStateTokens} state tokens`
         : 'Jev: not configured',
+      `Selected advisor: ${config.advisor ?? 'jev'} · Cloudflare: ${config.cloudflare?.enabled ? 'enabled' : 'disabled'} · profile opt-in: ${profile && config.profiles[profile]?.cloudflare?.enabled ? 'yes' : 'no'}`,
       `Previous model: ${formatModelRef(state.lastNonRouterModel)}`,
       ...formatJevStats(state.debugHistory),
+      ...formatCloudflareStats(state.debugHistory),
     ];
     const last = state.lastDecision;
     if (last) {
@@ -294,6 +327,7 @@ export const registerCommands = (
       [
         header,
         ...formatJevStats(state.debugHistory),
+        ...formatCloudflareStats(state.debugHistory),
         ...(history.length > 0
           ? ['Recent decisions:', ...history]
           : ['No recent routing decisions.']),

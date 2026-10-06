@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Pi Router · native UI concept</title>
+<style>
+:root { color-scheme:dark; --bg:#101215; --surface:#16191e; --raised:#1d2127; --line:#30363e; --text:#e2e6e9; --muted:#a0a9b5; --accent:#9adeca; --accent-bg:#223c35; --warn:#f0bd7d; --red:#f4a09d; --mono:ui-monospace,SFMono-Regular,Consolas,monospace; }
+body.light { color-scheme:light; --bg:#e9ece8; --surface:#fafbf8; --raised:#eef1ed; --line:#cbd1cb; --text:#232d2a; --muted:#58675f; --accent:#17654c; --accent-bg:#dceee3; --warn:#865000; --red:#a52e27; }
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+body { margin:0; background:var(--bg); color:var(--text); font:14px/1.55 system-ui,sans-serif; }
+button,select,input { font:inherit; color:inherit; }
+button { cursor:pointer; border:1px solid var(--line); background:var(--raised); border-radius:5px; padding:.42rem .7rem; }
+button:hover { border-color:var(--accent); }
+button:disabled { opacity:.45; cursor:default; }
+button.primary { background:var(--accent); color:var(--bg); border-color:var(--accent); font-weight:650; }
+button.quiet { background:transparent; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+select,input { background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:.5rem; width:100%; min-width:0; }
+h1,h2,h3,p { margin:0; }
+h1 { font-size:1.5rem; letter-spacing:-.04em; font-weight:600; }
+h2 { font-size:1.05rem; font-weight:650; }
+h3 { font-size:.85rem; font-weight:600; margin-bottom:.7rem; }
+small,.small { font-size:.75rem; }
+.muted { color:var(--muted); }
+.accent { color:var(--accent); }
+.warn { color:var(--warn); }
+.mono,code,kbd { font-family:var(--mono); }
+.eyebrow { text-transform:uppercase; letter-spacing:.14em; color:var(--muted); font-size:.65rem; font-weight:650; }
+.shell { max-width:1570px; padding:1.8rem 2.2rem; margin:auto; }
+.intro { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1.3rem; flex-wrap:wrap; }
+.intro h1 span { color:var(--muted); font-weight:400; }
+.stamp { border:1px solid var(--line); padding:.2rem .5rem; font:11px var(--mono); color:var(--muted); border-radius:3px; }
+.toolbar { display:flex; align-items:center; gap:.65rem; flex-wrap:wrap; margin-bottom:1rem; }
+.toolbar label { display:flex; align-items:center; gap:.6rem; color:var(--muted); font-size:.75rem; }
+.toolbar select { width:auto; max-width:100%; font-size:.75rem; padding:.4rem; }
+.toolbar .check { margin-left:auto; }
+.check input { width:auto; accent-color:var(--accent); }
+.terminal { border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--surface); box-shadow:0 20px 65px #0003; }
+.titlebar { padding:.6rem 1rem; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:1rem; background:var(--raised); font:11px var(--mono); color:var(--muted); }
+.titlebar strong { font-size:16px; margin-right:.65rem; color:var(--accent); }
+.workspace { position:relative; min-height:690px; }
+.conversation { min-height:690px; display:flex; flex-direction:column; font:13px/1.75 var(--mono); }
+.transcript { padding:1.5rem 1.8rem; flex:1; }
+.transcript .entry { max-width:780px; margin-bottom:1.6rem; }
+.role { font-size:11px; margin-bottom:.35rem; color:var(--muted); }
+.role span { margin-left:1rem; opacity:.75; }
+.user { padding:.8rem 1rem; border-left:2px solid var(--line); background:var(--raised); }
+.tool { margin:.8rem 0; padding:.6rem .8rem; border:1px solid var(--line); border-radius:4px; color:var(--muted); }
+.tool span { color:var(--accent); margin-right:.6rem; }
+.code-lines { color:var(--muted); border-left:1px solid var(--line); padding-left:1rem; margin:.8rem 0; font-size:12px; white-space:pre-wrap; }
+.status-zone { padding:0 1rem 1rem; }
+.route-band { border:1px solid var(--line); border-left:3px solid var(--accent); background:var(--raised); padding:.6rem .8rem; display:grid; gap:.2rem; }
+.route-row { display:flex; gap:.65rem; flex-wrap:wrap; align-items:center; min-width:0; }
+.route-row.secondary { font-size:11px; color:var(--muted); }
+.route-name { font-weight:650; }
+.badge { font:10px var(--mono); padding:.17rem .4rem; border-radius:3px; background:var(--accent-bg); color:var(--accent); white-space:nowrap; }
+.badge.warn { background:transparent; border:1px solid var(--warn); color:var(--warn); }
+.route-row button { margin-left:auto; font:11px var(--mono); padding:.2rem .5rem; }
+.editor { display:flex; align-items:center; gap:.7rem; padding:.65rem .8rem; margin-top:.6rem; border:1px solid var(--line); border-radius:4px; }
+.editor input { border:0; padding:0; background:transparent; font:13px var(--mono); }
+.host-footer { color:var(--muted); font:10px var(--mono); padding:.5rem .3rem 0; display:flex; justify-content:space-between; gap:.5rem; flex-wrap:wrap; }
+.inspector { position:absolute; inset:0 0 0 auto; width:448px; max-width:100%; background:var(--surface); border-left:1px solid var(--line); box-shadow:-15px 0 30px #0003; display:flex; flex-direction:column; font-size:13px; z-index:1; }
+.panel-head { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem .7rem; }
+.panel-head .eyebrow { margin-bottom:.2rem; }
+.tabs { display:flex; border-bottom:1px solid var(--line); padding:0 1rem; gap:1rem; }
+.tabs button { border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:var(--muted); padding:.6rem 0; font-size:12px; }
+.tabs button[aria-selected=true] { color:var(--accent); border-bottom-color:var(--accent); }
+.draft { background:var(--accent-bg); padding:.7rem 1.1rem; border-bottom:1px solid var(--line); font-size:12px; }
+.draft-actions { display:flex; gap:.4rem; margin-top:.5rem; }
+.draft code { display:block; font-size:10px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:75px; overflow:auto; margin-top:.3rem; }
+.panel-body { overflow:auto; padding:1rem 1.1rem; flex:1; min-height:0; }
+.panel-body > section { display:grid; gap:1.05rem; }
+.section { padding-top:1rem; border-top:1px solid var(--line); }
+.hero-route { display:flex; align-items:center; gap:.6rem; margin:.4rem 0; }
+.hero-route strong { font:600 1.25rem var(--mono); letter-spacing:-.04em; }
+.facts { display:grid; grid-template-columns:1fr auto; gap:.5rem 1rem; margin:0; font-size:12px; }
+.facts dt { color:var(--muted); }
+.facts dd { margin:0; text-align:right; overflow-wrap:anywhere; max-width:230px; }
+.callout { border:1px solid var(--line); background:var(--raised); border-radius:4px; padding:.65rem .75rem; font-size:12px; }
+.flow { display:flex; align-items:center; justify-content:space-between; gap:.25rem; font:10px var(--mono); color:var(--muted); margin:.6rem 0; }
+.flow b { color:var(--accent); font-weight:400; }
+.events { list-style:none; padding:0; margin:.5rem 0 0; }
+.events li { display:grid; grid-template-columns:42px 1fr; gap:.75rem; padding:.4rem 0; font-size:11px; border-bottom:1px solid var(--line); }
+.events time { color:var(--muted); font-family:var(--mono); }
+.fields { display:grid; gap:.85rem; }
+.fields label { display:grid; gap:.3rem; font-size:12px; }
+.origin { color:var(--muted); font-size:10px; font-weight:400; }
+fieldset { border:0; padding:0; margin:0; min-width:0; }
+legend { font-weight:600; margin-bottom:.8rem; }
+.model-card { display:grid; gap:.3rem; border:1px solid var(--line); border-radius:5px; padding:.7rem .8rem; margin-bottom:.5rem; }
+.model-card:has(input:checked) { border-color:var(--accent); background:var(--accent-bg); }
+.model-choice { display:flex; align-items:center; gap:.5rem; font-weight:600; }
+.model-choice input { width:auto; accent-color:var(--accent); }
+.model-card code { font-size:10px; color:var(--muted); overflow-wrap:anywhere; }
+.model-card p { font-size:11px; color:var(--muted); }
+.metrics { display:grid; grid-template-columns:1fr 1fr; gap:.65rem; }
+.metric { border:1px solid var(--line); border-radius:4px; padding:.65rem; }
+.metric b { display:block; font:500 1.45rem var(--mono); letter-spacing:-.05em; }
+.metric span { color:var(--muted); font-size:10px; }
+.mix { display:grid; gap:.65rem; }
+.mix-row { display:grid; grid-template-columns:55px 1fr 50px; align-items:center; gap:.65rem; font:11px var(--mono); }
+meter { width:100%; height:.6rem; accent-color:var(--accent); }
+.mix-row span:last-child { text-align:right; color:var(--muted); }
+.panel-foot { padding:.65rem 1.1rem; border-top:1px solid var(--line); color:var(--muted); font:10px var(--mono); }
+.caption { display:grid; grid-template-columns:1fr 1fr; gap:2rem; padding-top:1.15rem; font-size:12px; color:var(--muted); }
+.caption strong { color:var(--text); font-weight:500; display:block; margin-bottom:.2rem; }
+#feedback { min-height:1.4rem; padding-top:.65rem; color:var(--accent); font-size:12px; }
+.compact .workspace,.compact .conversation { min-height:590px; }
+.compact .transcript { padding:1rem; }
+.compact .route-row.secondary .optional { display:none; }
+@media (min-width:1100px) { .terminal:not(.compact) .status-zone { padding-right:calc(448px + 1rem); } .terminal.panel-closed .status-zone { padding-right:1rem; } }
+@media (max-width:760px) { .shell { padding:1rem .7rem; } .toolbar .check { margin-left:0; } .caption { grid-template-columns:1fr; gap:.8rem; } .inspector { width:100%; border-left:0; } .workspace,.conversation { min-height:720px; } .transcript { padding:1rem; } .titlebar .optional { display:none; } h1 { font-size:1.25rem; } .route-row.secondary .optional { display:none; } }
+@media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto; } }
+</style>
+</head>
+<body>
+<main class="shell">
+<header class="intro">
+<div><p class="eyebrow">Pi model router / design study 02</p><h1>One route. <span>A clear view of every decision.</span></h1></div>
+<span class="stamp">INTERACTIVE MOCK · NO NETWORK / NO SAVES</span>
+</header>
+<div class="toolbar" aria-label="Prototype controls">
+<label>Scenario
+<select id="scenario">
+<option value="selected">Advice accepted</option><option value="choosing">Choosing a route</option><option value="continuation">Tool continuation</option><option value="timeout">Advisor timeout</option><option value="fallback">Generation fallback</option><option value="budget">Soft budget exceeded</option><option value="cancelled">Caller cancelled</option><option value="unknown">Unknown usage</option><option value="off">Router off</option>
+</select></label>
+<button id="next" class="quiet" type="button">Start demo turn →</button>
+<button id="theme" class="quiet" aria-pressed="false" type="button">Light theme</button>
+<button id="compact" class="quiet" aria-pressed="false" type="button">Compact strip</button>
+<label class="check"><input type="checkbox" id="consent">Simulate Cloudflare consent</label>
+<button id="open" type="button" aria-expanded="true" aria-controls="inspector">Inspector</button>
+</div>
+<div class="terminal" id="terminal">
+<div class="titlebar"><span><strong>π</strong> pi-model-router <span class="optional">/ main · synthetic session</span></span><span>router/auto <span class="accent">●</span></span></div>
+<div class="workspace">
+<div class="conversation">
+<div class="transcript">
+<div class="entry"><p class="role">you <span>turn 08</span></p><p class="user">Add cancellation to the request pipeline. Keep the retry policy unchanged.</p></div>
+<div class="entry"><p class="role accent">assistant <span>medium · gpt-6-luna · high effort</span></p><p>I’ll trace cancellation through the request and body reader, then test the timeout and abort paths.</p><div class="tool"><span>✓</span> read · extensions/provider.ts</div><div class="tool"><span>✓</span> read · extensions/jev.ts</div><div class="code-lines">request → bounded advisor → validate candidate
+        → generation → tool result → reuse route</div><p class="muted">The tool continuation keeps the actual generation route.<br>No new classifier request is needed.</p></div>
+<p class="small muted">Transcript illustration · scenario controls change the router sample, not these messages.</p>
+</div>
+<div class="status-zone">
+<div class="route-band" aria-label="Above-editor route strip">
+<div class="route-row"><span class="eyebrow">router / auto</span><span id="band-state" class="badge">GENERATING</span><span id="band-route" class="route-name">medium → gpt-6-luna</span><span class="muted" id="band-effort">high</span></div>
+<div class="route-row secondary"><span id="band-advisor">Jev · accepted · 412 ms</span><span class="optional" id="band-reuse">1 advice / this user turn</span><button id="band-open" type="button">Details ↗</button></div>
+</div>
+<div class="editor"><span class="accent">❯</span><input id="prompt" aria-label="Demo Pi prompt" placeholder="Type /router-ui to inspect routing" autocomplete="off"></div>
+<div class="host-footer"><span>Pi footer · unchanged</span><span>context 31% · host cost not shown in mock</span></div>
+</div>
+</div>
+<aside id="inspector" class="inspector" aria-labelledby="panel-title">
+<div class="panel-head"><div><p class="eyebrow">Right-side overlay / not a dock</p><h2 id="panel-title">Router inspector <span class="muted">/ auto</span></h2></div><button id="close" class="quiet" aria-label="Close inspector" type="button">×</button></div>
+<div class="tabs" role="tablist" aria-label="Router sections">
+<button id="tab-now" role="tab" aria-selected="true" aria-controls="page-now" type="button" data-tab="now">Now</button>
+<button id="tab-routing" role="tab" aria-selected="false" tabindex="-1" aria-controls="page-routing" type="button" data-tab="routing">Routing</button>
+<button id="tab-classifier" role="tab" aria-selected="false" tabindex="-1" aria-controls="page-classifier" type="button" data-tab="classifier">Classifier</button>
+<button id="tab-usage" role="tab" aria-selected="false" tabindex="-1" aria-controls="page-usage" type="button" data-tab="usage">Usage</button>
+</div>
+<div id="draft" class="draft" hidden><strong>Pending · next demo user turn</strong><code id="diff"></code><div class="draft-actions"><button id="apply" class="primary" type="button">Apply to demo</button><button id="discard" type="button">Discard</button></div></div>
+<div id="saved" class="draft" hidden><span id="saved-text">Demo controls updated. Last route unchanged.</span> <button id="undo" class="quiet" type="button">Undo</button></div>
+<div class="panel-body">
+<section id="page-now" role="tabpanel" aria-labelledby="tab-now" tabindex="0">
+<div><p class="eyebrow" id="route-caption">Actual generation route</p><div class="hero-route"><span class="badge" id="tier">MEDIUM</span><strong id="actual">gpt-6-luna</strong></div><p class="muted small" id="actual-detail">openai · high effort · current request</p></div>
+<div class="callout"><p id="explanation">Jev selected an eligible candidate. The route was revalidated before generation.</p><div class="flow" aria-label="Routing stages"><span>eligible</span><span>→</span><span id="flow-advice">advice</span><span>→</span><b id="flow-result">generate</b></div></div>
+<dl class="facts"><dt>Decision source</dt><dd id="source">jev / choice</dd><dt>Classifier choice</dt><dd id="choice">medium</dd><dt>Advice latency</dt><dd id="latency">412 ms</dd><dt>Confidence</dt><dd id="confidence">86% · not route probability</dd><dt>Generation attempts</dt><dd id="attempts">1</dd><dt>Tool continuations</dt><dd id="continuations">0</dd></dl>
+<div class="section"><h3>Next user turn <span class="origin">· applied demo controls</span></h3><p id="next-summary" class="mono small">auto tier · baseline medium · Jev</p><p class="muted small">Drafts do not change an in-flight request. Pins persist until cleared; they are not one-shot.</p></div>
+<div class="section"><h3>Recent decisions <span class="origin">· synthetic metadata</span></h3><ol id="events" class="events"><li><time>08.0</time><span>medium · Jev choice · 412 ms</span></li><li><time>07.2</time><span>medium · tool route reused</span></li><li><time>07.1</time><span>medium · tool route reused</span></li><li><time>07.0</time><span>medium · baseline / deadline</span></li></ol></div>
+</section>
+<section id="page-routing" role="tabpanel" aria-labelledby="tab-routing" tabindex="0" hidden>
+<div><h3>Session controls</h3><p class="muted small">Changes stay in demo memory. No user or project configuration is written.</p></div>
+<form id="routing-form" class="fields">
+<label>Pin tier <span class="origin">session override · persistent until auto</span><select id="pin" data-field="pin"><option value="auto">Auto · ask selected advisor</option><option>micro</option><option>low</option><option>medium</option><option>high</option></select></label>
+<label>Baseline tier <span class="origin">effective profile · demo edit</span><select id="baseline" data-field="baseline"><option>medium</option><option>high</option><option>low</option><option>micro</option></select></label>
+<label>Soft generation budget (USD) <span class="origin">advisor charges excluded</span><input id="budget" data-field="budget" type="number" min="0.01" step="0.01" value="5" required></label>
+</form>
+<div class="section"><h3>Tier map <span class="origin">· illustrative, read-only</span></h3><dl class="facts"><dt>high</dt><dd>gpt-6-sol / high</dd><dt>medium</dt><dd>gpt-6-luna / high</dd><dt>low</dt><dd>gemini-3.8-flash / low</dd><dt>micro</dt><dd>gemini-3.8-flash / off</dd></dl></div>
+<div class="callout"><strong>No new routing heuristics.</strong><p class="muted small">Pin → budget → eligible candidates → one advisor → baseline if advice fails. A soft budget is not a spending cap.</p></div>
+<p class="muted small">Production file editing is a separate action: provenance → leaf diff → conflict check → confirmation. Credentials and privacy approval are never project-owned.</p>
+</section>
+<section id="page-classifier" role="tabpanel" aria-labelledby="tab-classifier" tabindex="0" hidden>
+<fieldset><legend>One advisor. Your choice.</legend>
+<label class="model-card"><span class="model-choice"><input type="radio" name="advisor" value="jev" checked>Jev <span class="badge">KEEP DEFAULT</span></span><code>typesafe / jev-latest</code><p>Existing bounded transport · no migration required first.</p></label>
+<label class="model-card"><span class="model-choice"><input type="radio" name="advisor" value="clef">Clef</span><code>cloudflare-workers-ai / @cf/cloudflare/clef</code><p>27B · 65,536 context · $0.24 / M input tokens*</p></label>
+<label class="model-card"><span class="model-choice"><input type="radio" name="advisor" value="flash">Clef Flash</span><code>cloudflare-workers-ai / @cf/cloudflare/clef-flash</code><p>9B · 65,536 context · $0.09 / M input tokens*</p></label>
+</fieldset>
+<label class="fields">Total advisory deadline (ms)<input id="timeout" data-field="timeout" type="number" min="1" max="2147483647" step="1" value="1500" required></label>
+<div class="callout"><strong id="privacy-title">TypeSafe · demo profile approved</strong><p class="muted small" id="privacy-detail">No credentials inspected. No live request is sent.</p></div>
+<dl class="facts"><dt>Failure path</dt><dd>Eligible baseline · no second advisor</dd><dt>Context sent</dt><dd>Bounded text only</dd><dt>Acceptance policy</dt><dd>Strict candidate + distribution checks</dd></dl>
+<p class="warn small">Recent dialogue and tool output can contain private data. Filtering is not redaction. Selecting Cloudflare does not grant consent.</p>
+<p class="muted small">* Published input prices checked 6 Oct 2026, not measured routing cost or accuracy. Wire compatibility still needs a smoke test. No images are sent by this router design.</p>
+</section>
+<section id="page-usage" role="tabpanel" aria-labelledby="tab-usage" tabindex="0" hidden>
+<div><h3>Retained decisions <span class="origin">· fixed synthetic fixture</span></h3><p class="muted small">24 decisions, not session lifetime. These figures do not change with the scenario controls.</p></div>
+<div class="metrics"><div class="metric"><b>$0.184</b><span>known generation cost · partial</span></div><div class="metric"><b>22 / 24</b><span>decisions with known cost</span></div><div class="metric"><b>8</b><span>unique advice requests</span></div><div class="metric"><b>16</b><span>tool-route reuses</span></div></div>
+<div class="section"><h3>Actual tier distribution</h3><div class="mix"><div class="mix-row"><span>high</span><meter min="0" max="24" value="4" aria-label="High: 4 of 24"></meter><span>4 / 24</span></div><div class="mix-row"><span>medium</span><meter min="0" max="24" value="14" aria-label="Medium: 14 of 24"></meter><span>14 / 24</span></div><div class="mix-row"><span>low</span><meter min="0" max="24" value="4" aria-label="Low: 4 of 24"></meter><span>4 / 24</span></div><div class="mix-row"><span>micro</span><meter min="0" max="24" value="2" aria-label="Micro: 2 of 24"></meter><span>2 / 24</span></div></div></div>
+<div class="section"><h3>Advisor observations</h3><dl class="facts"><dt>Accepted / requests</dt><dd>6 / 8</dd><dt>Abstained / timed out</dt><dd>1 / 1</dd><dt>Median latency / samples</dt><dd>412 ms / 8</dd><dt>HTTP attempts / requests</dt><dd>9 / 8</dd><dt>Advisor cost</dt><dd>unknown · not free</dd></dl></div>
+<div class="callout"><strong>Catalog cost ≠ invoice.</strong><p class="muted small">Two decisions have unknown cost. Host totals overlap router observations; never add them together. Future cache warmth is unknown.</p></div>
+</section>
+</div>
+<div class="panel-foot">← → sections · Tab controls · Esc close · /router-ui</div>
+</aside>
+</div>
+</div>
+<p id="feedback" role="status" aria-live="polite">Synthetic data. Selecting a classifier never makes a network request.</p>
+<div class="caption"><p><strong>01 / Ambient, not noisy</strong>Two-line strip above the editor. Actual route first, advice second. Pi keeps its own footer. The HTML strip reserves space for readability; Pi's overlay does not reflow the transcript.</p><p><strong>02 / Detail on demand</strong>Four sections, one shared draft. Wide: right-side overlay. Narrow: full inspector. Native implementation uses Pi components, not embedded HTML.</p></div>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const put = (id, value) => { $(id).textContent = value; };
+const labels = { jev:'Jev', clef:'Clef', flash:'Clef Flash' };
+const modelNames = { micro:'gemini-3.8-flash', low:'gemini-3.8-flash', medium:'gpt-6-luna', high:'gpt-6-sol' };
+const modelProviders = { micro:'google', low:'google', medium:'openai', high:'openai' };
+const efforts = { micro:'off', low:'low', medium:'high', high:'high' };
+const tabs = ['now','routing','classifier','usage'];
+let activeTab = 'now';
+let applied = { pin:'auto', baseline:'medium', budget:5, advisor:'jev', timeout:1500 };
+let draft = { ...applied };
+let previous;
+let opener = $('open');
+let turn = 8;
+const dirtyFields = () => Object.keys(applied).filter((key) => draft[key] !== applied[key]);
+const announce = (message) => put('feedback', message);
+const activate = (tab, focus = false) => {
+  activeTab = tab;
+  for (const name of tabs) {
+    const selected = name === tab;
+    $('tab-'+name).setAttribute('aria-selected', String(selected));
+    $('tab-'+name).tabIndex = selected ? 0 : -1;
+    $('page-'+name).hidden = !selected;
+  }
+  if (focus) $('tab-'+tab).focus();
+};
+const open = (from) => {
+  opener = from;
+  $('inspector').hidden = false;
+  $('terminal').classList.remove('panel-closed');
+  $('open').setAttribute('aria-expanded','true');
+  $('tab-'+activeTab).focus();
+};
+const close = () => {
+  $('inspector').hidden = true;
+  $('terminal').classList.add('panel-closed');
+  $('open').setAttribute('aria-expanded','false');
+  opener.focus();
+};
+const privacy = () => {
+  const cloudflare = draft.advisor !== 'jev';
+  const allowed = !cloudflare || $('consent').checked;
+  put('privacy-title', (cloudflare ? 'Cloudflare' : 'TypeSafe') + (allowed ? ' · demo profile approved' : ' · profile approval missing'));
+  put('privacy-detail', allowed ? 'Simulated approval only. Credentials are not inspected; no network request is sent.' : 'The next demo turn uses baseline. Existing TypeSafe approval does not authorize Cloudflare.');
+  $('privacy-title').classList.toggle('warn', !allowed);
+};
+const validDraft = () => $('budget').checkValidity() && $('timeout').checkValidity();
+const drawDraft = () => {
+  const changed = dirtyFields();
+  $('draft').hidden = changed.length === 0;
+  $('saved').hidden = changed.length > 0 || !previous;
+  put('diff', changed.map((key) => key + ': ' + applied[key] + ' → ' + draft[key]).join('\n'));
+  $('apply').disabled = !validDraft();
+  privacy();
+};
+const syncControls = () => {
+  for (const key of ['pin','baseline','budget','timeout']) $(key).value = String(draft[key]);
+  document.querySelectorAll('[name=advisor]').forEach((radio) => { radio.checked = radio.value === draft.advisor; });
+  drawDraft();
+};
+const drawNext = () => put('next-summary', (applied.pin === 'auto' ? 'auto tier' : 'pin '+applied.pin) + ' · baseline '+applied.baseline+' · '+labels[applied.advisor]+' · '+applied.timeout+' ms');
+const sample = (kind) => {
+  const advisor = labels[applied.advisor];
+  const blocked = applied.advisor !== 'jev' && !$('consent').checked;
+  const base = { tier:'medium', state:'GENERATING', source:applied.advisor === 'jev' ? 'jev / choice' : 'classifier / choice', advice:advisor+' · accepted · 412 ms', choice:'medium', latency:'412 ms', confidence:'86% · not route probability', attempts:'1', continuations:'0', detail:'The selected advisor returned an eligible candidate. It was revalidated before generation.', flow:'generate' };
+  if (kind === 'off') return { ...base, tier:null, state:'OFF', source:'router disabled', advice:'No router advice', choice:'—', latency:'—', confidence:'—', attempts:'0', detail:'Pi owns the selected model. No router generation starts.', flow:'idle' };
+  if (kind === 'cancelled') return { ...base, tier:null, state:'CANCELLED', source:'caller cancellation', advice:advisor+' · cancelled', choice:'—', latency:'240 ms elapsed', confidence:'—', attempts:'0', detail:'Caller cancellation stops advice and generation. It never starts baseline or a retry.', flow:'stop' };
+  if (applied.pin !== 'auto') return { ...base, tier:applied.pin, source:'pinned / '+applied.pin, advice:'Advisor skipped · explicit pin', choice:'not requested', latency:'—', confidence:'—', detail:'An eligible explicit pin bypasses advice. The pin remains until cleared.' };
+  if (kind === 'choosing') return { ...base, tier:null, state:'CHOOSING', source:'awaiting optional advice', advice:advisor+' · pending', choice:'pending', latency:'180 ms elapsed', confidence:'pending', attempts:'0', detail:'Generation has not started. This is an in-flight state, not the previous turn’s route.', flow:'waiting' };
+  if (kind === 'continuation') return { ...base, source:'continuation / validated route', advice:'Tool continuation · no new advice', choice:'medium · original turn', latency:'— · no new request', confidence:'— · reused route', continuations:'2', detail:'The actual medium route is reused after matching tool identities and capabilities. The advisor is not called again.' };
+  if (kind === 'budget') return { ...base, tier:applied.baseline === 'high' ? 'medium' : applied.baseline, source:'budget / eligible baseline', advice:'Advisor skipped · soft budget exceeded', choice:'not requested', latency:'—', confidence:'—', detail:'The demo prefers an eligible medium-or-lower baseline. Generation continues: this is not a hard spending cap.' };
+  if (blocked) return { ...base, tier:applied.baseline, source:'baseline / privacy not approved', advice:advisor+' · not authorized', choice:'not requested', latency:'—', confidence:'—', detail:'No Cloudflare request is made without provider/profile approval. Use the eligible local baseline.' };
+  if (kind === 'timeout') return { ...base, tier:applied.baseline, source:'baseline / deadline', advice:advisor+' · timeout → baseline', choice:'none accepted', latency:applied.timeout+' ms deadline', confidence:'—', detail:'The advisory deadline expired. Use the eligible baseline directly, never a second advisor.' };
+  if (kind === 'fallback') return { ...base, tier:'high', model:'gpt-6-luna', source:'fallback / before visible content', advice:advisor+' · high advised', choice:'high · gpt-6-sol', attempts:'2', detail:'The high primary failed before content. The explicit fallback is gpt-6-luna in the same tier. Actual generation differs from advice.' };
+  if (kind === 'unknown') return { ...base, source:(applied.advisor === 'jev' ? 'jev' : 'classifier')+' / usage unknown', advice:advisor+' · selected; usage missing', detail:'A valid route ran, but usage is missing. Do not treat an unknown cost as zero.' };
+  return base;
+};
+const drawSample = () => {
+  const kind = $('scenario').value;
+  const s = sample(kind);
+  const model = s.tier ? (s.model ?? modelNames[s.tier]) : 'No generation';
+  put('band-state',s.state);
+  $('band-state').classList.toggle('warn', ['CANCELLED','OFF'].includes(s.state) || kind === 'timeout');
+  put('band-route',s.tier ? s.tier+' → '+model : model);
+  put('band-effort',s.tier ? efforts[s.tier]+' effort' : '');
+  put('band-advisor',s.advice);
+  put('band-reuse',kind === 'continuation' ? 'route reused / same user turn' : s.attempts === '0' ? 'no generation attempt' : 'synthetic current-turn sample');
+  put('tier',s.tier ? s.tier.toUpperCase() : s.state);
+  put('actual',model);
+  put('actual-detail',s.tier ? modelProviders[s.tier]+' · '+efforts[s.tier]+' effort · synthetic current request' : 'Logical selection stays router/auto');
+  put('route-caption',s.tier ? 'Actual generation route' : 'Current routing state');
+  for (const key of ['source','choice','latency','confidence','attempts','continuations']) put(key,s[key]);
+  put('explanation',s.detail);
+  put('flow-advice',s.advice.includes('skipped') || kind === 'continuation' ? 'bypass' : 'advice');
+  put('flow-result',s.flow);
+  drawNext();
+};
+document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => activate(button.dataset.tab,true)));
+document.querySelector('.tabs').addEventListener('keydown', (event) => {
+  if (!['ArrowRight','ArrowLeft','Home','End'].includes(event.key)) return;
+  event.preventDefault();
+  const index = tabs.indexOf(activeTab);
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length-1 : (index+(event.key === 'ArrowRight' ? 1 : tabs.length-1))%tabs.length;
+  activate(tabs[next],true);
+});
+$('inspector').addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); close(); } });
+$('open').addEventListener('click', () => open($('open')));
+$('band-open').addEventListener('click', () => open($('band-open')));
+$('close').addEventListener('click', close);
+$('routing-form').addEventListener('submit', (event) => event.preventDefault());
+document.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('input', () => {
+  const key = input.dataset.field;
+  draft[key] = input.type === 'number' ? Number(input.value) : input.value;
+  drawDraft();
+}));
+document.querySelectorAll('[name=advisor]').forEach((radio) => radio.addEventListener('change', () => {
+  draft.advisor = radio.value;
+  drawDraft();
+}));
+$('consent').addEventListener('change', () => { privacy(); announce('Consent fixture changed only. Start a demo turn to see its effect; no real consent was granted.'); });
+$('apply').addEventListener('click', () => {
+  if (!validDraft()) return;
+  previous = { ...applied };
+  applied = { ...draft };
+  drawNext(); drawDraft();
+  announce('Applied to demo memory. Last route unchanged; Start demo turn uses the new controls.');
+});
+$('discard').addEventListener('click', () => { draft = { ...applied }; syncControls(); announce('Draft discarded. Applied controls and last route unchanged.'); });
+$('undo').addEventListener('click', () => {
+  if (!previous) return;
+  applied = { ...previous }; draft = { ...applied }; previous = undefined;
+  syncControls(); drawNext(); announce('Demo controls restored. Last observed route is unchanged.');
+});
+$('scenario').addEventListener('change', () => { drawSample(); announce('Scenario preview updated. Usage tab remains a fixed synthetic fixture.'); });
+$('next').addEventListener('click', () => {
+  $('scenario').value = 'selected'; turn += 1; drawSample();
+  const li = document.createElement('li'), time = document.createElement('time'), span = document.createElement('span');
+  time.textContent = turn+'.0'; span.textContent = $('band-route').textContent+' · '+$('source').textContent;
+  li.append(time,span); $('events').prepend(li);
+  if ($('events').children.length > 5) $('events').lastElementChild.remove();
+  announce('Simulated new user turn. No inference ran. Historical usage fixture is unchanged.');
+});
+$('theme').addEventListener('click', () => {
+  const light = document.body.classList.toggle('light');
+  $('theme').setAttribute('aria-pressed',String(light)); put('theme',light ? 'Dark theme' : 'Light theme');
+});
+$('compact').addEventListener('click', () => {
+  const compact = $('terminal').classList.toggle('compact'); $('compact').setAttribute('aria-pressed',String(compact));
+});
+$('prompt').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  if (event.target.value.trim() === '/router-ui') { event.target.value = ''; open($('prompt')); }
+  else announce('This mock accepts /router-ui only. No prompt is submitted to an agent.');
+});
+syncControls(); drawSample();
+</script>
+</body>
+</html>

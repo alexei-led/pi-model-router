@@ -16,7 +16,7 @@ flowchart LR
         State --> UI["Status and commands"]
     end
     subgraph External["External advisor service"]
-        Jev["TypeSafe Jev"]
+        Jev["Jev / Cloudflare"]
     end
     Router <-->|"Bounded text + candidate IDs / advice"| Jev
     Registry -->|"Generation context"| Model["Model backend · local or remote"]
@@ -39,12 +39,15 @@ Node labels identify each role without color.
 | --- | --- |
 | Router | Profile policy, eligible routes, advisor calls, explicit fallbacks, and diagnostics. |
 | Pi | Authentication, credential-specific URLs, provider dispatch, transcript conversion, and tool permissions. |
-| Jev | Advice among eligible tier candidates. It cannot add models or authorize tools. |
+| Structured advisor | Advice among eligible tier candidates. It cannot add models or authorize tools. |
 | Operator | Model configuration, provider access, and per-profile approval for external context. |
 
 The router never reads private authentication storage or claims to identify the provider account behind a login.
-Only the Jev advisor uses a separate HTTPS credential.
-Project configuration cannot enable Jev or inherit approval for a new profile.
+Jev and Cloudflare both resolve credentials and provider URLs through Pi's public classifier registry.
+The router owns only bounded request policy, strict answer validation and user/profile authorization.
+Project configuration cannot select/enable an external choice advisor or inherit approval for a new profile.
+Cloudflare uses Pi's classifier registry and authentication. Jev approval never transfers to Cloudflare;
+see the [Cloudflare contract](cloudflare-advisor.md).
 
 ## Route selection
 
@@ -52,7 +55,7 @@ Project configuration cannot enable Jev or inherit approval for a new profile.
 flowchart TD
     Start["Validate request and eligible routes"] --> Policy["Continuation, pin, budget, then candidate count"]
     Policy -->|"Local rule selects a route"| Generate["Revalidate and generate through Pi"]
-    Policy -->|"Advice needed"| Advisor["Jev or isolated Pi classifier"]
+    Policy -->|"Advice needed"| Advisor["Jev, Cloudflare or Pi classifier"]
     Advisor -->|"Valid choice"| Generate
     Advisor -->|"No valid advice"| Baseline["Eligible baseline"]
     Policy -->|"No active advisor"| Baseline
@@ -91,7 +94,8 @@ Prompt words, language, length, and inferred task phase never select a local tie
 
 ## Advisor contract
 
-Jev receives bounded current text, recent dialogue, and permitted tool evidence.
+The selected structured advisor (Jev, Clef, or Clef Flash) receives bounded current text,
+recent dialogue, and permitted tool evidence.
 It never receives system prompts, tool definitions, thinking blocks, tool arguments, binary blocks, or raw configuration.
 Selected text can still contain private data. Filtering is not redaction.
 
@@ -109,10 +113,10 @@ The Pi classifier has a separate deadline and no retry.
 sequenceDiagram
     participant Pi as Pi caller
     participant R as Router
-    participant J as Jev
+    participant J as Selected advisor
     participant M as Pi model registry
     Pi->>R: New user turn
-    opt Jev active and more than one eligible route
+    opt Advice eligible
         R->>J: Bounded text and candidate IDs
         J-->>R: Choice, confidence, distribution
     end
@@ -140,7 +144,7 @@ Its text estimate does not guarantee a fit for images or oversized active turns.
 
 | Event | Router action | Boundary |
 | --- | --- | --- |
-| Jev times out, abstains, or returns invalid advice. | Select the eligible baseline. | Do not call a second advisor. |
+| The selected advisor times out, abstains, or returns invalid advice. | Select the eligible baseline. | Do not call a second advisor. |
 | An explicit pin has no eligible route. | Return an error. | Do not substitute another tier. |
 | The caller cancels. | Stop the request. | Do not start baseline generation or retry. |
 | Generation fails before visible content. | Try the next configured fallback, or return an error. | Revalidate the target and account for reported costs. |
@@ -178,14 +182,25 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 | `provider.ts` | Own route flow, advisor deadlines, continuation reuse, and delegation. |
 | `routing.ts` | Apply baseline, pin, budget, input, and effort policy. |
 | `context.ts` | Select bounded advisor text and extract generation input. |
-| `jev.ts`, `classifier.ts` | Call and validate their respective advisors. |
+| `jev.ts`, `cloudflare.ts` | Select the native TypeSafe/Cloudflare classifier target and normalize tuning. |
+| `choice.ts` | Shared structured rubric, candidate acceptance and bounded Pi-native classifier transport. |
+| `classifier.ts` | Optional chat-based classifier compatibility path. |
 | `economics.ts` | Produce generation metrics and hypothetical cost comparisons. |
 | `state.ts` | Validate and copy branch-safe snapshots. |
-| `commands.ts`, `ui.ts` | Accept operator controls and show state. |
+| `commands.ts`, `ui.ts`, private `ui/` | Operator controls, sanitized presentation runtime and native inspector; no advisor calls or credential IO. |
 | `types.ts` | Define shared contracts. |
 
 `provider.ts` calls policy and advisor modules. Advisors do not own provider state or UI behavior.
-State and UI do not call Jev. Generation uses Pi's registry rather than a parallel authentication layer.
+State and UI do not call advisors. Generation and all structured classification use Pi's registry rather than a parallel authentication layer.
+
+The native inspector reads a sanitized presentation snapshot. Provider observations distinguish
+selected advice from attempted/actual generation and cannot affect routing or retries.
+A request epoch rejects stale UI observations after a newer request or session reset.
+Pending session controls use field-level compare-and-set, activate before the next user run,
+and are revalidated against current capabilities. They never enable privacy settings.
+The inspector's transient state is cleared on reload/session replacement/shutdown;
+activated pins and effort retain the existing branch persistence.
+Usage is a projection of the profile's retained debug history, not a new accounting ledger.
 
 Strict TypeScript, Biome import-cycle checks, and behavior tests protect these boundaries.
 Integration tests use real Pi event streams and in-memory providers. Jev tests use synthetic HTTP fixtures, not live credentials.

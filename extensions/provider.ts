@@ -18,6 +18,7 @@ import {
   estimateTokens as estimateMessageTokens,
 } from '@earendil-works/pi-coding-agent';
 import { runClassifier } from './classifier';
+import { runCloudflareDetailed } from './cloudflare';
 import {
   MAX_THINKING_LEVEL,
   parseCanonicalModelRef,
@@ -44,6 +45,7 @@ import {
 } from './routing';
 import type {
   AdvisedTurnRecord,
+  CloudflareConfig,
   JevConfig,
   JevFlight,
   JevRequest,
@@ -52,6 +54,7 @@ import type {
   RoutePair,
   RouterConfig,
   RouterPinByProfile,
+  RouterRequestObservation,
   RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
@@ -83,7 +86,6 @@ const createJevFlightKey = (
     profile,
     policy,
     candidates: candidates.map((candidate) => candidate.id),
-    endpoint: config.endpoint,
     model: config.model,
     timeoutMs: config.timeoutMs,
     confidenceThreshold: config.confidenceThreshold,
@@ -115,11 +117,12 @@ const waitForAbortable = async <T>(
   }
 };
 
-const runJevSingleFlight = (
+const runChoiceSingleFlight = (
   pending: Map<string, JevFlight>,
   key: string,
-  config: JevConfig,
+  config: JevConfig | CloudflareConfig,
   request: JevRequest,
+  run: (request: JevRequest) => Promise<JevResult>,
 ): { promise: Promise<JevResult>; shared: boolean; release: () => void } => {
   const existing = pending.get(key);
   const shared = existing?.config === config;
@@ -131,7 +134,7 @@ const runJevSingleFlight = (
         config,
         controller,
         waiters: 0,
-        promise: runJevDetailed(config, {
+        promise: run({
           ...request,
           signal: controller.signal,
         }),
@@ -335,6 +338,9 @@ export const registerRouterProvider = (
     recordDebugDecision: (decision: RoutingDecision) => void;
     updateStatus: (ctx: ExtensionContext) => void;
     syncPiThinkingLevel: (level: ThinkingLevel) => void;
+    beginRequest?: (
+      profile: string,
+    ) => (event: RouterRequestObservation) => void;
   },
 ) => {
   const profileList = profileNames(state.currentConfig);
@@ -417,7 +423,7 @@ export const registerRouterProvider = (
   // than letting the latest stream replace another stream's continuation.
   const continuations = new Map<string, ContinuationRecord>();
   const advisedTurns = new Map<string, AdvisedTurnRecord>();
-  const pendingJev = new Map<string, JevFlight>();
+  const pendingChoice = new Map<string, JevFlight>();
   const rememberContinuation = (record: ContinuationRecord) => {
     continuations.delete(record.turn);
     continuations.set(record.turn, record);
@@ -473,11 +479,25 @@ export const registerRouterProvider = (
       options?: SimpleStreamOptions,
     ): AssistantMessageEventStream {
       const stream = createAssistantMessageEventStream();
+      let observer: ((event: RouterRequestObservation) => void) | undefined;
+      try {
+        observer = actions.beginRequest?.(model.id);
+      } catch {
+        /* Optional presentation only. */
+      }
+      const observe = (event: RouterRequestObservation) => {
+        try {
+          observer?.(event);
+        } catch {
+          /* UI cannot change routing or retries. */
+        }
+      };
 
       void (async () => {
         let partialMessage: AssistantMessage | undefined;
         let activeTurn: string | undefined;
         let generationSucceeded = false;
+        let generationAborted = false;
         try {
           // Wait for the router to be fully initialized (session_start sets currentModelRegistry).
           // This handles the race where subagents (e.g. from pi-dynamic-workflows) invoke
@@ -572,18 +592,32 @@ export const registerRouterProvider = (
             pinnedTier,
             thinkingOverrides,
             state.currentConfig.classifierModel,
+            state.currentConfig.advisor,
+            state.currentConfig.cloudflare,
             isBudgetExceeded,
           ]);
           const toolContinuation =
             context.messages.at(-1)?.role === 'toolResult';
-          const jev = state.currentConfig.jev;
+          const adviceConfig = state.currentConfig;
+          const cloudflareSelection =
+            adviceConfig.advisor === 'clef' ||
+            adviceConfig.advisor === 'clef-flash'
+              ? adviceConfig.advisor
+              : undefined;
+          const cloudflare = adviceConfig.cloudflare;
+          const cloudflareAuthorization = JSON.stringify([
+            cloudflareSelection,
+            cloudflare,
+            profile.cloudflare,
+          ]);
+          const jev = adviceConfig.jev;
           const useJev = Boolean(
-            jev?.enabled &&
-              profile.jev?.enabled &&
-              jev.apiKey.trim().length > 0,
+            !cloudflareSelection && jev?.enabled && profile.jev?.enabled,
           );
           const advisorConfigured =
-            useJev || Boolean(state.currentConfig.classifierModel);
+            Boolean(cloudflareSelection) ||
+            useJev ||
+            Boolean(state.currentConfig.classifierModel);
           const continuationRecord =
             toolContinuation && turn ? continuations.get(turn) : undefined;
           const continuationDecision = continuationRecord?.decision;
@@ -693,10 +727,12 @@ export const registerRouterProvider = (
             const started = performance.now();
             const routingDeadline =
               started +
-              (useJev && jev
-                ? jev.timeoutMs
-                : (state.currentConfig.classifierModel?.timeoutMs ??
-                  DEFAULT_CLASSIFIER_TIMEOUT_MS));
+              (cloudflareSelection
+                ? (cloudflare?.timeoutMs ?? 1500)
+                : useJev && jev
+                  ? jev.timeoutMs
+                  : (state.currentConfig.classifierModel?.timeoutMs ??
+                    DEFAULT_CLASSIFIER_TIMEOUT_MS));
             const candidates = primaryRoutePairs(profile, pairs).map(
               createJevCandidate,
             );
@@ -711,25 +747,64 @@ export const registerRouterProvider = (
                 policy,
                 state.currentConfig,
               );
-            } else if (useJev && jev) {
+            } else if (cloudflareSelection || (useJev && jev)) {
+              const structuredConfig = cloudflareSelection ? cloudflare : jev;
+              const fallbackConfig: CloudflareConfig = {
+                enabled: false,
+                timeoutMs: 1500,
+                confidenceThreshold: 0.65,
+                probabilityThreshold: 0.8,
+                maxStateTokens: 3000,
+                mode: 'advisory',
+              };
+              const selectedConfig = structuredConfig ?? fallbackConfig;
+              const diagnosticKey = cloudflareSelection ? 'cloudflare' : 'jev';
               options?.signal?.throwIfAborted();
-              const flight = runJevSingleFlight(
-                pendingJev,
-                createJevFlightKey(turn, model.id, candidates, jev, policy),
-                jev,
+              const flight = runChoiceSingleFlight(
+                pendingChoice,
+                cloudflareSelection
+                  ? JSON.stringify([
+                      turn,
+                      model.id,
+                      policy,
+                      cloudflareSelection,
+                      candidates,
+                      selectedConfig,
+                    ])
+                  : createJevFlightKey(
+                      turn,
+                      model.id,
+                      candidates,
+                      jev as JevConfig,
+                      policy,
+                    ),
+                selectedConfig,
                 {
                   context,
                   candidates,
-                  profile: profile.jev,
+                  profile: cloudflareSelection
+                    ? profile.cloudflare
+                    : profile.jev,
                   baselineTier: selectBaselineRoute(model.id, profile, pairs)
                     .pair.tier,
                   routingDeadline,
                 },
+                cloudflareSelection
+                  ? (request) =>
+                      runCloudflareDetailed(
+                        cloudflareSelection,
+                        cloudflare,
+                        request,
+                        registry,
+                      )
+                  : (request) => runJevDetailed(jev, request, registry),
               );
               const result = await waitForAbortable(
                 flight.promise,
                 options?.signal,
               ).finally(flight.release);
+              if (result.diagnostics.outcome === 'cancelled')
+                throw new DOMException('Advisor aborted', 'AbortError');
               const advice = result.advice;
               options?.signal?.throwIfAborted();
               // Re-read registry capabilities after the network boundary.
@@ -739,6 +814,14 @@ export const registerRouterProvider = (
               );
               if (
                 candidate &&
+                state.currentConfig === adviceConfig &&
+                (!cloudflareSelection ||
+                  cloudflareAuthorization ===
+                    JSON.stringify([
+                      state.currentConfig.advisor,
+                      state.currentConfig.cloudflare,
+                      profile.cloudflare,
+                    ])) &&
                 performance.now() < routingDeadline &&
                 pairs.some(
                   (pair) =>
@@ -748,8 +831,12 @@ export const registerRouterProvider = (
                 )
               ) {
                 decision = {
-                  ...decisionForPair(model.id, candidate, 'jev'),
-                  advisor: 'jev',
+                  ...decisionForPair(
+                    model.id,
+                    candidate,
+                    cloudflareSelection ? 'cloudflare' : 'jev',
+                  ),
+                  advisor: cloudflareSelection ? 'cloudflare' : 'jev',
                 };
               } else {
                 const baseline = selectBaselineRoute(model.id, profile, pairs);
@@ -758,11 +845,14 @@ export const registerRouterProvider = (
                   baseline.pair,
                   baseline.reasonCode,
                 );
-                decision.advisor = 'jev-fallback';
+                decision.advisor = cloudflareSelection
+                  ? 'cloudflare-fallback'
+                  : 'jev-fallback';
                 decision.errorClass = 'advisor-unavailable';
               }
-              decision.jev =
-                decision.advisor === 'jev-fallback' &&
+              decision[diagnosticKey] =
+                (decision.advisor === 'jev-fallback' ||
+                  decision.advisor === 'cloudflare-fallback') &&
                 result.diagnostics.outcome === 'selected'
                   ? {
                       ...result.diagnostics,
@@ -774,14 +864,9 @@ export const registerRouterProvider = (
                   : result.diagnostics;
               decision.reuse = flight.shared ? 'shared' : undefined;
               decision.routingLatencyMs = result.diagnostics.latencyMs;
-              if (decision.jev.outcome === 'deadline')
+              if (decision[diagnosticKey]?.outcome === 'deadline')
                 decision.errorClass = 'deadline';
-              rememberAdvisedDecision(
-                turn,
-                decision,
-                policy,
-                state.currentConfig,
-              );
+              rememberAdvisedDecision(turn, decision, policy, adviceConfig);
             } else if (state.currentConfig.classifierModel) {
               const classifier = state.currentConfig.classifierModel;
               const result = await runClassifier(
@@ -883,6 +968,7 @@ export const registerRouterProvider = (
           // A reused route must not carry the previous generation's usage.
           decision.generation = undefined;
           state.lastDecision = decision;
+          observe({ stage: 'selected', decision });
 
           // Sync pi's thinking level display with the router's effective thinking.
           // Wrapped in try/catch: in subagent contexts the extension runtime
@@ -1006,6 +1092,18 @@ export const registerRouterProvider = (
               // Pi owns request-time auth, custom/native providers, URLs and transcript normalization.
               attempts += 1;
               attemptStarted = true;
+              observe({
+                stage: 'generating',
+                decision: {
+                  ...decision,
+                  targetProvider,
+                  targetModelId,
+                  targetLabel: modelRef,
+                  thinking: pair.thinking,
+                  isFallback:
+                    i > 0 || modelRef !== profile[decision.tier]?.model,
+                },
+              });
               const delegatedStream = registry.streamSimple(
                 targetModel,
                 effectiveContext,
@@ -1030,6 +1128,8 @@ export const registerRouterProvider = (
                   decision.reasonCode = 'fallback';
               };
               for await (const event of delegatedStream) {
+                if (event.type === 'error' && event.reason === 'aborted')
+                  generationAborted = true;
                 if (event.type === 'done' || event.type === 'error') {
                   usageReceived = true;
                   const usage = (
@@ -1100,7 +1200,7 @@ export const registerRouterProvider = (
                         turn,
                         decision,
                         policy,
-                        state.currentConfig,
+                        adviceConfig,
                       );
                     }
                     rememberContinuation({
@@ -1108,7 +1208,7 @@ export const registerRouterProvider = (
                       policy,
                       branch,
                       decision,
-                      config: state.currentConfig,
+                      config: adviceConfig,
                       toolCalls: new Set(
                         event.message.content.flatMap((entry) =>
                           entry.type === 'toolCall' ? [entry.id] : [],
@@ -1166,9 +1266,18 @@ export const registerRouterProvider = (
           }
 
           actions.recordDebugDecision(decision);
+          observe({
+            stage: generationAborted ? 'cancelled' : 'complete',
+            decision,
+          });
           stream.end();
         } catch (error) {
-          const reason = options?.signal?.aborted ? 'aborted' : 'error';
+          const reason =
+            options?.signal?.aborted ||
+            (error instanceof DOMException && error.name === 'AbortError')
+              ? 'aborted'
+              : 'error';
+          observe({ stage: reason === 'aborted' ? 'cancelled' : 'failed' });
           stream.push({
             type: 'error',
             reason,

@@ -1,13 +1,34 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_JEV_CONFIG } from './config';
 import { estimateJevRequestTokens, estimateJevTextTokens } from './context';
-import { createJevCandidate, runJev, runJevDetailed } from './jev';
+import {
+  createJevCandidate,
+  runJev as runNativeJev,
+  runJevDetailed as runNativeJevDetailed,
+} from './jev';
 import { buildPersistedState } from './state';
+import { nativeJevRegistry } from './test/fixtures';
 import fixtures from './test/fixtures/jev-http.json';
-import type { JevConfig, JevRequest, RoutingDecision } from './types';
+import type {
+  JevConfig,
+  JevDependencies,
+  JevRequest,
+  RoutingDecision,
+} from './types';
 
 const KEY = 'synthetic-private-key-never-log';
-const config: JevConfig = { ...DEFAULT_JEV_CONFIG, enabled: true, apiKey: KEY };
+const config: JevConfig = { ...DEFAULT_JEV_CONFIG, enabled: true };
+const runJev = (
+  config: JevConfig | undefined,
+  request: JevRequest,
+  dependencies: JevDependencies = {},
+) => runNativeJev(config, request, nativeJevRegistry(KEY), dependencies);
+const runJevDetailed = (
+  config: JevConfig | undefined,
+  request: JevRequest,
+  dependencies: JevDependencies = {},
+) =>
+  runNativeJevDetailed(config, request, nativeJevRegistry(KEY), dependencies);
 const candidates = [
   createJevCandidate({
     tier: 'medium',
@@ -510,15 +531,17 @@ describe('jev.ts HTTP contract', () => {
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     const [endpoint, init] = fetch.mock.calls[0] ?? [];
-    expect(endpoint).toBe(fixtures.request.endpoint);
+    expect(String(endpoint)).toBe(fixtures.request.endpoint);
     expect(init).toMatchObject({
       method: 'POST',
       redirect: 'error',
-      headers: {
-        Authorization: `Bearer ${KEY}`,
-        'Content-Type': 'application/json',
-      },
     });
+    expect(new Headers(init?.headers).get('authorization')).toBe(
+      `Bearer ${KEY}`,
+    );
+    expect(new Headers(init?.headers).get('content-type')).toBe(
+      'application/json',
+    );
     const body = JSON.parse(String(init?.body));
     expect(body).toMatchObject({
       ...fixtures.request.body,
@@ -704,7 +727,7 @@ describe('jev.ts HTTP contract', () => {
   it.each([
     undefined,
     { ...config, enabled: false },
-    { ...config, apiKey: '' },
+    { ...config, model: '' },
     { ...config, endpoint: 'http://insecure.invalid' },
     { ...config, timeoutMs: Number.NaN },
   ])('never sends disabled or malformed config', async (value) => {
@@ -874,7 +897,7 @@ describe('jev.ts HTTP contract', () => {
     const state = buildPersistedState(input);
     for (const sink of [advice, state, state.debugHistory]) {
       expect(JSON.stringify(sink)).not.toContain(KEY);
-      expect(JSON.stringify(sink)).not.toContain(config.endpoint);
+      expect(JSON.stringify(sink)).not.toContain('https://api.typesafe.ai/v1/');
     }
     for (const log of logs) expect(log).not.toHaveBeenCalled();
   });

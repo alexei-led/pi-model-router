@@ -403,3 +403,53 @@ describe('state.ts', () => {
     ).toBe(true);
   });
 });
+
+describe('Cloudflare diagnostic snapshots', () => {
+  it.each(['@cf/cloudflare/clef', '@cf/cloudflare/clef-flash'])(
+    'retains allowlisted %s identity and numeric diagnostics separately from Jev',
+    (model) => {
+      const snapshot = snapshotDecision({
+        ...decision,
+        reasonCode: 'cloudflare',
+        advisor: 'cloudflare',
+        cloudflare: {
+          model,
+          outcome: 'selected',
+          latencyMs: 12,
+          actualInputTokens: 42,
+          selectedTier: 'high',
+          confidence: 0.9,
+          errorMessage: 'remote-secret',
+          resolvedModel: 'jev-1.13.0',
+        },
+      } as unknown as RoutingDecision);
+      expect(snapshot).toMatchObject({
+        reasonCode: 'cloudflare',
+        advisor: 'cloudflare',
+        cloudflare: { model, actualInputTokens: 42, latencyMs: 12 },
+      });
+      expect(snapshot?.jev).toBeUndefined();
+      expect(snapshot?.cloudflare?.resolvedModel).toBeUndefined();
+      expect(JSON.stringify(snapshot)).not.toContain('remote-secret');
+    },
+  );
+
+  it('does not accept arbitrary/foreign model labels', () => {
+    const snapshot = snapshotDecision({
+      ...decision,
+      cloudflare: {
+        model: 'secret-model',
+        outcome: 'unavailable',
+        latencyMs: 0,
+      },
+    });
+    expect(snapshot?.cloudflare?.model).toBeUndefined();
+    expect(snapshotDecision(decision)?.cloudflare).toBeUndefined();
+    expect(
+      snapshotDecision({
+        ...decision,
+        jev: { outcome: 'selected', latencyMs: 1, model: 'jev-1.13.0' },
+      })?.jev?.model,
+    ).toBe('jev-1.13.0');
+  });
+});

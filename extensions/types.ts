@@ -1,5 +1,10 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type { Context } from '@earendil-works/pi-ai';
+import type {
+  ClassifierApi,
+  ClassifierModel,
+  Context,
+} from '@earendil-works/pi-ai';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 // Descending routing complexity; all tier iteration and ranking derives here.
 export const ROUTER_TIERS = ['high', 'medium', 'low', 'micro'] as const;
@@ -74,8 +79,6 @@ export interface JevContextMetrics {
 
 export interface JevConfig {
   enabled: boolean;
-  apiKey: string;
-  endpoint: string;
   model: string;
   timeoutMs: number;
   confidenceThreshold: number;
@@ -86,6 +89,30 @@ export interface JevConfig {
   mode: 'advisory';
 }
 
+export type AdvisorSelection = 'jev' | 'clef' | 'clef-flash';
+
+/** Cloudflare authentication belongs exclusively to Pi. */
+export type CloudflareConfig = Omit<JevConfig, 'model'>;
+export interface ChoiceRegistry {
+  findOfType: (
+    type: 'classifier',
+    provider: string,
+    id: string,
+  ) => ClassifierModel<ClassifierApi> | undefined;
+  classify: ExtensionContext['modelRegistry']['classify'];
+}
+export interface ChoiceTarget {
+  provider: 'typesafe' | 'cloudflare-workers-ai';
+  modelId: string;
+  api: 'typesafe-system-one' | 'cloudflare-workers-ai-system-one';
+}
+export interface CapabilityCriterion {
+  covers: string;
+  useWhen?: readonly string[];
+  notFor: readonly string[];
+  examples: readonly string[];
+}
+
 export interface JevProfileConfig {
   enabled: boolean;
 }
@@ -93,6 +120,7 @@ export interface JevProfileConfig {
 export interface RouterProfile {
   baselineTier?: RouterTier | undefined;
   jev?: JevProfileConfig | undefined;
+  cloudflare?: JevProfileConfig | undefined;
   high?: RoutedTierConfig | undefined;
   medium?: RoutedTierConfig | undefined;
   low?: RoutedTierConfig | undefined;
@@ -104,6 +132,8 @@ export type StatusLineMode = 'compact' | 'detailed';
 export interface RouterConfig {
   ui?: { statusLine: StatusLineMode } | undefined;
   jev?: JevConfig | undefined;
+  advisor?: AdvisorSelection | undefined;
+  cloudflare?: CloudflareConfig | undefined;
   debug?: boolean | undefined;
   classifierModel?: ClassifierConfig | undefined;
   maxSessionBudget?: number | undefined;
@@ -212,7 +242,7 @@ export interface JevResult {
 
 /** Runtime-only shared request; never persisted. */
 export interface JevFlight {
-  config: JevConfig;
+  config: JevConfig | CloudflareConfig;
   promise: Promise<JevResult>;
   controller: AbortController;
   waiters: number;
@@ -238,6 +268,7 @@ export const ROUTING_REASON_CODES = [
   'continuation',
   'classifier',
   'jev',
+  'cloudflare',
   'fallback',
   'budget',
   'legacy',
@@ -253,6 +284,8 @@ export const ADVISOR_OUTCOMES = [
   'bypassed',
   'jev',
   'jev-fallback',
+  'cloudflare',
+  'cloudflare-fallback',
   'classifier',
   'classifier-fallback',
 ] as const;
@@ -313,6 +346,7 @@ export interface RoutingDecision {
   advisor?: AdvisorOutcome | undefined;
   bypassReason?: BypassReason | undefined;
   jev?: JevDiagnostics | undefined;
+  cloudflare?: JevDiagnostics | undefined;
   generation?: GenerationDiagnostics | undefined;
   reuse?: 'same-turn' | 'shared' | 'continuation' | undefined;
   thinking: ThinkingLevel;
@@ -361,6 +395,8 @@ export interface RouterPersistedState {
 export interface RawRouterConfig {
   ui?: unknown;
   jev?: unknown;
+  advisor?: unknown;
+  cloudflare?: unknown;
   debug?: unknown;
   classifierModel?: unknown;
   phaseBias?: unknown;
@@ -378,4 +414,123 @@ export interface ConfigLoadResult {
 export interface ParsedConfigFile {
   config: RawRouterConfig;
   warnings: string[];
+}
+
+export type RouterUIAdvisorId = 'jev' | 'clef' | 'clef-flash';
+export type RouterUILifecycle =
+  | 'choosing'
+  | 'generating'
+  | 'continuation'
+  | 'timeout'
+  | 'fallback'
+  | 'budget'
+  | 'cancelled'
+  | 'failed'
+  | 'off'
+  | 'idle';
+
+/** Flat fields make compare-and-set undo independent of unrelated edits. */
+export interface RouterUIControls {
+  pin: RouterPin;
+  baseline: RouterPin;
+  budget: number | undefined;
+  advisor: RouterUIAdvisorId;
+  timeout: number;
+  thinkingHigh: ThinkingLevel | undefined;
+  thinkingMedium: ThinkingLevel | undefined;
+  thinkingLow: ThinkingLevel | undefined;
+  thinkingMicro: ThinkingLevel | undefined;
+}
+export type RouterUIControlChange = {
+  [K in keyof RouterUIControls]: {
+    key: K;
+    before: RouterUIControls[K];
+    after: RouterUIControls[K];
+  };
+}[keyof RouterUIControls];
+export interface RouterUIControlTransaction {
+  profile: string;
+  action: 'apply' | 'undo';
+  changes: readonly RouterUIControlChange[];
+}
+export interface RouterUIRoute {
+  tier: RouterTier;
+  provider: string;
+  model: string;
+  thinking: ThinkingLevel;
+}
+export interface RouterUIAdviceObservation {
+  advisor: RouterUIAdvisorId;
+  requestId?: string | undefined;
+  outcome: JevOutcome;
+  latencyMs?: number | undefined;
+  httpAttempts?: number | undefined;
+  costUsd?: number | undefined;
+}
+export interface RouterUIHistoryEntry {
+  actual?: RouterUIRoute | undefined;
+  advice?: RouterUIAdviceObservation | undefined;
+  reuse?: RoutingDecision['reuse'];
+  /** Cost for this observation only; reuses must not repeat an earlier cost. */
+  generationCostUsd?: number | undefined;
+  generationAttempts?: number | undefined;
+}
+/** Presentation only: no credentials, transcript text or remote explanations. */
+export interface RouterUISnapshot {
+  profile: string;
+  lifecycle: RouterUILifecycle;
+  reason?: RoutingReasonCode | undefined;
+  failure?: 'request-failed' | undefined;
+  actual?: RouterUIRoute | undefined;
+  advised?: RouterUIRoute | undefined;
+  advice?: RouterUIAdviceObservation | undefined;
+  controls: Readonly<RouterUIControls>;
+  pendingControls?: Readonly<RouterUIControls> | undefined;
+  eligible: Readonly<Partial<Record<RouterTier, RouterUIRoute>>>;
+  privacy: {
+    jevApproved: boolean | undefined;
+    cloudflareApproved: boolean | undefined;
+    /** Public host capability only; not backend-login attestation. */
+    auth: 'available' | 'unavailable' | 'unknown';
+  };
+  /** Active-branch retained decisions, not a session ledger; UI caps at 50.
+   * Replace the array when observations change; keep its identity on token refreshes. */
+  history: readonly RouterUIHistoryEntry[];
+}
+export interface RouterUIAdapters {
+  getSnapshot: () => RouterUISnapshot;
+  /** Atomically compare all before values; reject conflicts; queue next-user-turn controls. */
+  applyControls: (
+    transaction: RouterUIControlTransaction,
+  ) => Promise<'applied' | 'conflict'>;
+  subscribe: (refresh: () => void) => () => void;
+  /** Abort on session replacement/reload/shutdown to complete and dispose the inspector. */
+  signal?: AbortSignal | undefined;
+}
+
+export interface RouterUIPreferences {
+  widgetEnabled: boolean;
+  statusLine?: StatusLineMode | undefined;
+}
+
+/** Runtime-only observations. They must never affect generation or enter snapshots. */
+export interface RouterRequestObservation {
+  stage: 'selected' | 'generating' | 'complete' | 'cancelled' | 'failed';
+  decision?: RoutingDecision | undefined;
+}
+export interface RouterUIPendingControls {
+  base: RouterUIControls;
+  value: RouterUIControls;
+}
+export interface RouterUIRuntimeState {
+  currentConfig: RouterConfig;
+  readonly selectedProfile: string | undefined;
+  readonly routerEnabled: boolean;
+  readonly pinnedTierByProfile: RouterPinByProfile;
+  readonly thinkingByProfile: RouterThinkingByProfile;
+  readonly lastDecision: RoutingDecision | undefined;
+  readonly debugHistory: readonly RoutingDecision[];
+  readonly currentModelRegistry:
+    | Pick<ExtensionContext['modelRegistry'], 'find'>
+    | undefined;
 }

@@ -17,6 +17,7 @@ import {
   resolveMaxTokens,
   resolveModelRef,
   resolveProfileName,
+  stripProjectJevConfig,
 } from './config';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
 
@@ -26,7 +27,6 @@ describe('Jev context configuration', () => {
     const config = normalizeJevConfig(
       {
         enabled: true,
-        apiKey: 'synthetic',
         context: { previousTurns: 0, toolResults: 'none' },
       },
       warnings,
@@ -903,7 +903,7 @@ describe('config.ts Jev user-config provenance', () => {
     jev: { enabled: true },
   };
   const user = {
-    jev: { enabled: true, apiKey: 'synthetic-user-key' },
+    jev: { enabled: true },
     profiles: {
       personal,
       work: {
@@ -924,8 +924,6 @@ describe('config.ts Jev user-config provenance', () => {
     expect(warnings).toEqual([]);
     expect(config.jev).toEqual({
       enabled: true,
-      apiKey: 'synthetic-user-key',
-      endpoint: 'https://api.typesafe.ai/v1/systemone',
       model: 'jev-1.13.0',
       timeoutMs: 1500,
       confidenceThreshold: 0.65,
@@ -969,8 +967,8 @@ describe('config.ts Jev user-config provenance', () => {
       },
     });
     expect(config.jev?.enabled).toBe(true);
-    expect(config.jev?.apiKey).toBe('synthetic-user-key');
-    expect(config.jev?.endpoint).toBe('https://api.typesafe.ai/v1/systemone');
+    expect(config.jev).not.toHaveProperty('apiKey');
+    expect(config.jev).not.toHaveProperty('endpoint');
     expect(config.jev?.model).toBe('jev-1.13.0');
     expect(config.profiles.personal?.jev?.enabled).toBe(true);
     expect(config.profiles.work?.jev?.enabled).not.toBe(true);
@@ -1020,14 +1018,10 @@ describe('config.ts Jev user-config provenance', () => {
     expect(config.profiles.personal?.jev).toEqual({ enabled: true });
   });
 
-  it('disables missing or blank keys with a fixed warning', () => {
-    for (const apiKey of [undefined, '']) {
-      const warnings: string[] = [];
-      expect(
-        normalizeJevConfig({ enabled: true, apiKey }, warnings)?.enabled,
-      ).toBe(false);
-      expect(warnings).toEqual(['Jev disabled: missing user-config API key.']);
-    }
+  it('keeps enablement independent of credentials resolved by Pi at request time', () => {
+    const warnings: string[] = [];
+    expect(normalizeJevConfig({ enabled: true }, warnings)?.enabled).toBe(true);
+    expect(warnings).toEqual([]);
   });
 
   it.each([
@@ -1178,4 +1172,117 @@ describe('review safety diagnostics', () => {
       expect(warnings).toEqual([]);
     },
   );
+});
+
+describe('user-owned Cloudflare advisor configuration', () => {
+  it('defaults selection to Jev without transferring existing consent', () => {
+    const { config } = normalizeConfig({
+      jev: { enabled: true, apiKey: 'synthetic' },
+      profiles: { p: { medium: { model: 'test/m' }, jev: { enabled: true } } },
+    });
+    expect(config.advisor).toBe('jev');
+    expect(config.cloudflare).toBeUndefined();
+    expect(config.profiles.p?.cloudflare).toBeUndefined();
+  });
+
+  it.each(['clef', 'clef-flash'] as const)(
+    'normalizes explicit %s user consent and bounded defaults',
+    (advisor) => {
+      const { config, warnings } = normalizeConfig({
+        advisor,
+        cloudflare: { enabled: true },
+        profiles: {
+          p: { medium: { model: 'test/m' }, cloudflare: { enabled: true } },
+        },
+      });
+      expect(warnings).toEqual([]);
+      expect(config.advisor).toBe(advisor);
+      expect(config.cloudflare).toMatchObject({
+        enabled: true,
+        timeoutMs: 1500,
+        confidenceThreshold: 0.65,
+        probabilityThreshold: 0.8,
+        maxStateTokens: 3000,
+        retry: { maxAttempts: 2, backoffMs: 400 },
+      });
+      expect(config.cloudflare).not.toHaveProperty('apiKey');
+      expect(config.cloudflare).not.toHaveProperty('endpoint');
+      expect(config.profiles.p?.cloudflare?.enabled).toBe(true);
+    },
+  );
+
+  it.each([
+    { apiKey: 'secret' },
+    { endpoint: 'https://foreign.invalid' },
+    { model: 'foreign' },
+    { timeoutMs: 0 },
+    { timeoutMs: 2147483648 },
+    { confidenceThreshold: 2 },
+    { retry: { maxAttempts: 3 } },
+  ])('rejects unsafe/invalid tuning with value-free warning: %j', (extra) => {
+    const { config, warnings } = normalizeConfig({
+      advisor: 'clef',
+      cloudflare: { enabled: true, ...extra },
+      profiles: {},
+    });
+    expect(config.cloudflare).toBeUndefined();
+    expect(warnings).toContain('Ignored invalid Cloudflare configuration.');
+    expect(warnings.join(' ')).not.toContain('secret');
+  });
+
+  it('ignores all project selection, tuning, consent, including a project-only profile', () => {
+    const user = {
+      advisor: 'clef',
+      cloudflare: { enabled: true },
+      profiles: {
+        p: { medium: { model: 'test/m' }, cloudflare: { enabled: true } },
+      },
+    };
+    const warnings: string[] = [];
+    const project = stripProjectJevConfig(
+      {
+        advisor: 'clef-flash',
+        cloudflare: { timeoutMs: 1 },
+        profiles: {
+          p: { cloudflare: { enabled: false } },
+          added: {
+            medium: { model: 'test/m' },
+            cloudflare: { enabled: true },
+            jev: { enabled: true },
+          },
+        },
+      },
+      warnings,
+    );
+    const config = normalizeConfig(mergeConfig(user, project)).config;
+    expect(config.advisor).toBe('clef');
+    expect(config.cloudflare?.timeoutMs).toBe(1500);
+    expect(config.profiles.p?.cloudflare?.enabled).toBe(true);
+    expect(config.profiles.added?.cloudflare).toBeUndefined();
+    expect(config.profiles.added?.jev).toBeUndefined();
+    expect(warnings).toContain(
+      'Ignored project Cloudflare/advisor settings: configure only in user config.',
+    );
+  });
+
+  it('merges nested user tuning and accepts the Node timer range without a product cap', () => {
+    const raw = mergeConfig(
+      {
+        cloudflare: {
+          enabled: true,
+          context: { previousTurns: 0 },
+          retry: { backoffMs: 25 },
+        },
+      },
+      {
+        cloudflare: { timeoutMs: 2147483647, context: { toolResults: 'none' } },
+      },
+    );
+    const config = normalizeConfig({ ...raw, profiles: {} }).config;
+    expect(config.cloudflare).toMatchObject({
+      timeoutMs: 2147483647,
+      context: { previousTurns: 0, toolResults: 'none' },
+      retry: { maxAttempts: 2, backoffMs: 25 },
+    });
+  });
 });

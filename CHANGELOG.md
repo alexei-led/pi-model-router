@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.10.0] - 2026-10-06
+
+Add a native router inspector, Cloudflare advisors, and Pi-managed Jev authentication.
+
+### Changes
+
+- Add `/router-ui [now|routing|classifier|usage]`, a compact above-editor strip, keyboard navigation, responsive layouts and text-mode output. Session drafts support apply, discard and undo; pending settings do not replace the actual route or interrupt tool continuations.
+- Show retained-history usage, request deduplication and unknown-cost coverage. This is not lifetime accounting or invoice data.
+- Add opt-in Clef and Clef Flash through Cloudflare Workers AI. Provider selection and per-profile privacy approval remain separate; project configuration cannot authorize external advice.
+- Route Jev through Pi's classifier registry. Keep explicit Jev model pins, the structured rubric, strict response validation, bounded retries/deadlines and cancellation. Credentials and provider URLs no longer belong in router config.
+
+### Upgrade
+
+1. Keep Pi on 1.0.2 or later in the 1.x series. Before upgrading, run `/login typesafe` or provide `TYPESAFE_API_KEY` to Pi. The generic login menu requires **Sign in with an API key**.
+2. Upgrade the router and start a new Pi session. Then remove `jev.apiKey` and `jev.endpoint` from user `model-router.json`. Legacy fields are ignored with a warning; without Pi authentication, Jev advice falls back to baseline. A custom legacy endpoint disables Jev until its URL is migrated into Pi's provider configuration and the old field is removed.
+3. Keep your model pin, tuning and profile consent. Nothing transfers credentials or enables a work profile automatically. For Cloudflare, use `/login cloudflare-workers-ai` and its separate user/profile opt-in.
+
+See the [Jev migration guide](docs/jev-advisor.md#migrate-the-old-router-fields)
+and [Cloudflare setup](docs/cloudflare-advisor.md).
+
+### Verification
+
+- Update the development lockfile to `source-map-js` 1.2.2 to remove GHSA-68fv-2mgg-jv7q; dependency audit is clean.
+- 797 tests; TypeScript/Biome and package checks.
+- Actual Pi/agterm UI validation and scoped screenshots.
+- Bounded live generation/tool-continuation, Jev, Clef and Clef Flash smoke tests. These are compatibility samples, not quality or latency benchmarks.
+
 ## [0.9.2] - 2026-10-04
 
 ### Changed
