@@ -16,16 +16,16 @@ flowchart LR
         State --> UI["Status and commands"]
     end
     subgraph External["External advisor service"]
-        Jev["Jev / Cloudflare"]
+        Classifier["Configured Pi classifier"]
     end
-    Router <-->|"Bounded text + candidate IDs / advice"| Jev
+    Router <-->|"Bounded text + candidate IDs / advice"| Classifier
     Registry -->|"Generation context"| Model["Model backend · local or remote"]
     classDef policy fill:#dbeafe,stroke:#2563eb,color:#0f172a
     classDef advisor fill:#fef3c7,stroke:#b45309,color:#451a03
     classDef generation fill:#dcfce7,stroke:#15803d,color:#14532d
     classDef local fill:#f1f5f9,stroke:#64748b,color:#0f172a
     class Config,Router policy
-    class Jev advisor
+    class Classifier advisor
     class Registry,Model generation
     class State local
     style Process fill:transparent,stroke:#64748b
@@ -43,11 +43,7 @@ Node labels identify each role without color.
 | Operator | Model configuration, provider access, and per-profile approval for external context. |
 
 The router never reads private authentication storage or claims to identify the provider account behind a login.
-Jev and Cloudflare both resolve credentials and provider URLs through Pi's public classifier registry.
-The router owns only bounded request policy, strict answer validation and user/profile authorization.
-Project configuration cannot select/enable an external choice advisor or inherit approval for a new profile.
-Cloudflare uses Pi's classifier registry and authentication. Jev approval never transfers to Cloudflare;
-see the [Cloudflare contract](cloudflare-advisor.md).
+Every configured classifier uses Pi's public classifier registry and authentication. The router owns bounded context selection, candidate validation, deadline policy and user/profile authorization. Project configuration cannot select a classifier or grant profile approval.
 
 ## Route selection
 
@@ -55,7 +51,7 @@ see the [Cloudflare contract](cloudflare-advisor.md).
 flowchart TD
     Start["Validate request and eligible routes"] --> Policy["Continuation, pin, budget, then candidate count"]
     Policy -->|"Local rule selects a route"| Generate["Revalidate and generate through Pi"]
-    Policy -->|"Advice needed"| Advisor["Jev, Cloudflare or Pi classifier"]
+    Policy -->|"Advice needed"| Advisor["Configured Pi classifier"]
     Advisor -->|"Valid choice"| Generate
     Advisor -->|"No valid advice"| Baseline["Eligible baseline"]
     Policy -->|"No active advisor"| Baseline
@@ -89,23 +85,23 @@ A pin, a Google tool continuation, and explicit generation fallbacks keep their 
 
 An eligible `baselineTier` takes priority. The remaining preference is `medium`, `high`, `low`, then `micro`.
 Each tier offers at most one advisor candidate: its primary, or its first eligible fallback when the primary is ineligible.
-Explicit fallback models retain their configured order. They are not extra Jev candidates.
+Explicit fallback models retain their configured order. They are not extra classifier candidates.
 Prompt words, language, length, and inferred task phase never select a local tier.
 
 ## Advisor contract
 
-The selected structured advisor (Jev, Clef, or Clef Flash) receives bounded current text,
+The selected Pi classifier receives bounded current text,
 recent dialogue, and permitted tool evidence.
 It never receives system prompts, tool definitions, thinking blocks, tool arguments, binary blocks, or raw configuration.
 Selected text can still contain private data. Filtering is not redaction.
 
 A candidate ID represents the tier, canonical model, and effort.
 The adapter rejects unknown IDs, invalid confidence, malformed distributions, and oversized responses.
-It accepts only a current candidate. The [Jev guide](jev-advisor.md#acceptance-policy) defines probability selection.
+It accepts only a current candidate. The [classifier guide](classifier-advisor.md) documents configuration and probability selection.
 
 One absolute deadline covers context preparation, HTTP attempts, backoff, and response reading.
 Only documented transient statuses qualify for a retry inside that deadline.
-The Pi classifier has a separate deadline and no retry.
+Pi classifier retries run only within the shared total deadline.
 
 ## Route reuse and generation
 
@@ -162,13 +158,13 @@ Its text estimate does not guarantee a fit for images or oversized active turns.
 
 Snapshots use deep copies and field-level validation.
 They exclude raw advisor responses, prompts, credentials, endpoints, and remote explanations.
-Local Jev request IDs support deduplication within retained history. They are not provider authentication or cache-affinity IDs.
+Local classifier request IDs support deduplication within retained history. They are not provider authentication or cache-affinity IDs.
 
 Every terminal attempt contributes its reported cost before a fallback decision.
 Missing usage remains unknown. Advisor costs are outside the generation budget.
 The final UI update cannot prevent persistence.
 
-`economics.ts` compares catalog prices on the same measured token workload.
+`economics.ts` calls Pi `calculateCost()` for hypothetical cache scenarios on the same measured token workload, including request-wide input pricing tiers.
 This comparison never affects route selection. It stores no physical cache state or guessed TTL.
 A restored branch does not restore a server cache. Same-model effort changes do not imply cache preservation.
 The [evaluation](evaluation.md#cost-method) states the cost assumptions and evidence limits.
@@ -182,9 +178,8 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 | `provider.ts` | Own route flow, advisor deadlines, continuation reuse, and delegation. |
 | `routing.ts` | Apply baseline, pin, budget, input, and effort policy. |
 | `context.ts` | Select bounded advisor text and extract generation input. |
-| `jev.ts`, `cloudflare.ts` | Select the native TypeSafe/Cloudflare classifier target and normalize tuning. |
-| `choice.ts` | Shared structured rubric, candidate acceptance and bounded Pi-native classifier transport. |
-| `classifier.ts` | Optional chat-based classifier compatibility path. |
+| `classifier.ts` | Build bounded typed requests, call Pi’s classifier registry, enforce deadlines and validate advice. |
+| `choice.ts` | Provider-neutral rubric, candidate identity and strict response validation. |
 | `economics.ts` | Produce generation metrics and hypothetical cost comparisons. |
 | `state.ts` | Validate and copy branch-safe snapshots. |
 | `commands.ts`, `ui.ts`, private `ui/` | Operator controls, sanitized presentation runtime and native inspector; no advisor calls or credential IO. |
@@ -208,4 +203,4 @@ activated pins and effort retain the existing branch persistence.
 Usage is a projection of the profile's retained debug history, not a new accounting ledger.
 
 Strict TypeScript, Biome import-cycle checks, and behavior tests protect these boundaries.
-Integration tests use real Pi event streams and in-memory providers. Jev tests use synthetic HTTP fixtures, not live credentials.
+Integration tests use Pi 1.1.0 types, real host startup and in-memory providers. Classifier transport tests use synthetic fixtures, not live credentials.

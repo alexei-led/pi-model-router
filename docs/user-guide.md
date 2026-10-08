@@ -47,7 +47,7 @@ The baseline is the configured default, not a tier inferred from prompt words.
 | Model ID | The actual generation target, not just the advisor's choice. |
 | Tier / effort | The configured tier and reasoning effort that ran. Narrow strips omit secondary fields first. |
 | `last` | The last completed route, not a currently running request. |
-| Advisor name | Jev, Clef, Clef Flash or Pi classifier. Naming follows the observed advisor. |
+| Advisor name | The configured Pi classifier model reference. |
 | `Tool route reused` | No new advisor request. Prior latency is not presented as a new request. |
 | `timed out → baseline` | Advice failed but an eligible generation baseline ran. |
 | `Explicit generation fallback` | Another configured generation target ran, possibly in the same tier. |
@@ -67,7 +67,7 @@ Run **`/router`**, **`/router usage`** or **`/router settings`**.
 - **Usage:** up to 50 retained decisions, unique advisor requests and cost
   coverage. Bars show observed tiers, not answer quality.
 - **Settings:** pin first. **Advanced** exposes baseline, budget, per-tier effort
-  and Jev / Clef / Clef Flash selection with its deadline and read-only consent.
+  and registered Pi classifier selection with its deadline and read-only profile approvals.
   The separate Pi classifier path is shown when configured.
 
 Use Left/Right on the tab row to change sections. Tab/Shift+Tab changes focus.
@@ -102,18 +102,13 @@ for durable settings.
 
 ![Queued controls in actual Pi](assets/router-ui/signal-settings-dark.png)
 
-Credentials and privacy consent are read-only. Selecting Clef does not authorize
-sending context to Cloudflare. See [Cloudflare advisors](cloudflare-advisor.md).
-The Pi chat classifier remains a separate configured path when external advice
-is inactive, never a second advisor after failed external advice.
+Classifier credentials and profile approvals are read-only. Selecting a different classifier does not add profile approval. Configure the selected model in Pi, then approve its exact provider/model reference for each profile. See the [classifier privacy guide](classifier-advisor.md).
 
 ![Retained usage in actual Pi, light theme](assets/router-ui/signal-usage-light.png)
 
 Usage is **not lifetime accounting**. `/router log on` starts collection;
 turning it off preserves existing history, and clearing it clears this view.
-Advice is deduplicated by local request ID. Pi chat-classifier observations
-without those IDs are excluded from HTTP-request totals. Attempts and reuses
-are separate counts. Missing costs are unknown, not zero. Do not add these
+Classifier calls are deduplicated by local request ID. Attempts and reused decisions are counted separately. Missing costs are unknown, not zero. Do not add these
 observations to overlapping host totals.
 
 The session gauge uses **recorded catalog cost**, not an invoice or precise
@@ -123,27 +118,6 @@ Advisor charges are excluded; the budget is not a hard cap.
 
 These images are real Pi/agterm captures using synthetic local fixtures,
 not the HTML prototype. See [validation evidence](testing/signal-panel-acceptance.md).
-
-## Try Jev next
-
-1. Review the [privacy boundary](jev-advisor.md#privacy-boundary).
-2. [Enable Jev](jev-advisor.md#enable-jev) for the same `auto` profile.
-3. Send a new request.
-4. Run `/router` again.
-
-With multiple eligible routes and no policy bypass, status shows Jev advice or a reason for baseline fallback.
-The selected tier can still be high. Different wording does not guarantee a different tier.
-
-### Example session
-
-These outcomes illustrate the flow. They are not fixed rules for particular prompts.
-
-| Event | Example result |
-| --- | --- |
-| A new user request arrives. | Jev advises low. The router validates that choice and selects the low model. |
-| The model receives a tool result. | A valid continuation keeps the actual route without another advisor call. |
-| The user sends a new request. | The router can ask Jev again and select high. |
-| The user pins high. | Later requests use the high tier and its explicit fallbacks without advice. |
 
 ## Take control
 
@@ -179,7 +153,7 @@ Use `/router thinking auto` to clear the override.
 | --- | --- |
 | No eligible route | Make sure that the model exists in `/model` and supports the input. Check `reasoning` and `thinkingLevels` in the configuration. |
 | The baseline handles every request | Inspect `/router`. Enable an advisor for semantic selection, or clear a pin. |
-| Jev does not run | Inspect the bypass reason and the [Jev diagnostics](jev-advisor.md#diagnostics). |
+| Jev does not run | Inspect the bypass reason and classifier status in `/router` or `/router log`. |
 | Old behavior after an extension change | Start a new Pi session. |
 | Provider context overflow | Reduce the active context. Text estimates cannot guarantee that images or a large tool turn fit. |
 
@@ -209,7 +183,7 @@ explicit `profile <name>`, including profiles whose names match commands.
 | File | Purpose |
 | --- | --- |
 | `~/.pi/agent/model-router.json` | User configuration and external-advisor approval. A custom Pi agent directory changes this location. |
-| `.pi/model-router.json` | Project overrides for routes, the Pi classifier, and display. Project Jev, Cloudflare, advisor-selection and advisor-consent settings have no effect. |
+| `.pi/model-router.json` | Project overrides for routes and display. Advisor selection, tuning and profile approvals are ignored in project configuration. |
 | `~/.pi/agent/model-router-state.json` | Last selected profile. The extension manages this file. |
 
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
@@ -224,17 +198,14 @@ The [complete example](../model-router.example.json) shows aliases, all four tie
 | Field | Behavior |
 | --- | --- |
 | `maxSessionBudget` | Soft threshold for reported generation cost. Unpinned requests skip advisors and prefer eligible medium-or-lower tiers after this threshold. |
-| `classifierModel` | Optional chat-based Pi classifier, active only on the default Jev path when Jev is inactive. Accepts a model reference or `{ "model", "thinking", "timeoutMs" }`. |
-| `advisor` | User-only `jev` (default), `clef`, or `clef-flash`. See [Cloudflare advisors](cloudflare-advisor.md). |
-| `cloudflare` | User-only Cloudflare enablement and bounded tuning; per-profile approval is separate. |
+| `advisor` | User-only Pi classifier model, enablement, bounded context, deadline and probability settings. See [classifier setup](classifier-advisor.md). |
 | `models` | Aliases with a `model` reference and optional `contextWindow` and `maxTokens`. |
 | `ui.statusLine` | `compact` by default. `detailed` adds the full provider/model reference and recorded catalog cost, still within two widget lines. |
 
 Budgets and model capacities must be positive, finite numbers. Invalid values are ignored with a warning.
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
 Without an eligible lower tier, the budget policy keeps an eligible baseline.
-The classifier timeout defaults to 10 seconds. A classifier error selects the baseline.
-User or project configuration can set `classifierModel`. It sends bounded recent conversation text through the configured Pi model; Jev approval does not govern this separate path.
+The classifier deadline defaults to 10 seconds. An unavailable model, rejected answer, timeout or provider error selects the local baseline. Profile approval is required for the exact configured classifier model.
 
 ## Read costs and cache data
 
@@ -279,19 +250,8 @@ A restored router snapshot does not restore a server cache.
    `/router widget` for a quiet footer instead. Detailed status stays at two
    lines; cache/probability diagnostics remain in `/router log`.
 
-Routing policy, advisor configuration and privacy consent are unchanged.
+The generic classifier migration is documented below.
 
-### From 0.9.x to 0.10.0
-
-Jev authentication has moved to Pi. Before upgrading, run `/login typesafe` or
-provide `TYPESAFE_API_KEY` to Pi. After installing 0.10.0, start a new Pi session
-and follow the [Jev field migration](jev-advisor.md#migrate-the-old-router-fields).
-Without a Pi credential, enabled Jev falls back to baseline, not the chat classifier.
-A custom legacy endpoint stays disabled until explicitly migrated.
-
-Version 0.10.0 introduced `/router-ui`; use the 0.11.0 command mapping above
-when upgrading to the current release.
-Cloudflare is opt-in and does not inherit Jev approval.
 
 
 CAUTION: Do not load this fork and the upstream extension together. Both register the `router` provider.
@@ -303,3 +263,7 @@ pi install npm:@alexeiled/pi-model-router
 
 If a manifest loads the upstream extension, remove that entry instead.
 Deprecated `rules` and `phaseBias` produce a warning but have no routing effect.
+
+## From 0.11.x to 0.12.x
+
+The advisor now uses any text-capable classifier registered by Pi, through `modelRegistry.classify()`. Replace the old Jev, Cloudflare and chat-classifier fields with the user-level advisor object and exact canonical model references in each profile’s advisor.models. Configure credentials and provider models through Pi. See the [classifier guide](classifier-advisor.md).

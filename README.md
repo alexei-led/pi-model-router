@@ -8,7 +8,7 @@
 
 Keep one profile in [Pi](https://github.com/earendil-works/pi/tree/main/packages/coding-agent).
 `pi-model-router` can select a different model and reasoning effort for each new turn.
-Optional Jev, Clef, or Clef Flash advice uses bounded task context. You choose the available models and retain control.
+Optional advice uses any text-capable classifier registered in Pi. The router uses Pi’s typed classifier API and requires explicit per-profile approval for the exact model.
 
 ## Why use it?
 
@@ -23,14 +23,14 @@ Advisors add latency. Their fees are separate from generation costs.
 
 ## Optional routing advice
 
-Choose [Jev](https://typesafe.ai), Clef or Clef Flash as an optional advisor.
+Choose any classifier model configured in Pi as the optional advisor.
 It reads bounded recent context and advises a model and effort from your profile.
 The selected generation model produces the answer, not the advisor.
 
 ```mermaid
 flowchart LR
     Task["Your task"] --> Router["Pi model router"]
-    Advisor["Jev / Clef / Clef Flash"] -.-> Router
+    Advisor["Configured Pi classifier"] -.-> Router
     Router --> Light["Micro / low"]
     Router --> Strong["Medium / high"]
     Light --> Answer["Answer and tool calls"]
@@ -43,9 +43,8 @@ flowchart LR
     class Light,Strong generation
 ```
 
-Jev needs TypeSafe authentication through Pi (`/login typesafe`) and approval for each profile. Selected text can contain private data.
-Without an advisor, the router uses a compatible default route from your profile.
-[Jev setup and privacy →](docs/jev-advisor.md) · [Clef / Clef Flash setup →](docs/cloudflare-advisor.md)
+Configure classifier credentials in Pi and approve its exact `provider/model` reference per profile. Selected text can contain private data. The router sends text only. Without an advisor, it uses a compatible local route.
+[Classifier setup and privacy →](docs/classifier-advisor.md)
 
 ## Inspect routing in Pi
 
@@ -56,7 +55,7 @@ The two-line strip is on in new sessions. `/router widget` switches to a quiet f
 ![Native Pi router inspector with an above-editor route strip](docs/assets/router-ui/signal-now-dark.png)
 
 Captured from the local dev extension in Pi inside agterm, using synthetic fixture data.
-[Inspector controls](docs/user-guide.md#native-inspector) · [Cloudflare setup](docs/cloudflare-advisor.md)
+[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md)
 
 ## A turn in Pi
 
@@ -64,7 +63,7 @@ This illustrative strip shows a low-tier choice after completion. It is not a ro
 
 ```text
 gpt-6-luna · low · effort off · last
-Clef advice accepted · 807 ms · auto
+Classifier advice accepted · 807 ms · auto (illustrative historical capture)
 ```
 
 The model answers and calls tools. Valid tool continuations keep that route without another advisor call.
@@ -74,19 +73,18 @@ For the next user turn, the router can select a different route.
 Recent records cover 1,967 Pi responses across 25 sessions. They show route use, not guaranteed savings.
 [See the chart, cost calculations, and limits →](docs/evaluation.md)
 
-## Upgrading to 0.11.0
+## Upgrading to 0.12.0
 
 After updating, restart Pi. Replace `/router-ui` with `/router`, and
-`/router <profile>` with `/router profile <name>`. Routing and Classifier settings
-now share `/router settings`. Routing policy and privacy approval are unchanged.
-[Command migration →](docs/user-guide.md#from-010x-to-0110)
+`/router <profile>` with `/router profile <name>`. Classifier advice now uses any Pi-registered classifier. Replace provider-specific configuration with the generic advisor model and exact per-profile approvals.
+[Classifier migration →](docs/user-guide.md#from-011x-to-012x)
 
-Coming from 0.9.x? First follow the [Jev authentication migration](docs/jev-advisor.md#migrate-the-old-router-fields).
+Coming from 0.11.0? Replace Jev/Clef/chat-classifier settings with generic advisor settings and exact profile approvals. See the migration note in the user guide.
 
 ## Install
 
-Requires Pi **1.0.2 or later in the 1.x series** and Node.js **22.19.0+**.
-The test suite checks Pi 1.0.2 types and isolated RPC startup. The native UI was also exercised in Pi 1.0.4 inside agterm; see the [acceptance evidence](docs/testing/signal-panel-acceptance.md).
+Requires Pi **1.1.0 or later in the 1.x series** and Node.js **22.19.0+**.
+The test suite and host checks run against Pi 1.1.0; see the [classifier acceptance evidence](docs/testing/classifier-advisor-pi-1.1-acceptance.md).
 
 ```sh
 pi install npm:@alexeiled/pi-model-router

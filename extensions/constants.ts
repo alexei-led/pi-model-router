@@ -15,20 +15,17 @@ export const ROUTER_COMMANDS = [
 
 export const MAX_DEBUG_HISTORY = 50;
 // Bound JSON metadata as well as text; expand only with measured long-dialogue needs.
-export const MAX_JEV_CONTEXT_TURNS = 20;
-export const MAX_JEV_STATE_TOKENS = 24_000;
-export const MAX_JEV_ESTIMATED_REQUEST_TOKENS = 28_000;
-export const DEFAULT_JEV_CONTEXT = {
+export const MAX_CLASSIFIER_CONTEXT_TURNS = 20;
+export const MAX_CLASSIFIER_STATE_TOKENS = 24_000;
+export const MAX_CLASSIFIER_ESTIMATED_REQUEST_TOKENS = 28_000;
+export const DEFAULT_CLASSIFIER_CONTEXT = {
   previousTurns: 2,
   maxHistoryTokens: 500,
   toolResults: 'last-error',
   maxToolTokens: 250,
 } as const;
-/** One retry of a documented transient status; the total budget stays `jev.timeoutMs`. */
-export const DEFAULT_JEV_RETRY = { maxAttempts: 2, backoffMs: 400 } as const;
-export const MAX_JEV_ATTEMPTS = 5;
-export const MAX_JEV_BACKOFF_MS = 60_000;
 export const DEFAULT_CLASSIFIER_TIMEOUT_MS = 10_000;
+export const MAX_CLASSIFIER_RETRIES = 4;
 /** Runtime-only per-turn caches: continuations and advised decisions. */
 export const MAX_TURN_CACHE_ENTRIES = 16;
 export const DEFAULT_CONTEXT_WINDOW = 128_000;

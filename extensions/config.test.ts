@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   isObjectRecord,
@@ -7,7 +6,6 @@ import {
   loadRouterConfig,
   mergeConfig,
   normalizeConfig,
-  normalizeJevConfig,
   normalizeModelsMap,
   normalizeTierConfig,
   parseCanonicalModelRef,
@@ -17,61 +15,9 @@ import {
   resolveMaxTokens,
   resolveModelRef,
   resolveProfileName,
-  stripProjectJevConfig,
+  stripProjectAdvisorConfig,
 } from './config';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
-
-describe('Jev context configuration', () => {
-  it('normalizes partial knobs and supports current-only input', () => {
-    const warnings: string[] = [];
-    const config = normalizeJevConfig(
-      {
-        enabled: true,
-        context: { previousTurns: 0, toolResults: 'none' },
-      },
-      warnings,
-    );
-    expect(warnings).toEqual([]);
-    expect(config?.context).toEqual({
-      previousTurns: 0,
-      maxHistoryTokens: 500,
-      toolResults: 'none',
-      maxToolTokens: 250,
-    });
-  });
-  it.each([
-    null,
-    [],
-    { previousTurns: -1 },
-    { previousTurns: 21 },
-    { previousTurns: 1.5 },
-    { previousTurns: Infinity },
-    { maxHistoryTokens: -1 },
-    { maxHistoryTokens: 24001 },
-    { maxToolTokens: '250' },
-    { toolResults: 'all' },
-    { unknownSecret: 'PRIVATE_VALUE' },
-  ])('rejects malformed context with a value-free warning', (context) => {
-    const warnings: string[] = [];
-    expect(
-      normalizeJevConfig(
-        { enabled: true, apiKey: 'synthetic', context },
-        warnings,
-      ),
-    ).toBeUndefined();
-    expect(warnings).toEqual(['Ignored invalid Jev configuration.']);
-  });
-  it('merges nested knobs without mutating either source', () => {
-    const base = { jev: { context: { previousTurns: 3, maxToolTokens: 200 } } };
-    const override = { jev: { context: { toolResults: 'none' } } };
-    const before = JSON.stringify([base, override]);
-    expect(mergeConfig(base, override).jev).toEqual({
-      context: { previousTurns: 3, maxToolTokens: 200, toolResults: 'none' },
-    });
-    mergeConfig(base, {});
-    expect(JSON.stringify([base, override])).toBe(before);
-  });
-});
 
 describe('status line configuration', () => {
   it.each([undefined, {}, { statusLine: 'compact' }])(
@@ -561,7 +507,6 @@ describe('config.ts', () => {
         debug: true,
         phaseBias: 0.8,
         maxSessionBudget: 5.5,
-        classifierModel: 'gpt4',
         rules: [{ matches: 'private-value', tier: 'high' }],
         profiles: {
           balanced: {
@@ -584,7 +529,6 @@ describe('config.ts', () => {
       expect(JSON.stringify(warnings)).not.toContain('private-value');
       expect(config.debug).toBe(true);
       expect(config.maxSessionBudget).toBe(5.5);
-      expect(config.classifierModel?.model).toBe('openai/gpt-4o');
       expect(config.profiles.balanced?.baselineTier).toBe('high');
       expect(config.profiles.balanced?.high?.model).toBe(
         'google/gemini-2.5-pro',
@@ -731,82 +675,6 @@ describe('config.ts', () => {
       expect(resolveMaxTokens('high', profile, registryWithFind)).toBe(3000);
     });
   });
-
-  describe('normalizeConfig – classifier config variants', () => {
-    it('normalize classifierModel as object with valid thinking', () => {
-      const raw = {
-        profiles: {
-          balanced: { high: { model: 'openai/gpt-4o' } },
-        },
-        classifierModel: { model: 'openai/gpt-4o', thinking: 'low' },
-      };
-      const { config, warnings } = normalizeConfig(
-        raw as unknown as RouterConfig,
-      );
-      expect(config.classifierModel?.model).toBe('openai/gpt-4o');
-      expect(config.classifierModel?.thinking).toBe('low');
-      expect(warnings).toEqual([]);
-    });
-
-    it('warn and ignore invalid thinking on classifierModel object', () => {
-      const raw = {
-        profiles: {
-          balanced: { high: { model: 'openai/gpt-4o' } },
-        },
-        classifierModel: { model: 'openai/gpt-4o', thinking: 'super-invalid' },
-      };
-      const { config, warnings } = normalizeConfig(
-        raw as unknown as RouterConfig,
-      );
-      expect(config.classifierModel?.model).toBe('openai/gpt-4o');
-      expect(config.classifierModel?.thinking).toBeUndefined();
-      expect(warnings).toEqual([
-        'classifierModel has an invalid thinking level. Ignored.',
-      ]);
-      expect(JSON.stringify(warnings)).not.toContain('super-invalid');
-    });
-
-    it.each([
-      [undefined, undefined, []],
-      [2500, 2500, []],
-      [0, undefined, ['classifierModel has an invalid timeoutMs. Ignored.']],
-      [
-        '5000',
-        undefined,
-        ['classifierModel has an invalid timeoutMs. Ignored.'],
-      ],
-      [
-        Number.NaN,
-        undefined,
-        ['classifierModel has an invalid timeoutMs. Ignored.'],
-      ],
-    ])(
-      'normalizes classifierModel.timeoutMs %j',
-      (timeoutMs, expected, expectedWarnings) => {
-        const { config, warnings } = normalizeConfig({
-          profiles: { balanced: { high: { model: 'openai/gpt-4o' } } },
-          classifierModel: { model: 'openai/gpt-4o', timeoutMs },
-        } as unknown as RouterConfig);
-        expect(config.classifierModel?.timeoutMs).toBe(expected);
-        expect(warnings).toEqual(expectedWarnings);
-      },
-    );
-
-    it('warn when classifierModel object is missing model field', () => {
-      const raw = {
-        profiles: {
-          balanced: { high: { model: 'openai/gpt-4o' } },
-        },
-        classifierModel: { thinking: 'high' },
-      };
-      const { config, warnings } = normalizeConfig(
-        raw as unknown as RouterConfig,
-      );
-      expect(config.classifierModel).toBeUndefined();
-      expect(warnings.length).toBe(1);
-      expect(warnings[0]).toContain('missing the "model" field');
-    });
-  });
 });
 
 describe('micro config compatibility', () => {
@@ -902,393 +770,89 @@ describe('micro config compatibility', () => {
   );
 });
 
-describe('config.ts Jev user-config provenance', () => {
-  const personal = {
-    high: { model: 'openai/test' },
-    medium: { model: 'openai/test' },
-    jev: { enabled: true },
-  };
-  const user = {
-    jev: { enabled: true },
-    profiles: {
-      personal,
-      work: {
-        high: { model: 'openai/test' },
-        medium: { model: 'openai/test' },
-      },
-    },
-  };
-  const loadSources = (global: unknown, project: unknown) => {
-    vi.mocked(readFileSync)
-      .mockReturnValueOnce(JSON.stringify(global))
-      .mockReturnValueOnce(JSON.stringify(project));
-    return loadRouterConfig('/project');
-  };
-
-  it('normalizes approved defaults and keeps work disabled without explicit user opt-in', () => {
-    const { config, warnings } = loadSources(user, {});
-    expect(warnings).toEqual([]);
-    expect(config.jev).toEqual({
-      enabled: true,
-      model: 'jev-1.13.0',
-      timeoutMs: 1500,
-      confidenceThreshold: 0.65,
-      probabilityThreshold: 0.8,
-      maxStateTokens: 3000,
-      context: {
-        previousTurns: 2,
-        maxHistoryTokens: 500,
-        toolResults: 'last-error',
-        maxToolTokens: 250,
-      },
-      retry: { maxAttempts: 2, backoffMs: 400 },
-      mode: 'advisory',
-    });
-    expect(config.profiles.personal?.jev?.enabled).toBe(true);
-    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
-  });
-
-  it.each([
-    { enabled: false },
-    { enabled: true },
-    { apiKey: 'synthetic-project-secret' },
-    {
-      context: { previousTurns: 20, toolResults: 'last', maxToolTokens: 12000 },
-    },
-    { endpoint: 'https://attacker.invalid/collect' },
-    { model: 'attacker-model' },
-    {
-      enabled: true,
-      apiKey: 'synthetic-project-secret',
-      endpoint: 'https://attacker.invalid/collect',
-      model: 'attacker-model',
-    },
-  ])('ignores project Jev settings before merging: %j', (jev) => {
-    const { config, warnings } = loadSources(user, {
-      jev,
-      profiles: {
-        personal: { jev: { enabled: false } },
-        work: { jev: { enabled: true } },
-        projectOnly: { ...personal },
-      },
-    });
-    expect(config.jev?.enabled).toBe(true);
-    expect(config.jev).not.toHaveProperty('apiKey');
-    expect(config.jev).not.toHaveProperty('endpoint');
-    expect(config.jev?.model).toBe('jev-1.13.0');
-    expect(config.profiles.personal?.jev?.enabled).toBe(true);
-    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
-    expect(config.profiles.projectOnly?.jev?.enabled).not.toBe(true);
-    expect(warnings).toEqual([
-      'Ignored project Jev settings: configure Jev only in user config.',
-    ]);
-    expect(JSON.stringify(warnings)).not.toContain('synthetic-project-secret');
-    expect(JSON.stringify(warnings)).not.toContain('attacker');
-  });
-
-  it('cannot inherit user credentials through project enablement', () => {
-    const { config } = loadSources(
-      { ...user, jev: { apiKey: 'synthetic-user-key' } },
-      {
-        jev: { enabled: true },
-        profiles: { work: { jev: { enabled: true } } },
-      },
-    );
-    expect(config.jev?.enabled).toBe(false);
-    expect(config.profiles.work?.jev?.enabled).not.toBe(true);
-  });
-
-  it('cannot use a project key or project profile opt-in without user Jev settings', () => {
-    const { config } = loadSources({}, user);
-    expect(config.jev).toBeUndefined();
-    expect(config.profiles.personal?.jev).toBeUndefined();
-  });
-
-  it('uses only enabled from a user profile, never profile credentials or endpoint', () => {
-    const { config } = loadSources(
-      {
-        ...user,
-        profiles: {
-          personal: {
-            ...personal,
-            jev: {
-              enabled: true,
-              apiKey: 'profile-secret',
-              endpoint: 'https://other.invalid',
-            },
-          },
-        },
-      },
-      {},
-    );
-    expect(config.profiles.personal?.jev).toEqual({ enabled: true });
-  });
-
-  it('keeps enablement independent of credentials resolved by Pi at request time', () => {
-    const warnings: string[] = [];
-    expect(normalizeJevConfig({ enabled: true }, warnings)?.enabled).toBe(true);
-    expect(warnings).toEqual([]);
-  });
-
-  it.each([
-    null,
-    [],
-    'synthetic-secret',
-    { enabled: 'yes' },
-    { apiKey: 1 },
-    { apiKey: 'bad\nsecret' },
-    { endpoint: 'http://insecure.invalid' },
-    { endpoint: 'https://user:secret@host.invalid' },
-    { endpoint: 'https://host.invalid?token=secret' },
-    { model: '' },
-    { model: {} },
-    { timeoutMs: 0 },
-    { timeoutMs: Number.NaN },
-    { timeoutMs: Number.POSITIVE_INFINITY },
-    { timeoutMs: -1 },
-    { timeoutMs: 2_147_483_648 },
-    { confidenceThreshold: -1 },
-    { confidenceThreshold: 2 },
-    { confidenceThreshold: Number.NaN },
-    { probabilityThreshold: 0 },
-    { probabilityThreshold: -1 },
-    { probabilityThreshold: 1.01 },
-    { probabilityThreshold: Number.NaN },
-    { probabilityThreshold: '0.8' },
-    { retry: null },
-    { retry: { maxAttempts: 0 } },
-    { retry: { maxAttempts: 6 } },
-    { retry: { maxAttempts: 1.5 } },
-    { retry: { backoffMs: -1 } },
-    { retry: { backoffMs: 60_001 } },
-    { retry: { backoffMs: '400' } },
-    { retry: { unknown: 1 } },
-    { maxStateTokens: 0 },
-    { maxStateTokens: 24001 },
-    { maxStateTokens: 1.5 },
-    { mode: 'authoritative' },
-  ])('rejects malformed Jev config without echoing fields: %j', (value) => {
-    const warnings: string[] = [];
-    expect(normalizeJevConfig(value, warnings)).toBeUndefined();
-    expect(warnings).toEqual(['Ignored invalid Jev configuration.']);
-  });
-
-  it('never includes JSON parse source or thrown read errors in warnings', () => {
-    const secret = 'synthetic-json-key-never-log';
-    vi.mocked(readFileSync).mockReturnValueOnce(
-      `{"jev":{"apiKey":"${secret}"} invalid`,
-    );
-    const invalid = parseConfigFile('/exists/model-router.json');
-    vi.mocked(readFileSync).mockImplementationOnce(() => {
-      throw new Error(secret);
-    });
-    const error = parseConfigFile('/exists/model-router.json');
-    expect(invalid.warnings).toEqual([
-      'Failed to parse router config at /exists/model-router.json.',
-    ]);
-    expect(error.warnings).toEqual(invalid.warnings);
-    expect(JSON.stringify([invalid, error])).not.toContain(secret);
-  });
-});
-
-describe('review safety diagnostics', () => {
-  it('does not echo malformed model references in warnings', () => {
-    const secret = 'sentinel-model-secret';
-    const { warnings } = normalizeConfig({
-      models: { leaked: { model: secret } },
-      profiles: {
-        p: {
-          medium: {
-            model: 'test/model',
-            fallbacks: [secret],
-          },
-        },
-      },
-      classifierModel: secret,
-    });
-    expect(JSON.stringify(warnings)).not.toContain(secret);
-    expect(warnings.join(' ')).toContain('invalid model reference');
-    expect(warnings.join(' ')).toContain('Invalid fallback model');
-  });
-
-  it('ignores legacy rule contents with one fixed value-free warning', () => {
+describe('classifier advisor config', () => {
+  it('normalizes arbitrary provider classifier references and explicit profile approvals', () => {
     const { config, warnings } = normalizeConfig({
-      profiles: { p: { high: { model: 'test/model' } } },
-      rules: [
-        {
-          matches: 'sentinel-private-task',
-          tier: 'invalid',
-          apiKey: 'sentinel-secret',
-        },
-        'sentinel-secret',
-      ],
-    });
-    expect(warnings).toEqual([
-      'Deprecated router config field "rules" ignored.',
-    ]);
-    expect(JSON.stringify(warnings)).not.toContain('sentinel');
-    expect(config.profiles.p?.high?.model).toBe('test/model');
-  });
-
-  it.each([
-    [undefined, { maxAttempts: 2, backoffMs: 400 }],
-    [{ maxAttempts: 1 }, { maxAttempts: 1, backoffMs: 400 }],
-    [{ backoffMs: 0 }, { maxAttempts: 2, backoffMs: 0 }],
-    [
-      { maxAttempts: 5, backoffMs: 60_000 },
-      { maxAttempts: 5, backoffMs: 60_000 },
-    ],
-  ])('normalizes jev.retry %j with defaults', (retry, expected) => {
-    const warnings: string[] = [];
-    expect(normalizeJevConfig({ retry }, warnings)?.retry).toEqual(expected);
-    expect(warnings).toEqual([]);
-  });
-
-  it('merges nested retry knobs without mutating either source', () => {
-    const base = { jev: { retry: { maxAttempts: 3 } } };
-    const override = { jev: { retry: { backoffMs: 100 } } };
-    const merged = mergeConfig(
-      base as unknown as RouterConfig,
-      override as unknown as RouterConfig,
-    );
-    expect(merged.jev).toMatchObject({
-      retry: { maxAttempts: 3, backoffMs: 100 },
-    });
-    expect(base.jev.retry).toEqual({ maxAttempts: 3 });
-  });
-
-  it.each([1, 500, 750, 1500, 2000, 3000, 4000, 5000, 2_147_483_647])(
-    'honors the configured Jev timeout of %s ms',
-    (timeoutMs) => {
-      const warnings: string[] = [];
-      expect(normalizeJevConfig({ timeoutMs }, warnings)?.timeoutMs).toBe(
-        timeoutMs,
-      );
-      expect(warnings).toEqual([]);
-    },
-  );
-
-  it.each(['micro', 'low', 'medium', 'high'] as const)(
-    'accepts a %s-only profile without prompt-derived floor warnings',
-    (tier) => {
-      const { config, warnings } = normalizeConfig({
-        profiles: { partial: { [tier]: { model: 'test/model' } } },
-      });
-      expect(config.profiles.partial?.[tier]).toBeDefined();
-      expect(warnings).toEqual([]);
-    },
-  );
-});
-
-describe('user-owned Cloudflare advisor configuration', () => {
-  it('defaults selection to Jev without transferring existing consent', () => {
-    const { config } = normalizeConfig({
-      jev: { enabled: true, apiKey: 'synthetic' },
-      profiles: { p: { medium: { model: 'test/m' }, jev: { enabled: true } } },
-    });
-    expect(config.advisor).toBe('jev');
-    expect(config.cloudflare).toBeUndefined();
-    expect(config.profiles.p?.cloudflare).toBeUndefined();
-  });
-
-  it.each(['clef', 'clef-flash'] as const)(
-    'normalizes explicit %s user consent and bounded defaults',
-    (advisor) => {
-      const { config, warnings } = normalizeConfig({
-        advisor,
-        cloudflare: { enabled: true },
-        profiles: {
-          p: { medium: { model: 'test/m' }, cloudflare: { enabled: true } },
-        },
-      });
-      expect(warnings).toEqual([]);
-      expect(config.advisor).toBe(advisor);
-      expect(config.cloudflare).toMatchObject({
+      advisor: {
         enabled: true,
-        timeoutMs: 1500,
-        confidenceThreshold: 0.65,
-        probabilityThreshold: 0.8,
-        maxStateTokens: 3000,
-        retry: { maxAttempts: 2, backoffMs: 400 },
-      });
-      expect(config.cloudflare).not.toHaveProperty('apiKey');
-      expect(config.cloudflare).not.toHaveProperty('endpoint');
-      expect(config.profiles.p?.cloudflare?.enabled).toBe(true);
-    },
-  );
-
-  it.each([
-    { apiKey: 'secret' },
-    { endpoint: 'https://foreign.invalid' },
-    { model: 'foreign' },
-    { timeoutMs: 0 },
-    { timeoutMs: 2147483648 },
-    { confidenceThreshold: 2 },
-    { retry: { maxAttempts: 3 } },
-  ])('rejects unsafe/invalid tuning with value-free warning: %j', (extra) => {
-    const { config, warnings } = normalizeConfig({
-      advisor: 'clef',
-      cloudflare: { enabled: true, ...extra },
-      profiles: {},
-    });
-    expect(config.cloudflare).toBeUndefined();
-    expect(warnings).toContain('Ignored invalid Cloudflare configuration.');
-    expect(warnings.join(' ')).not.toContain('secret');
-  });
-
-  it('ignores all project selection, tuning, consent, including a project-only profile', () => {
-    const user = {
-      advisor: 'clef',
-      cloudflare: { enabled: true },
+        model: 'openai/gpt-6-luna',
+        temperature: 1.3,
+        maxRetries: 0,
+      },
       profiles: {
-        p: { medium: { model: 'test/m' }, cloudflare: { enabled: true } },
+        work: {
+          advisor: { models: ['openai/gpt-6-luna', 'llama.cpp/julia-1'] },
+          high: { model: 'test/high' },
+        },
+      },
+    });
+    expect(config.advisor).toMatchObject({
+      model: 'openai/gpt-6-luna',
+      enabled: true,
+      temperature: 1.3,
+      maxRetries: 0,
+    });
+    expect(config.profiles.work?.advisor?.models).toEqual([
+      'openai/gpt-6-luna',
+      'llama.cpp/julia-1',
+    ]);
+    expect(warnings).toEqual([]);
+  });
+  it('rejects malformed references and bounds retries without echoing values', () => {
+    for (const raw of ['router/private', 'missing-slash', 'secret\nvalue']) {
+      const warnings: string[] = [];
+      expect(
+        normalizeConfig({
+          advisor: { model: raw },
+          profiles: { p: { high: { model: 'test/high' } } },
+        }).config.advisor,
+      ).toBeUndefined();
+      expect(JSON.stringify(warnings)).not.toContain(raw);
+    }
+    expect(
+      normalizeConfig({
+        advisor: { model: 'provider/model', maxRetries: 5 },
+        profiles: { p: { high: { model: 'test/high' } } },
+      }).config.advisor,
+    ).toBeUndefined();
+  });
+  it('never accepts project model selection, tuning or privacy approvals', () => {
+    const base = {
+      advisor: { model: 'typesafe/jev-latest', enabled: true },
+      profiles: {
+        work: {
+          advisor: { models: ['typesafe/jev-latest'] },
+          high: { model: 'test/high' },
+        },
       },
     };
     const warnings: string[] = [];
-    const project = stripProjectJevConfig(
-      {
-        advisor: 'clef-flash',
-        cloudflare: { timeoutMs: 1 },
-        profiles: {
-          p: { cloudflare: { enabled: false } },
-          added: {
-            medium: { model: 'test/m' },
-            cloudflare: { enabled: true },
-            jev: { enabled: true },
-          },
+    const merged = mergeConfig(
+      base,
+      stripProjectAdvisorConfig(
+        {
+          advisor: { model: 'attacker/steal', enabled: true },
+          profiles: { work: { advisor: { models: ['attacker/steal'] } } },
         },
-      },
-      warnings,
+        warnings,
+      ),
     );
-    const config = normalizeConfig(mergeConfig(user, project)).config;
-    expect(config.advisor).toBe('clef');
-    expect(config.cloudflare?.timeoutMs).toBe(1500);
-    expect(config.profiles.p?.cloudflare?.enabled).toBe(true);
-    expect(config.profiles.added?.cloudflare).toBeUndefined();
-    expect(config.profiles.added?.jev).toBeUndefined();
-    expect(warnings).toContain(
-      'Ignored project Cloudflare/advisor settings: configure only in user config.',
-    );
+    const { config } = normalizeConfig(merged);
+    expect(config.advisor?.model).toBe('typesafe/jev-latest');
+    expect(config.profiles.work?.advisor?.models).toEqual([
+      'typesafe/jev-latest',
+    ]);
   });
-
-  it('merges nested user tuning and accepts the Node timer range without a product cap', () => {
-    const raw = mergeConfig(
-      {
-        cloudflare: {
-          enabled: true,
-          context: { previousTurns: 0 },
-          retry: { backoffMs: 25 },
+  it('requires canonical model references in explicit profile approvals', () => {
+    const { config } = normalizeConfig({
+      models: { local: { model: 'llama.cpp/julia-1' } },
+      profiles: {
+        work: {
+          advisor: { models: ['local'] },
+          medium: { model: 'test/model' },
         },
       },
-      {
-        cloudflare: { timeoutMs: 2147483647, context: { toolResults: 'none' } },
-      },
-    );
-    const config = normalizeConfig({ ...raw, profiles: {} }).config;
-    expect(config.cloudflare).toMatchObject({
-      timeoutMs: 2147483647,
-      context: { previousTurns: 0, toolResults: 'none' },
-      retry: { maxAttempts: 2, backoffMs: 25 },
     });
+    expect(config.profiles.work?.advisor).toBeUndefined();
   });
 });

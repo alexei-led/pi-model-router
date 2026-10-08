@@ -1,6 +1,9 @@
 import type { Context, Message } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
-import { buildJevContext, estimateJevTextTokens } from './context';
+import {
+  buildClassifierContext,
+  estimateClassifierTextTokens,
+} from './context';
 import { message } from './test/fixtures';
 
 const user = (text: string): Message => ({
@@ -26,7 +29,7 @@ const options = {
   maxToolTokens: 250,
 };
 
-describe('buildJevContext', () => {
+describe('buildClassifierContext', () => {
   it('defaults to two previous turns and only the last native error', () => {
     const context: Context = {
       messages: [
@@ -41,7 +44,7 @@ describe('buildJevContext', () => {
         user('now'),
       ],
     };
-    const result = buildJevContext(context, 12000);
+    const result = buildClassifierContext(context, 12000);
     expect(result.state.recentDialogue.map((entry) => entry.text)).toEqual([
       'previous task',
       'previous answer',
@@ -50,7 +53,7 @@ describe('buildJevContext', () => {
     ]);
     expect(result.state.recentToolEvidence).toEqual([]);
     expect(JSON.stringify(result)).not.toContain('OLD_');
-    const failed = buildJevContext(
+    const failed = buildClassifierContext(
       { messages: [user('task'), tool('nonzero exit', true), user('fix')] },
       12000,
     );
@@ -60,7 +63,7 @@ describe('buildJevContext', () => {
   });
 
   it('does not resurrect an old failure after a successful binary-only tool result', () => {
-    const result = buildJevContext(
+    const result = buildClassifierContext(
       {
         messages: [
           user('task'),
@@ -108,14 +111,16 @@ describe('buildJevContext', () => {
         user('Сделай второй вариант'),
       ],
     };
-    const result = buildJevContext(context, 12000, options);
+    const result = buildClassifierContext(context, 12000, options);
     expect(result.state.currentRequest.text).toBe('Сделай второй вариант');
     expect(result.state.recentDialogue.map((entry) => entry.text)).toEqual([
       'Design a parser',
       'Option 1: recursive descent. Option 2: Pratt parser.',
     ]);
     expect(
-      estimateJevTextTokens(result.state.recentToolEvidence[0]?.text ?? ''),
+      estimateClassifierTextTokens(
+        result.state.recentToolEvidence[0]?.text ?? '',
+      ),
     ).toBeLessThanOrEqual(250);
     expect(result.state.recentToolEvidence[0]?.truncated).toBe(true);
     expect(result.metrics.historyTurns).toBe(1);
@@ -123,7 +128,7 @@ describe('buildJevContext', () => {
   });
 
   it('preserves the end of a long current request before allocating older history', () => {
-    const result = buildJevContext(
+    const result = buildClassifierContext(
       {
         messages: [
           user('old'),
@@ -138,7 +143,7 @@ describe('buildJevContext', () => {
       /^BEGIN .*END INSTRUCTION$/s,
     );
     expect(
-      estimateJevTextTokens(result.state.currentRequest.text),
+      estimateClassifierTextTokens(result.state.currentRequest.text),
     ).toBeLessThanOrEqual(400);
     expect(result.state.currentRequest.truncated).toBe(true);
     expect(result.state.recentDialogue).toEqual([]);
@@ -159,14 +164,14 @@ describe('buildJevContext', () => {
         user('now'),
       ],
     };
-    const minimal = buildJevContext(context, 1000, {
+    const minimal = buildClassifierContext(context, 1000, {
       ...options,
       previousTurns: 0,
       toolResults: 'none',
     });
     expect(minimal.state.recentDialogue).toEqual([]);
     expect(minimal.state.recentToolEvidence).toEqual([]);
-    const evidence = buildJevContext(context, 1000, {
+    const evidence = buildClassifierContext(context, 1000, {
       ...options,
       previousTurns: 0,
     });
@@ -174,7 +179,7 @@ describe('buildJevContext', () => {
   });
 
   it('never carries an old failed result into a later unrelated turn', () => {
-    const result = buildJevContext(
+    const result = buildClassifierContext(
       {
         messages: [
           user('old task'),
@@ -221,7 +226,7 @@ describe('buildJevContext', () => {
         user('fix it'),
       ],
     };
-    const result = buildJevContext(context, 12000, options);
+    const result = buildClassifierContext(context, 12000, options);
     expect(JSON.stringify(result)).not.toContain('PRIVATE');
     expect(result.state.recentToolEvidence[0]?.isError).toBe(true);
   });
@@ -229,7 +234,7 @@ describe('buildJevContext', () => {
   it.each([1, 3, 4, 5])(
     'does not split Unicode surrogate pairs at budget %s',
     (budget) => {
-      const result = buildJevContext(
+      const result = buildClassifierContext(
         { messages: [user('😀reference😄')] },
         budget,
         options,
@@ -238,7 +243,7 @@ describe('buildJevContext', () => {
       expect(new TextDecoder().decode(new TextEncoder().encode(text))).toBe(
         text,
       );
-      expect(estimateJevTextTokens(text)).toBeLessThanOrEqual(budget);
+      expect(estimateClassifierTextTokens(text)).toBeLessThanOrEqual(budget);
     },
   );
 
@@ -253,7 +258,7 @@ describe('buildJevContext', () => {
           user('new'),
         ],
       };
-      const result = buildJevContext(context, budget, options);
+      const result = buildClassifierContext(context, budget, options);
       expect(
         result.metrics.currentRequestTokens +
           result.metrics.historyTokens +

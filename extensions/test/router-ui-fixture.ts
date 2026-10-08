@@ -202,36 +202,29 @@ export default (pi: ExtensionAPI) => {
       },
     };
   };
-  for (const [provider, api, ids] of [
-    [
-      'cloudflare-workers-ai',
-      'cloudflare-workers-ai-system-one',
-      ['@cf/cloudflare/clef', '@cf/cloudflare/clef-flash'],
-    ],
-    ['typesafe', 'typesafe-system-one', ['jev-latest', 'jev-1.13.0']],
-  ] as const) {
-    pi.registerProvider(provider, {
-      apiKey: 'local-fixture-no-network',
-      models: ids.map((id) => ({
+  pi.registerProvider('router-fixture-classifiers', {
+    apiKey: 'local-fixture-no-network',
+    models: [
+      {
         type: 'classifier',
-        id,
-        name: `Fixture ${id}`,
-        api,
-        baseUrl: 'https://fixture.invalid/ai',
+        id: 'demo/route',
+        name: 'Fixture route chooser',
+        api: 'fixture-classifier',
+        baseUrl: 'https://fixture.invalid',
         input: ['text'],
         contextWindow: 65536,
-        cost: { input: 0.24, output: 0, cacheRead: 0, cacheWrite: 0 },
-      })),
-      classifiers: { [api]: { classify: classifyFixture } },
-    });
-  }
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      },
+    ],
+    classifiers: { 'fixture-classifier': { classify: classifyFixture } },
+  });
   pi.registerCommand('router-demo-check', {
     description: 'Check the local classifier registration, without network',
     handler: async (_args, ctx) => {
       const model = ctx.modelRegistry.findOfType(
         'classifier',
-        'cloudflare-workers-ai',
-        '@cf/cloudflare/clef',
+        'router-fixture-classifiers',
+        'demo/route',
       );
       if (!model) {
         ctx.ui.notify('Fixture classifier absent', 'error');

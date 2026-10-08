@@ -1,97 +1,36 @@
 {
   "debug": false,
-  "advisor": "jev",
-  "cloudflare": {
+  "advisor": {
     "enabled": false,
-    "timeoutMs": 1500,
+    "model": "openai/gpt-6-luna",
+    "timeoutMs": 10000,
     "confidenceThreshold": 0.65,
     "probabilityThreshold": 0.8,
     "maxStateTokens": 3000,
-    "retry": { "maxAttempts": 2, "backoffMs": 400 },
-    "mode": "advisory"
+    "maxRetries": 1
   },
-  "ui": { "statusLine": "compact" },
-  "jev": {
-    "enabled": false,
-    "model": "jev-1.13.0",
-    "timeoutMs": 1500,
-    "confidenceThreshold": 0.65,
-    "probabilityThreshold": 0.8,
-    "maxStateTokens": 3000,
-    "context": {
-      "previousTurns": 2,
-      "maxHistoryTokens": 500,
-      "toolResults": "last-error",
-      "maxToolTokens": 250
-    },
-    "retry": { "maxAttempts": 2, "backoffMs": 400 },
-    "mode": "advisory"
-  },
-  "classifierModel": "flash",
   "maxSessionBudget": 1.0,
   "models": {
-    "gpt-pro": {
-      "model": "openai/gpt-5.4-pro",
-      "contextWindow": 256000,
-      "maxTokens": 64000,
-      "thinkingLevels": ["high", "medium", "low"]
-    },
-    "flash": {
-      "model": "google/gemini-flash-latest",
-      "contextWindow": 1048576
-    },
-    "nano": {
-      "model": "openai/gpt-5.4-nano",
-      "contextWindow": 128000,
-      "maxTokens": 8192,
-      "reasoning": false
-    },
-    "sonnet": {
-      "model": "anthropic/claude-3-5-sonnet-20241022",
+    "strong": {
+      "model": "anthropic/claude-haiku-5-5",
       "contextWindow": 200000
-    }
+    },
+    "fast": { "model": "anthropic/claude-haiku-5-5", "contextWindow": 200000 }
   },
   "profiles": {
-    "auto": {
+    "personal": {
+      "advisor": { "models": ["openai/gpt-6-luna"] },
       "baselineTier": "medium",
-      "jev": { "enabled": false },
-      "cloudflare": { "enabled": false },
-      "high": {
-        "model": "gpt-pro",
-        "thinking": "high",
-        "fallbacks": ["sonnet"]
-      },
-      "medium": { "model": "flash", "thinking": "medium" },
-      "low": { "model": "nano", "thinking": "off" },
-      "micro": { "model": "nano", "thinking": "off" }
+      "high": { "model": "strong", "thinking": "high" },
+      "medium": { "model": "strong", "thinking": "medium" },
+      "low": { "model": "fast", "thinking": "low" },
+      "micro": { "model": "fast", "thinking": "off" }
     },
-    "cheap": {
-      "jev": { "enabled": false },
-      "high": { "model": "flash", "thinking": "low" },
-      "medium": { "model": "nano", "thinking": "off" },
-      "low": { "model": "google/gemini-flash-lite-latest", "thinking": "off" }
-    },
-    "deep": {
-      "jev": { "enabled": false },
-      "high": {
-        "model": "openai/o1-preview",
-        "thinking": "xhigh",
-        "thinkingLevels": ["xhigh", "high", "medium", "low"]
-      },
-      "medium": { "model": "gpt-pro", "thinking": "medium" },
-      "low": { "model": "flash", "thinking": "low" }
-    },
-    "anthropic": {
-      "jev": { "enabled": false },
-      "high": {
-        "model": "sonnet",
-        "thinking": "high"
-      },
-      "medium": {
-        "model": "sonnet",
-        "thinking": "medium"
-      },
-      "low": { "model": "anthropic/claude-3-haiku-20240307", "thinking": "low" }
+    "work": {
+      "advisor": { "models": [] },
+      "high": { "model": "strong", "thinking": "high" },
+      "medium": { "model": "fast", "thinking": "medium" },
+      "low": { "model": "fast", "thinking": "low" }
     }
   }
 }

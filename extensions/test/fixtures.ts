@@ -6,12 +6,12 @@ import {
   type Model,
 } from '@earendil-works/pi-ai';
 import { classify as classifyTypeSafe } from '@earendil-works/pi-ai/api/typesafe-system-one';
-import type { ChoiceRegistry } from '../types';
+import type { ClassifierRegistry } from '../types';
 
 /** Mock only the public registry/auth boundary; native Pi owns the HTTP conversion. */
-export const nativeJevRegistry = (
+export const typeSafeClassifierRegistry = (
   apiKey = 'synthetic-private-key-never-log',
-): ChoiceRegistry => ({
+): ClassifierRegistry => ({
   findOfType: (_type, provider, id) =>
     provider === 'typesafe'
       ? {

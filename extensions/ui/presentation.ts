@@ -7,13 +7,7 @@ import type {
 
 export const advisorName = (
   advisor: RouterUIAdviceObservation['advisor'],
-): string =>
-  ({
-    jev: 'Jev',
-    clef: 'Clef',
-    'clef-flash': 'Clef Flash',
-    classifier: 'Pi classifier',
-  })[advisor];
+): string => (advisor === 'classifier' ? 'Pi classifier' : advisor);
 
 export const formatRoute = (route: RouterUIRoute | undefined): string =>
   route

@@ -1,3 +1,4 @@
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
 import { normalizeConfig } from '../config';
 import { model } from '../test/fixtures';
@@ -21,6 +22,19 @@ const setup = () => {
     debugHistory: [],
     currentModelRegistry: {
       find: (provider: string, id: string) => model(id, { provider }),
+      getModelsOfType: (() => [
+        {
+          type: 'classifier',
+          provider: 'typesafe',
+          id: 'jev-latest',
+          name: 'Jev',
+          api: 'typesafe-system-one',
+          baseUrl: 'https://fixture.invalid',
+          input: ['text'],
+          contextWindow: 64000,
+          cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+        },
+      ]) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'],
     },
   };
   const runtime = createRouterUIRuntime(state, () => undefined);
@@ -46,7 +60,7 @@ describe('router UI runtime boundary', () => {
       },
     });
     expect(runtime.adapters.getSnapshot().advice).toMatchObject({
-      advisor: 'classifier',
+      advisor: 'Classifier',
       outcome: 'selected',
       latencyMs: 27,
     });
@@ -60,21 +74,19 @@ describe('router UI runtime boundary', () => {
         profile: 'auto',
         action: 'apply',
         changes: [
-          { key: 'advisor', before: 'jev', after: 'clef-flash' },
+          { key: 'advisor', before: undefined, after: 'typesafe/jev-latest' },
           { key: 'pin', before: 'auto', after: 'high' },
         ],
       }),
     ).toBe('applied');
-    expect(state.currentConfig.advisor).toBe('jev');
+    expect(state.currentConfig.advisor?.model).toBeUndefined();
     expect(state.pinnedTierByProfile).toEqual({});
     expect(runtime.adapters.getSnapshot().pendingControls?.advisor).toBe(
-      'clef-flash',
+      'typesafe/jev-latest',
     );
     runtime.activatePending();
-    expect(state.currentConfig.advisor).toBe('clef-flash');
+    expect(state.currentConfig.advisor?.model).toBe('typesafe/jev-latest');
     expect(state.pinnedTierByProfile).toEqual({ auto: 'high' });
-    expect(state.currentConfig.cloudflare?.enabled).toBe(false);
-    expect(state.currentConfig.profiles.auto?.cloudflare).toBeUndefined();
     expect(Object.values(state.thinkingByProfile)).toStrictEqual([{}]);
   });
   it('removes a fully undone pending patch without touching the active config', async () => {
@@ -83,12 +95,16 @@ describe('router UI runtime boundary', () => {
     await runtime.adapters.applyControls({
       profile: 'auto',
       action: 'apply',
-      changes: [{ key: 'advisor', before: 'jev', after: 'clef' }],
+      changes: [
+        { key: 'advisor', before: undefined, after: 'typesafe/jev-latest' },
+      ],
     });
     await runtime.adapters.applyControls({
       profile: 'auto',
       action: 'undo',
-      changes: [{ key: 'advisor', before: 'clef', after: 'jev' }],
+      changes: [
+        { key: 'advisor', before: 'typesafe/jev-latest', after: undefined },
+      ],
     });
     expect(runtime.adapters.getSnapshot().pendingControls).toBeUndefined();
     runtime.activatePending();
@@ -103,25 +119,25 @@ describe('router UI runtime boundary', () => {
       profile: 'auto',
       action: 'apply',
       changes: [
-        { key: 'advisor', before: 'jev', after: 'clef' },
+        { key: 'advisor', before: undefined, after: 'typesafe/jev-latest' },
         { key: 'budget', before: undefined, after: 5 },
         { key: 'pin', before: 'auto', after: 'high' },
       ],
     });
     state.selectedProfile = 'other';
     expect(runtime.adapters.getSnapshot().pendingControls).toMatchObject({
-      advisor: 'clef',
+      advisor: 'typesafe/jev-latest',
       budget: 5,
       pin: 'auto',
     });
     expect(runtime.activatePending()).toBe(true);
-    expect(state.currentConfig.advisor).toBe('clef');
+    expect(state.currentConfig.advisor?.model).toBe('typesafe/jev-latest');
     expect(state.currentConfig.maxSessionBudget).toBe(5);
     expect(state.pinnedTierByProfile).toEqual({});
     state.selectedProfile = 'auto';
     expect(runtime.activatePending()).toBe(true);
     expect(state.pinnedTierByProfile).toEqual({ auto: 'high' });
-    expect(state.currentConfig.advisor).toBe('clef');
+    expect(state.currentConfig.advisor?.model).toBe('typesafe/jev-latest');
   });
   it('refreshes unrelated pending fields from current effective settings', async () => {
     const { state, runtime } = setup();
@@ -167,7 +183,9 @@ describe('router UI runtime boundary', () => {
       await runtime.adapters.applyControls({
         profile: 'auto',
         action: 'apply',
-        changes: [{ key: 'advisor', before: 'clef', after: 'jev' }],
+        changes: [
+          { key: 'advisor', before: 'typesafe/jev-latest', after: undefined },
+        ],
       }),
     ).toBe('conflict');
   });
@@ -202,11 +220,7 @@ describe('router UI runtime boundary', () => {
     const { state, runtime } = setup();
     state.currentConfig = normalizeConfig({
       ...state.currentConfig,
-      jev: {
-        enabled: true,
-        apiKey: 'secret-sentinel',
-        endpoint: 'https://secret.example/systemone',
-      },
+      advisor: { enabled: true, model: 'typesafe/jev-latest' },
     }).config;
     const serialized = JSON.stringify(runtime.adapters.getSnapshot());
     expect(serialized).not.toContain('secret-sentinel');

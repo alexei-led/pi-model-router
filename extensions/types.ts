@@ -24,13 +24,6 @@ export interface ModelDefinition {
   thinkingLevels?: ThinkingLevel[] | undefined;
 }
 
-export interface ClassifierConfig {
-  model: string;
-  thinking?: ThinkingLevel | undefined;
-  /** Total classifier budget in ms; `DEFAULT_CLASSIFIER_TIMEOUT_MS` when omitted. */
-  timeoutMs?: number | undefined;
-}
-
 export interface RoutedTierConfig {
   model: string;
   /** False for normalization defaults; omitted on legacy in-memory profiles. */
@@ -47,28 +40,22 @@ export interface RoutedTierConfig {
   resolvedMaxTokens?: number | undefined;
 }
 
-export interface JevContextConfig {
+export interface ClassifierContextConfig {
   previousTurns: number;
   maxHistoryTokens: number;
   toolResults: 'none' | 'last' | 'last-error';
   maxToolTokens: number;
 }
-export interface JevRetryConfig {
-  /** HTTP attempts in total; 1 disables retries. */
-  maxAttempts: number;
-  /** First backoff delay; doubled per attempt, raised by `Retry-After`. */
-  backoffMs: number;
-}
-export interface JevTextExcerpt {
+export interface ClassifierTextExcerpt {
   text: string;
   truncated: boolean;
 }
-export interface JevContextState {
-  currentRequest: JevTextExcerpt;
-  recentDialogue: (JevTextExcerpt & { role: 'user' | 'assistant' })[];
-  recentToolEvidence: (JevTextExcerpt & { isError: boolean })[];
+export interface ClassifierContextState {
+  currentRequest: ClassifierTextExcerpt;
+  recentDialogue: (ClassifierTextExcerpt & { role: 'user' | 'assistant' })[];
+  recentToolEvidence: (ClassifierTextExcerpt & { isError: boolean })[];
 }
-export interface JevContextMetrics {
+export interface ClassifierContextMetrics {
   currentRequestTokens: number;
   historyTokens: number;
   toolTokens: number;
@@ -77,34 +64,25 @@ export interface JevContextMetrics {
   truncatedBlocks: number;
 }
 
-export interface JevConfig {
+export interface AdvisorConfig {
   enabled: boolean;
   model: string;
   timeoutMs: number;
   confidenceThreshold: number;
   probabilityThreshold: number;
   maxStateTokens: number;
-  context?: JevContextConfig | undefined;
-  retry?: JevRetryConfig | undefined;
-  mode: 'advisory';
+  context?: ClassifierContextConfig | undefined;
+  maxRetries: number;
+  temperature?: number | undefined;
 }
 
-export type AdvisorSelection = 'jev' | 'clef' | 'clef-flash';
-
-/** Cloudflare authentication belongs exclusively to Pi. */
-export type CloudflareConfig = Omit<JevConfig, 'model'>;
-export interface ChoiceRegistry {
+export interface ClassifierRegistry {
   findOfType: (
     type: 'classifier',
     provider: string,
     id: string,
   ) => ClassifierModel<ClassifierApi> | undefined;
   classify: ExtensionContext['modelRegistry']['classify'];
-}
-export interface ChoiceTarget {
-  provider: 'typesafe' | 'cloudflare-workers-ai';
-  modelId: string;
-  api: 'typesafe-system-one' | 'cloudflare-workers-ai-system-one';
 }
 export interface CapabilityCriterion {
   covers: string;
@@ -113,14 +91,14 @@ export interface CapabilityCriterion {
   examples: readonly string[];
 }
 
-export interface JevProfileConfig {
-  enabled: boolean;
+export interface AdvisorProfileConfig {
+  /** Explicit user-owned consent for these exact classifier references. */
+  models: string[];
 }
 
 export interface RouterProfile {
   baselineTier?: RouterTier | undefined;
-  jev?: JevProfileConfig | undefined;
-  cloudflare?: JevProfileConfig | undefined;
+  advisor?: AdvisorProfileConfig | undefined;
   high?: RoutedTierConfig | undefined;
   medium?: RoutedTierConfig | undefined;
   low?: RoutedTierConfig | undefined;
@@ -131,11 +109,8 @@ export type StatusLineMode = 'compact' | 'detailed';
 
 export interface RouterConfig {
   ui?: { statusLine: StatusLineMode } | undefined;
-  jev?: JevConfig | undefined;
-  advisor?: AdvisorSelection | undefined;
-  cloudflare?: CloudflareConfig | undefined;
+  advisor?: AdvisorConfig | undefined;
   debug?: boolean | undefined;
-  classifierModel?: ClassifierConfig | undefined;
   maxSessionBudget?: number | undefined;
   profiles: Record<string, RouterProfile>;
   models?: Record<string, ModelDefinition> | undefined;
@@ -147,19 +122,19 @@ export interface RoutePair {
   thinking: ThinkingLevel;
 }
 
-export interface JevRouteCandidate extends RoutePair {
+export interface RouteCandidate extends RoutePair {
   id: string;
 }
 
-export interface JevDependencies {
+export interface ClassifierDependencies {
   fetch?: typeof fetch;
   now?: () => number;
 }
 
-export interface JevRequest {
+export interface ClassifierRequest {
   context: Context;
-  candidates: readonly JevRouteCandidate[];
-  profile: JevProfileConfig | undefined;
+  candidates: readonly RouteCandidate[];
+  profile: AdvisorProfileConfig | undefined;
   /** Local fallback tier; abstention mass is assigned to it, never inferred remotely. */
   baselineTier: RouterTier;
   /** Absolute monotonic deadline supplied by the routing orchestrator. */
@@ -167,11 +142,12 @@ export interface JevRequest {
   signal?: AbortSignal | undefined;
 }
 
-export const JEV_SELECTION_BASES = ['choice', 'probability'] as const;
-export type JevSelectionBasis = (typeof JEV_SELECTION_BASES)[number];
+export const CLASSIFIER_SELECTION_BASES = ['choice', 'probability'] as const;
+export type ClassifierSelectionBasis =
+  (typeof CLASSIFIER_SELECTION_BASES)[number];
 
 /** Local validation codes; remote error text is never retained. */
-export const JEV_RESPONSE_ISSUES = [
+export const CLASSIFIER_RESPONSE_ISSUES = [
   'unreadable-body',
   'missing-answer',
   'unexpected-answer-type',
@@ -181,9 +157,10 @@ export const JEV_RESPONSE_ISSUES = [
   'distribution-sum',
   'distribution-argmax',
 ] as const;
-export type JevResponseIssue = (typeof JEV_RESPONSE_ISSUES)[number];
+export type ClassifierResponseIssue =
+  (typeof CLASSIFIER_RESPONSE_ISSUES)[number];
 
-export const JEV_OUTCOMES = [
+export const CLASSIFIER_OUTCOMES = [
   'selected',
   'uncertain',
   'invalid-response',
@@ -194,20 +171,19 @@ export const JEV_OUTCOMES = [
   'unavailable',
   'input-too-large',
 ] as const;
-export type JevOutcome = (typeof JEV_OUTCOMES)[number];
-export interface JevDiagnostics {
-  context?: JevContextMetrics | undefined;
-  /** Locally generated per HTTP request, shared by reusers; never supplied by Jev. */
+export type ClassifierOutcome = (typeof CLASSIFIER_OUTCOMES)[number];
+export interface ClassifierDiagnostics {
+  context?: ClassifierContextMetrics | undefined;
+  /** Locally generated per classify call, shared by reusers; never supplied remotely. */
   requestId?: string | undefined;
-  outcome: JevOutcome;
+  outcome: ClassifierOutcome;
   latencyMs: number;
   startedAt?: number | undefined;
   model?: string | undefined;
-  resolvedModel?: string | undefined;
   choice?: RouterTier | 'uncertain' | undefined;
   /** Acted-on tier, which a conservative probability selection can raise above `choice`. */
   selectedTier?: RouterTier | undefined;
-  selectionBasis?: JevSelectionBasis | undefined;
+  selectionBasis?: ClassifierSelectionBasis | undefined;
   confidence?: number | undefined;
   probability?: number | undefined;
   /** Cumulative probability of the selected tier and every lower tier. */
@@ -218,20 +194,22 @@ export interface JevDiagnostics {
   candidateCount?: number | undefined;
   estimatedInputTokens?: number | undefined;
   actualInputTokens?: number | undefined;
+  actualOutputTokens?: number | undefined;
+  costUsd?: number | undefined;
   httpStatus?: number | undefined;
-  /** HTTP attempts made, including the retry of a documented transient status. */
+  /** HTTP calls observed through the Pi fetch hook; may include retries or several question requests. */
   attempts?: number | undefined;
-  responseIssue?: JevResponseIssue | undefined;
+  responseIssue?: ClassifierResponseIssue | undefined;
 }
-export interface JevResult {
-  advice?: JevAdvice | undefined;
-  diagnostics: JevDiagnostics;
+export interface ClassifierResult {
+  advice?: ClassifierAdvice | undefined;
+  diagnostics: ClassifierDiagnostics;
 }
 
 /** Runtime-only shared request; never persisted. */
-export interface JevFlight {
-  config: JevConfig | CloudflareConfig;
-  promise: Promise<JevResult>;
+export interface ClassifierFlight {
+  config: AdvisorConfig;
+  promise: Promise<ClassifierResult>;
   controller: AbortController;
   waiters: number;
 }
@@ -244,7 +222,7 @@ export interface AdvisedTurnRecord {
 }
 
 /** Only allowlisted local identity and numeric diagnostics cross the adapter boundary. */
-export interface JevAdvice {
+export interface ClassifierAdvice {
   candidateId: string;
   confidence: number;
   latencyMs: number;
@@ -255,8 +233,6 @@ export const ROUTING_REASON_CODES = [
   'pinned',
   'continuation',
   'classifier',
-  'jev',
-  'cloudflare',
   'fallback',
   'budget',
   'legacy',
@@ -270,10 +246,6 @@ export type RoutingErrorClass = 'advisor-unavailable' | 'deadline';
 export const ADVISOR_OUTCOMES = [
   'none',
   'bypassed',
-  'jev',
-  'jev-fallback',
-  'cloudflare',
-  'cloudflare-fallback',
   'classifier',
   'classifier-fallback',
 ] as const;
@@ -333,8 +305,7 @@ export interface RoutingDecision {
   errorClass?: RoutingErrorClass | undefined;
   advisor?: AdvisorOutcome | undefined;
   bypassReason?: BypassReason | undefined;
-  jev?: JevDiagnostics | undefined;
-  cloudflare?: JevDiagnostics | undefined;
+  classification?: ClassifierDiagnostics | undefined;
   generation?: GenerationDiagnostics | undefined;
   reuse?: 'same-turn' | 'shared' | 'continuation' | undefined;
   thinking: ThinkingLevel;
@@ -382,11 +353,8 @@ export interface RouterPersistedState {
 
 export interface RawRouterConfig {
   ui?: unknown;
-  jev?: unknown;
   advisor?: unknown;
-  cloudflare?: unknown;
   debug?: unknown;
-  classifierModel?: unknown;
   phaseBias?: unknown;
   maxSessionBudget?: unknown;
   rules?: unknown;
@@ -404,7 +372,7 @@ export interface ParsedConfigFile {
   warnings: string[];
 }
 
-export type RouterUIAdvisorId = 'jev' | 'clef' | 'clef-flash';
+export type RouterUIAdvisorId = string;
 export type RouterUIView = 'now' | 'usage' | 'settings';
 export type RouterUILifecycle =
   | 'choosing'
@@ -423,7 +391,7 @@ export interface RouterUIControls {
   pin: RouterPin;
   baseline: RouterPin;
   budget: number | undefined;
-  advisor: RouterUIAdvisorId;
+  advisor: RouterUIAdvisorId | undefined;
   timeout: number;
   thinkingHigh: ThinkingLevel | undefined;
   thinkingMedium: ThinkingLevel | undefined;
@@ -449,9 +417,9 @@ export interface RouterUIRoute {
   thinking: ThinkingLevel;
 }
 export interface RouterUIAdviceObservation {
-  advisor: RouterUIAdvisorId | 'classifier';
+  advisor: RouterUIAdvisorId;
   requestId?: string | undefined;
-  outcome: JevOutcome;
+  outcome: ClassifierOutcome;
   latencyMs?: number | undefined;
   httpAttempts?: number | undefined;
   costUsd?: number | undefined;
@@ -470,7 +438,7 @@ export interface RouterUISnapshot {
   lifecycle: RouterUILifecycle;
   /** Recorded catalog costs only, not a complete billing ledger. */
   accumulatedCost?: number | undefined;
-  classifierModel?: string | undefined;
+  classifiers: readonly { model: string; name: string }[];
   reuse?: RoutingDecision['reuse'];
   bypassReason?: BypassReason | undefined;
   reason?: RoutingReasonCode | undefined;
@@ -482,8 +450,8 @@ export interface RouterUISnapshot {
   pendingControls?: Readonly<RouterUIControls> | undefined;
   eligible: Readonly<Partial<Record<RouterTier, RouterUIRoute>>>;
   privacy: {
-    jevApproved: boolean | undefined;
-    cloudflareApproved: boolean | undefined;
+    advisorEnabled: boolean;
+    approvedModels: readonly string[];
     /** Public host capability only; not backend-login attestation. */
     auth: 'available' | 'unavailable' | 'unknown';
   };
@@ -526,6 +494,6 @@ export interface RouterUIRuntimeState {
   readonly lastDecision: RoutingDecision | undefined;
   readonly debugHistory: readonly RoutingDecision[];
   readonly currentModelRegistry:
-    | Pick<ExtensionContext['modelRegistry'], 'find'>
+    | Pick<ExtensionContext['modelRegistry'], 'find' | 'getModelsOfType'>
     | undefined;
 }

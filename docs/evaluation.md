@@ -78,18 +78,18 @@ Subscription prices, Jev fees, operator time, and answer quality are not part of
 
 ### The extension's shadow comparison
 
-The live Pi extension uses current registry base rates, not this historical report.
-Its scenarios use disjoint Pi input counters and the measured output count:
+The historical table above remains tied to its snapshot date and registry prices. The current extension uses Pi’s `calculateCost()` with request-wide input-price tiers. Each scenario uses the same total input and output counters:
 
 ```text
 I = input + cacheRead + cacheWrite
 O = output
-allRead(model) = (I × cacheReadRate + O × outputRate) / 1,000,000
-allNew(model) = (I × max(inputRate, cacheWriteRate) + O × outputRate) / 1,000,000
+allRead(model) = Pi.calculateCost(model, { cacheRead: I, output: O }).total
+allNew(model) = max(Pi.calculateCost(model, { input: I, output: O }).total,
+                   Pi.calculateCost(model, { cacheWrite: I, output: O }).total)
 ```
 
 The maximum permits a catalog without separate cache-write pricing.
-These scenarios omit long-context price tiers, retention differences, and changes in output length.
+Pi applies the highest matching request-wide input tier to each scenario. The scenarios still omit cache retention differences and changes in output length.
 They do not affect routing. Unknown tariffs remain unknown.
 
 ## Scope and reproducibility

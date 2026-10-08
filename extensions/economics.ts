@@ -1,4 +1,9 @@
-import type { Api, Model, Usage } from '@earendil-works/pi-ai';
+import {
+  type Api,
+  calculateCost,
+  type Model,
+  type Usage,
+} from '@earendil-works/pi-ai';
 import type { CacheCostShadow, GenerationDiagnostics } from './types';
 
 const isCount = (value: number): boolean =>
@@ -6,10 +11,17 @@ const isCount = (value: number): boolean =>
 const isCost = (value: number | undefined): value is number =>
   value !== undefined && Number.isFinite(value) && value >= 0;
 
-const priced = (model: Model<Api>): boolean =>
-  [model.cost.input, model.cost.output, model.cost.cacheRead].every(
-    (rate) => isCost(rate) && rate > 0,
-  ) && isCost(model.cost.cacheWrite);
+const priced = (model: Model<Api>, input: number): boolean => {
+  const tier = model.cost.tiers
+    ?.filter((entry) => input > entry.inputTokensAbove)
+    .sort((left, right) => right.inputTokensAbove - left.inputTokensAbove)[0];
+  const rates = tier ?? model.cost;
+  return (
+    [rates.input, rates.output, rates.cacheRead].every(
+      (rate) => isCost(rate) && rate > 0,
+    ) && isCost(rates.cacheWrite)
+  );
+};
 
 /** Catalog scenarios only. A zero/unknown tariff is not evidence of free generation. */
 const compareCacheCosts = (
@@ -18,13 +30,23 @@ const compareCacheCosts = (
   input: number,
   output: number,
 ): CacheCostShadow | undefined => {
-  if (!priced(previous) || !priced(target)) return undefined;
-  const allRead = (model: Model<Api>) =>
-    (input * model.cost.cacheRead + output * model.cost.output) / 1e6;
+  if (!priced(previous, input) || !priced(target, input)) return undefined;
+  const scenarioCost = (
+    model: Model<Api>,
+    kind: 'input' | 'cacheRead' | 'cacheWrite',
+  ) =>
+    calculateCost(model, {
+      input: 0,
+      output,
+      cacheRead: 0,
+      cacheWrite: 0,
+      [kind]: input,
+      totalTokens: input + output,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    }).total;
+  const allRead = (model: Model<Api>) => scenarioCost(model, 'cacheRead');
   const allNew = (model: Model<Api>) =>
-    (input * Math.max(model.cost.input, model.cost.cacheWrite) +
-      output * model.cost.output) /
-    1e6;
+    Math.max(scenarioCost(model, 'input'), scenarioCost(model, 'cacheWrite'));
   const costs = {
     stayAllReadUsd: allRead(previous),
     stayAllNewUsd: allNew(previous),
@@ -77,7 +99,8 @@ export const observeGeneration = ({
     cacheReadTokens: usage.cacheRead,
     cacheWriteTokens: usage.cacheWrite,
     reportedCostUsd:
-      isCost(reportedCostUsd) && (reportedCostUsd > 0 || priced(target))
+      isCost(reportedCostUsd) &&
+      (reportedCostUsd > 0 || priced(target, totalInput))
         ? reportedCostUsd
         : undefined,
     // No TTL or prefix-equality evidence is available here. Never persist a warmth claim.

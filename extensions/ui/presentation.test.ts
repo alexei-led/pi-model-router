@@ -17,7 +17,7 @@ const snapshot: RouterUISnapshot = {
     pin: 'auto',
     baseline: 'medium',
     budget: 2,
-    advisor: 'jev',
+    advisor: undefined,
     timeout: 1500,
     thinkingHigh: undefined,
     thinkingMedium: undefined,
@@ -26,67 +26,16 @@ const snapshot: RouterUISnapshot = {
   },
   eligible: {},
   history: [],
-  privacy: { jevApproved: true, cloudflareApproved: false, auth: 'unknown' },
+  classifiers: [],
+  privacy: { advisorEnabled: false, approvedModels: [], auth: 'unknown' },
 };
 
 describe('Signal Panel presentation', () => {
-  it.each([
-    ['jev', 'Jev'],
-    ['clef', 'Clef'],
-    ['clef-flash', 'Clef Flash'],
-    ['classifier', 'Pi classifier'],
-  ] as const)(
-    'names %s without branding the panel after it',
-    (advisor, label) => {
-      expect(advisorName(advisor)).toBe(label);
-      expect(
-        routeReason({
-          ...snapshot,
-          advice: { advisor, outcome: 'selected', latencyMs: 42 },
-        }),
-      ).toBe(label + ' advice accepted · 42 ms');
-    },
-  );
-  it.each(['jev', 'clef', 'clef-flash', 'classifier'] as const)(
-    'honestly explains all outcomes for %s',
-    (advisor) => {
-      for (const [outcome, expected] of [
-        ['deadline', 'timed out → baseline'],
-        ['uncertain', 'abstained → baseline'],
-        ['invalid-response', 'invalid advice → baseline'],
-        ['network-error', 'network error → baseline'],
-        ['http-error', 'HTTP error → baseline'],
-        ['unavailable', 'unavailable → baseline'],
-        ['input-too-large', 'input too large → baseline'],
-        ['cancelled', 'cancelled'],
-      ] as const) {
-        expect(routeReason({ ...snapshot, advice: { advisor, outcome } })).toBe(
-          advisorName(advisor) + ' ' + expected,
-        );
-      }
-    },
-  );
-  it.each([
-    ['choosing', 'Choosing route'],
-    ['continuation', 'Tool route reused'],
-    ['failed', 'Generation failed'],
-    ['cancelled', 'Cancelled'],
-    ['budget', 'Over soft budget'],
-    ['fallback', 'Explicit generation fallback'],
-    ['off', 'Router off'],
-  ] as const)('gives %s precedence over old advice', (lifecycle, expected) => {
-    const state = {
-      ...snapshot,
-      lifecycle,
-      advice: {
-        advisor: 'jev' as const,
-        outcome: 'selected' as const,
-        latencyMs: 99,
-      },
-    };
-    expect(routeReason(state)).toContain(expected);
-    expect(routeReason(state)).not.toContain('99 ms');
+  it('uses the configured classifier name without adding advisor branding', () => {
+    expect(advisorName('typesafe/jev-latest')).toBe('typesafe/jev-latest');
+    expect(advisorName('Pi classifier')).toBe('Pi classifier');
   });
+
   it('marks high tier as ordinary, actual failure as error and recovered problems as warnings', () => {
     expect(routerTone(snapshot)).toBe('accent');
     expect(routerTone({ ...snapshot, lifecycle: 'failed' })).toBe('error');
