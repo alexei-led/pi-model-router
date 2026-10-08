@@ -23,10 +23,9 @@ import type {
   RoutingDecision,
 } from './types';
 import {
-  formatCloudflareStats,
+  formatClassifierStats,
   formatDecision,
   formatDecisionSource,
-  formatJevStats,
   formatPinSummary,
   formatThinkingSummary,
 } from './ui';
@@ -291,8 +290,7 @@ export const registerCommands = (
     ctx.ui.notify(
       [
         header,
-        ...formatJevStats(state.debugHistory),
-        ...formatCloudflareStats(state.debugHistory),
+        ...formatClassifierStats(state.debugHistory),
         ...(history.length > 0
           ? ['Recent decisions:', ...history]
           : ['No recent routing decisions.']),

@@ -9,9 +9,9 @@ import {
 } from './config';
 import type {
   CacheCostShadow,
+  ClassifierContextMetrics,
+  ClassifierDiagnostics,
   GenerationDiagnostics,
-  JevContextMetrics,
-  JevDiagnostics,
   PersistedStateInput,
   RouterLastProfileState,
   RouterPersistedState,
@@ -19,13 +19,13 @@ import type {
   RoutingDecision,
 } from './types';
 import {
+  CLASSIFIER_OUTCOMES,
+  CLASSIFIER_RESPONSE_ISSUES,
+  CLASSIFIER_SELECTION_BASES,
   GENERATION_TRANSITIONS,
   isAdvisorOutcome,
   isBypassReason,
   isRoutingReasonCode,
-  JEV_OUTCOMES,
-  JEV_RESPONSE_ISSUES,
-  JEV_SELECTION_BASES,
 } from './types';
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
@@ -157,9 +157,9 @@ export const isRouterPersistedState = (
 
 const snapshotContextMetrics = (
   value: unknown,
-): JevContextMetrics | undefined => {
+): ClassifierContextMetrics | undefined => {
   if (!isObjectRecord(value)) return undefined;
-  const result: JevContextMetrics = {
+  const result: ClassifierContextMetrics = {
     currentRequestTokens: 0,
     historyTokens: 0,
     toolTokens: 0,
@@ -167,7 +167,7 @@ const snapshotContextMetrics = (
     toolResults: 0,
     truncatedBlocks: 0,
   };
-  for (const key of Object.keys(result) as (keyof JevContextMetrics)[]) {
+  for (const key of Object.keys(result) as (keyof ClassifierContextMetrics)[]) {
     const number = value[key];
     if (!isFiniteNumber(number) || !Number.isSafeInteger(number) || number < 0)
       return undefined;
@@ -176,15 +176,14 @@ const snapshotContextMetrics = (
   return result;
 };
 
-const snapshotJev = (
+const snapshotClassification = (
   value: unknown,
-  cloudflare = false,
-): JevDiagnostics | undefined => {
+): ClassifierDiagnostics | undefined => {
   if (!isObjectRecord(value)) return undefined;
-  const outcome = JEV_OUTCOMES.find((entry) => entry === value.outcome);
+  const outcome = CLASSIFIER_OUTCOMES.find((entry) => entry === value.outcome);
   if (!outcome || !isFiniteNumber(value.latencyMs) || value.latencyMs < 0)
     return undefined;
-  const result: JevDiagnostics = { outcome, latencyMs: value.latencyMs };
+  const result: ClassifierDiagnostics = { outcome, latencyMs: value.latencyMs };
   const context = snapshotContextMetrics(value.context);
   if (context) result.context = context;
   if (
@@ -192,24 +191,15 @@ const snapshotJev = (
     /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value.requestId)
   )
     result.requestId = value.requestId;
-  if (
-    typeof value.model === 'string' &&
-    (cloudflare
-      ? /^@cf\/cloudflare\/clef(?:-flash)?$/.test(value.model)
-      : /^(?:jev-latest|jev-\d+(?:\.\d+){1,3})$/.test(value.model))
-  )
+  if (typeof value.model === 'string' && isModelRef(value.model))
     result.model = value.model;
-  if (
-    !cloudflare &&
-    typeof value.resolvedModel === 'string' &&
-    /^jev-\d+(?:\.\d+){1,3}$/.test(value.resolvedModel)
-  )
-    result.resolvedModel = value.resolvedModel;
+  if (isFiniteNumber(value.costUsd) && value.costUsd >= 0)
+    result.costUsd = value.costUsd;
   if (isRouterTier(value.choice) || value.choice === 'uncertain')
     result.choice = value.choice;
   if (isRouterTier(value.selectedTier))
     result.selectedTier = value.selectedTier;
-  const basis = JEV_SELECTION_BASES.find(
+  const basis = CLASSIFIER_SELECTION_BASES.find(
     (entry) => entry === value.selectionBasis,
   );
   if (basis) result.selectionBasis = basis;
@@ -224,7 +214,7 @@ const snapshotJev = (
     if (isFiniteNumber(number) && number >= 0 && number <= 1)
       result[key] = number;
   }
-  const issue = JEV_RESPONSE_ISSUES.find(
+  const issue = CLASSIFIER_RESPONSE_ISSUES.find(
     (entry) => entry === value.responseIssue,
   );
   if (issue) result.responseIssue = issue;
@@ -234,6 +224,7 @@ const snapshotJev = (
     'candidateCount',
     'estimatedInputTokens',
     'actualInputTokens',
+    'actualOutputTokens',
     'httpStatus',
     'attempts',
   ] as const) {
@@ -332,8 +323,7 @@ export const snapshotDecision = (
   bypassReason: isBypassReason(decision.bypassReason)
     ? decision.bypassReason
     : undefined,
-  jev: snapshotJev(decision.jev),
-  cloudflare: snapshotJev(decision.cloudflare, true),
+  classification: snapshotClassification(decision.classification),
   generation: snapshotGeneration(decision.generation),
   reuse:
     decision.reuse === 'same-turn' ||

@@ -1,10 +1,10 @@
 import type { Context, Message } from '@earendil-works/pi-ai';
-import { DEFAULT_JEV_CONTEXT } from './constants';
+import { DEFAULT_CLASSIFIER_CONTEXT } from './constants';
 import type {
-  JevContextConfig,
-  JevContextMetrics,
-  JevContextState,
-  JevTextExcerpt,
+  ClassifierContextConfig,
+  ClassifierContextMetrics,
+  ClassifierContextState,
+  ClassifierTextExcerpt,
 } from './types';
 
 export const extractTextFromContent = (
@@ -99,8 +99,8 @@ const textOnly = (message: Message): string =>
 
 const utf8 = new TextEncoder();
 
-/** Conservative Jev preflight estimate; TypeSafe does not publish its tokenizer. */
-export const estimateJevTextTokens = (text: string): number => {
+/** Conservative text preflight estimate, not a provider tokenizer or exact context guarantee. */
+export const estimateClassifierTextTokens = (text: string): number => {
   let ascii = 0;
   let nonAsciiBytes = 0;
   for (const character of text) {
@@ -115,8 +115,9 @@ export const estimateJevTextTokens = (text: string): number => {
  * `usage.input_tokens` exceeded the text estimate by 110-135 tokens on ten
  * structured requests, so the headroom is set well above that gap.
  */
-export const estimateJevRequestTokens = (serializedRequest: string): number =>
-  400 + estimateJevTextTokens(serializedRequest);
+export const estimateClassifierRequestTokens = (
+  serializedRequest: string,
+): number => 400 + estimateClassifierTextTokens(serializedRequest);
 
 const safePrefix = (text: string, units: number): string =>
   text.slice(0, units).replace(/[\uD800-\uDBFF]$/u, '');
@@ -134,7 +135,7 @@ const largestFitting = (
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     const candidate = render(middle);
-    if (estimateJevTextTokens(candidate) <= tokenLimit) {
+    if (estimateClassifierTextTokens(candidate) <= tokenLimit) {
       selected = candidate;
       low = middle + 1;
     } else high = middle - 1;
@@ -142,10 +143,10 @@ const largestFitting = (
   return selected;
 };
 
-const excerpt = (text: string, tokenLimit: number): JevTextExcerpt => {
-  if (estimateJevTextTokens(text) <= tokenLimit)
+const excerpt = (text: string, tokenLimit: number): ClassifierTextExcerpt => {
+  if (estimateClassifierTextTokens(text) <= tokenLimit)
     return { text, truncated: false };
-  if (tokenLimit < estimateJevTextTokens('…'))
+  if (tokenLimit < estimateClassifierTextTokens('…'))
     return {
       text: largestFitting(text, tokenLimit, (units) =>
         safePrefix(text, units),
@@ -162,12 +163,12 @@ const excerpt = (text: string, tokenLimit: number): JevTextExcerpt => {
   };
 };
 
-/** Fixed structural selection, not intent scoring. Only selected text reaches Jev. */
-export const buildJevContext = (
+/** Fixed structural selection, not intent scoring. Only selected text reaches the configured classifier. */
+export const buildClassifierContext = (
   context: Context,
   maxTokens: number,
-  options: JevContextConfig = DEFAULT_JEV_CONTEXT,
-): { state: JevContextState; metrics: JevContextMetrics } => {
+  options: ClassifierContextConfig = DEFAULT_CLASSIFIER_CONTEXT,
+): { state: ClassifierContextState; metrics: ClassifierContextMetrics } => {
   const budget = Number.isFinite(maxTokens)
     ? Math.max(0, Math.floor(maxTokens))
     : 0;
@@ -175,12 +176,13 @@ export const buildJevContext = (
     (message) => message.role === 'user',
   );
   const current = context.messages[latest];
-  const state: JevContextState = {
+  const state: ClassifierContextState = {
     currentRequest: excerpt(current ? textOnly(current) : '', budget),
     recentDialogue: [],
     recentToolEvidence: [],
   };
-  let remaining = budget - estimateJevTextTokens(state.currentRequest.text);
+  let remaining =
+    budget - estimateClassifierTextTokens(state.currentRequest.text);
   const turns: { start: number; end: number }[] = [];
   let end = latest;
   for (
@@ -217,7 +219,7 @@ export const buildJevContext = (
     const selected = excerpt(entry.text, limit);
     state.recentDialogue.unshift({ role: entry.role, ...selected });
     includedTurns.add(entry.turn);
-    const selectedTokens = estimateJevTextTokens(selected.text);
+    const selectedTokens = estimateClassifierTextTokens(selected.text);
     historyBudget -= selectedTokens;
     remaining -= selectedTokens;
   }
@@ -251,13 +253,15 @@ export const buildJevContext = (
   return {
     state,
     metrics: {
-      currentRequestTokens: estimateJevTextTokens(state.currentRequest.text),
+      currentRequestTokens: estimateClassifierTextTokens(
+        state.currentRequest.text,
+      ),
       historyTokens: state.recentDialogue.reduce(
-        (sum, entry) => sum + estimateJevTextTokens(entry.text),
+        (sum, entry) => sum + estimateClassifierTextTokens(entry.text),
         0,
       ),
       toolTokens: state.recentToolEvidence.reduce(
-        (sum, entry) => sum + estimateJevTextTokens(entry.text),
+        (sum, entry) => sum + estimateClassifierTextTokens(entry.text),
         0,
       ),
       historyTurns: includedTurns.size,

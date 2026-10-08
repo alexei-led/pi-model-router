@@ -45,14 +45,87 @@ describe('generation economics', () => {
     });
     expect(result?.shadow).toEqual({
       previousModel: 'test/expensive',
-      stayAllReadUsd: 0.14,
-      stayAllNewUsd: 1.29,
-      switchAllReadUsd: 0.028,
-      switchAllNewUsd: 0.258,
+      stayAllReadUsd: expect.closeTo(0.14, 10),
+      stayAllNewUsd: expect.closeTo(1.29, 10),
+      switchAllReadUsd: expect.closeTo(0.028, 10),
+      switchAllNewUsd: expect.closeTo(0.258, 10),
     });
     expect(result?.shadow?.switchAllNewUsd).toBeGreaterThan(
       result?.shadow?.stayAllReadUsd ?? 0,
     );
+  });
+
+  it.each([200000, 200001, 300000])(
+    'uses the applicable long-context pricing tier at %i input tokens',
+    (input) => {
+      const tiered = model('tiered', {
+        cost: {
+          input: 1,
+          output: 2,
+          cacheRead: 0.1,
+          cacheWrite: 0,
+          tiers: [
+            {
+              inputTokensAbove: 200000,
+              input: 2,
+              output: 4,
+              cacheRead: 0.2,
+              cacheWrite: 0,
+            },
+          ],
+        },
+      });
+      const result = observeGeneration({
+        usage: { ...usage, input, output: 1000, cacheRead: 0, cacheWrite: 0 },
+        target: cheap,
+        previous: tiered,
+        contextTruncated: false,
+        attempts: 1,
+      });
+      const multiplier = input > 200000 ? 2 : 1;
+      expect(result?.shadow?.stayAllNewUsd).toBeCloseTo(
+        ((input + 2000) * multiplier) / 1e6,
+        10,
+      );
+      expect(result?.shadow?.stayAllReadUsd).toBeCloseTo(
+        ((input * 0.1 + 2000) * multiplier) / 1e6,
+        10,
+      );
+    },
+  );
+
+  it('uses known high-context tier prices even when base rates are zero', () => {
+    const tierOnly = model('tier-only', {
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        tiers: [
+          {
+            inputTokensAbove: 200000,
+            input: 2,
+            output: 4,
+            cacheRead: 0.2,
+            cacheWrite: 2.5,
+          },
+        ],
+      },
+    });
+    const result = observeGeneration({
+      usage: {
+        ...usage,
+        input: 300000,
+        output: 1000,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
+      target: cheap,
+      previous: tierOnly,
+      contextTruncated: false,
+      attempts: 1,
+    });
+    expect(result?.shadow?.stayAllNewUsd).toBeCloseTo(0.754, 10);
   });
 
   it('does not claim a cache-preserving effort change for the same model', () => {
@@ -130,7 +203,7 @@ describe('generation economics', () => {
         cost: { ...expensive.cost, cacheRead: expensive.cost.cacheRead * 10 },
       }),
     );
-    expect(base?.shadow?.stayAllReadUsd).toBe(0.14);
+    expect(base?.shadow?.stayAllReadUsd).toBeCloseTo(0.14, 10);
     expect(inflated?.shadow?.stayAllReadUsd).toBe(1.04);
     expect(inflated?.shadow?.switchAllNewUsd).toBe(
       base?.shadow?.switchAllNewUsd,

@@ -103,19 +103,19 @@ describe('state.ts', () => {
       debugHistory: [
         {
           ...decision,
-          advisor: 'jev-fallback',
+          advisor: 'classifier-fallback',
         } as unknown as RoutingDecision,
       ],
       lastDecision: {
         ...decision,
-        advisor: 'jev-fallback',
+        advisor: 'classifier-fallback',
       } as unknown as RoutingDecision,
       lastNonRouterModel: 'openai/gpt-4o',
       accumulatedCost: 0.0045,
     });
     expect(state.pinTier).toBe('medium');
-    expect(state.lastDecision?.advisor).toBe('jev-fallback');
-    expect(state.debugHistory?.[0]?.advisor).toBe('jev-fallback');
+    expect(state.lastDecision?.advisor).toBe('classifier-fallback');
+    expect(state.debugHistory?.[0]?.advisor).toBe('classifier-fallback');
     expect(state.accumulatedCost).toBe(0.0045);
     expect(isRouterPersistedState(JSON.parse(JSON.stringify(state)))).toBe(
       true,
@@ -126,7 +126,7 @@ describe('state.ts', () => {
     const tainted = {
       ...decision,
       reuse: 'continuation',
-      jev: {
+      classification: {
         outcome: 'selected',
         selectedTier: 'high',
         selectionBasis: 'probability',
@@ -161,7 +161,7 @@ describe('state.ts', () => {
     const copy = snapshotDecision(tainted);
     expect(copy).toMatchObject({
       reuse: 'continuation',
-      jev: {
+      classification: {
         requestId: '00000000-0000-4000-8000-000000000001',
         startedAt: 1234,
         latencyMs: 764,
@@ -187,8 +187,8 @@ describe('state.ts', () => {
     expect(JSON.stringify(copy)).not.toContain('secret');
     const invalid = {
       ...tainted,
-      jev: {
-        ...tainted.jev,
+      classification: {
+        ...tainted.classification,
         model: 'secret-key',
         requestId: 'secret-key',
         confidence: 2,
@@ -201,14 +201,14 @@ describe('state.ts', () => {
       reuse: 'remote-text',
     } as unknown as RoutingDecision;
     const sanitized = snapshotDecision(invalid);
-    expect(sanitized.jev?.model).toBeUndefined();
-    expect(sanitized.jev?.requestId).toBeUndefined();
-    expect(sanitized.jev?.context).toBeUndefined();
-    expect(sanitized.jev?.confidence).toBeUndefined();
-    expect(sanitized.jev?.choice).toBeUndefined();
-    expect(sanitized.jev?.selectedTier).toBeUndefined();
-    expect(sanitized.jev?.selectionBasis).toBeUndefined();
-    expect(sanitized.jev?.routeProbability).toBeUndefined();
+    expect(sanitized.classification?.model).toBeUndefined();
+    expect(sanitized.classification?.requestId).toBeUndefined();
+    expect(sanitized.classification?.context).toBeUndefined();
+    expect(sanitized.classification?.confidence).toBeUndefined();
+    expect(sanitized.classification?.choice).toBeUndefined();
+    expect(sanitized.classification?.selectedTier).toBeUndefined();
+    expect(sanitized.classification?.selectionBasis).toBeUndefined();
+    expect(sanitized.classification?.routeProbability).toBeUndefined();
     expect(sanitized.reuse).toBeUndefined();
   });
 
@@ -360,7 +360,7 @@ describe('state.ts', () => {
       'pinned',
       'continuation',
       'classifier',
-      'jev',
+      'classifier',
       'fallback',
       'budget',
       'legacy',
@@ -401,55 +401,5 @@ describe('state.ts', () => {
         lastDecision: decision,
       }),
     ).toBe(true);
-  });
-});
-
-describe('Cloudflare diagnostic snapshots', () => {
-  it.each(['@cf/cloudflare/clef', '@cf/cloudflare/clef-flash'])(
-    'retains allowlisted %s identity and numeric diagnostics separately from Jev',
-    (model) => {
-      const snapshot = snapshotDecision({
-        ...decision,
-        reasonCode: 'cloudflare',
-        advisor: 'cloudflare',
-        cloudflare: {
-          model,
-          outcome: 'selected',
-          latencyMs: 12,
-          actualInputTokens: 42,
-          selectedTier: 'high',
-          confidence: 0.9,
-          errorMessage: 'remote-secret',
-          resolvedModel: 'jev-1.13.0',
-        },
-      } as unknown as RoutingDecision);
-      expect(snapshot).toMatchObject({
-        reasonCode: 'cloudflare',
-        advisor: 'cloudflare',
-        cloudflare: { model, actualInputTokens: 42, latencyMs: 12 },
-      });
-      expect(snapshot?.jev).toBeUndefined();
-      expect(snapshot?.cloudflare?.resolvedModel).toBeUndefined();
-      expect(JSON.stringify(snapshot)).not.toContain('remote-secret');
-    },
-  );
-
-  it('does not accept arbitrary/foreign model labels', () => {
-    const snapshot = snapshotDecision({
-      ...decision,
-      cloudflare: {
-        model: 'secret-model',
-        outcome: 'unavailable',
-        latencyMs: 0,
-      },
-    });
-    expect(snapshot?.cloudflare?.model).toBeUndefined();
-    expect(snapshotDecision(decision)?.cloudflare).toBeUndefined();
-    expect(
-      snapshotDecision({
-        ...decision,
-        jev: { outcome: 'selected', latencyMs: 1, model: 'jev-1.13.0' },
-      })?.jev?.model,
-    ).toBe('jev-1.13.0');
   });
 });

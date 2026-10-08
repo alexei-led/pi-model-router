@@ -1,8 +1,4 @@
-import {
-  normalizeCloudflareConfig,
-  normalizeJevConfig,
-  parseCanonicalModelRef,
-} from '../config';
+import { normalizeAdvisorConfig, parseCanonicalModelRef } from '../config';
 import { availableRoutePairs, preservesRouteCoverage } from '../routing';
 import { snapshotDecision } from '../state';
 import type {
@@ -34,32 +30,26 @@ const routeOf = (decision: RoutingDecision): RouterUIRoute => ({
   thinking: decision.thinking,
 });
 const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
-  const metrics = decision.cloudflare ?? decision.jev;
+  const metrics = decision.classification;
   return {
     actual: decision.generation ? routeOf(decision) : undefined,
-    advice: metrics
-      ? {
-          advisor: decision.cloudflare
-            ? metrics.model === '@cf/cloudflare/clef-flash'
-              ? 'clef-flash'
-              : 'clef'
-            : 'jev',
-          requestId: metrics.requestId,
-          outcome: metrics.outcome,
-          latencyMs: metrics.latencyMs,
-          httpAttempts: metrics.attempts,
-        }
-      : decision.advisor === 'classifier' ||
-          decision.advisor === 'classifier-fallback'
+    advice:
+      metrics ||
+      decision.advisor === 'classifier' ||
+      decision.advisor === 'classifier-fallback'
         ? {
-            advisor: 'classifier',
+            advisor: metrics?.model ?? 'Classifier',
+            requestId: metrics?.requestId,
             outcome:
-              decision.advisor === 'classifier'
+              metrics?.outcome ??
+              (decision.advisor === 'classifier'
                 ? 'selected'
                 : decision.errorClass === 'deadline'
                   ? 'deadline'
-                  : 'unavailable',
-            latencyMs: decision.routingLatencyMs,
+                  : 'unavailable'),
+            latencyMs: metrics?.latencyMs ?? decision.routingLatencyMs,
+            httpAttempts: metrics?.attempts,
+            costUsd: metrics?.costUsd,
           }
         : undefined,
     reuse: decision.reuse,
@@ -77,7 +67,7 @@ const lifecycleOf = (
       ? 'budget'
       : decision.reuse === 'continuation'
         ? 'continuation'
-        : (decision.cloudflare ?? decision.jev)?.outcome === 'deadline'
+        : decision.classification?.outcome === 'deadline'
           ? 'timeout'
           : active
             ? 'generating'
@@ -130,12 +120,8 @@ export const createRouterUIRuntime = (
       pin: state.pinnedTierByProfile[profile] ?? 'auto',
       baseline: config.profiles[profile]?.baselineTier ?? 'auto',
       budget: config.maxSessionBudget,
-      advisor: config.advisor ?? 'jev',
-      timeout:
-        (config.advisor && config.advisor !== 'jev'
-          ? config.cloudflare
-          : config.jev
-        )?.timeoutMs ?? 1500,
+      advisor: config.advisor?.model,
+      timeout: config.advisor?.timeoutMs ?? 10_000,
       thinkingHigh: thinking?.high,
       thinkingMedium: thinking?.medium,
       thinkingLow: thinking?.low,
@@ -177,6 +163,14 @@ export const createRouterUIRuntime = (
     const config = state.currentConfig.profiles[profile];
     const registry = state.currentModelRegistry;
     if (!config || !registry || validateRouterUIControls(value)) return false;
+    if (
+      value.advisor &&
+      value.advisor !== state.currentConfig.advisor?.model &&
+      !registry
+        .getModelsOfType('classifier')
+        .some((model) => model.provider + '/' + model.id === value.advisor)
+    )
+      return false;
     if (value.baseline !== 'auto' && !config[value.baseline]) return false;
     const find = (provider: string, id: string) => registry.find(provider, id);
     const thinking = thinkingOf(value);
@@ -238,7 +232,17 @@ export const createRouterUIRuntime = (
     return {
       profile,
       accumulatedCost: state.accumulatedCost,
-      classifierModel: config.classifierModel?.model,
+      classifiers:
+        (typeof registry?.getModelsOfType === 'function'
+          ? registry.getModelsOfType('classifier')
+          : []
+        )
+          .filter((model) => model.input.includes('text'))
+          .map((model) => ({
+            model: model.provider + '/' + model.id,
+            name: model.name,
+          }))
+          .sort((a, b) => a.model.localeCompare(b.model)) ?? [],
       reuse: last?.reuse,
       bypassReason: last?.bypassReason,
       reason: last?.reasonCode,
@@ -260,10 +264,8 @@ export const createRouterUIRuntime = (
       pendingControls: pendingValue(profile),
       eligible,
       privacy: {
-        jevApproved: Boolean(config.jev?.enabled && configured?.jev?.enabled),
-        cloudflareApproved: Boolean(
-          config.cloudflare?.enabled && configured?.cloudflare?.enabled,
-        ),
+        advisorEnabled: config.advisor?.enabled === true,
+        approvedModels: configured?.advisor?.models ?? [],
         auth: 'unknown',
       },
       history,
@@ -333,7 +335,6 @@ export const createRouterUIRuntime = (
     if (!configured) return false;
     const nextConfig = {
       ...config,
-      advisor: next.advisor,
       maxSessionBudget: next.budget,
       profiles: {
         ...config.profiles,
@@ -343,25 +344,19 @@ export const createRouterUIRuntime = (
         },
       },
     };
-    if (next.advisor === 'jev')
-      nextConfig.jev = normalizeJevConfig(
-        {
-          ...config.jev,
-          enabled: config.jev?.enabled ?? false,
-          timeoutMs: next.timeout,
-        },
-        [],
-      );
-    else
-      nextConfig.cloudflare = normalizeCloudflareConfig(
-        {
-          ...config.cloudflare,
-          enabled: config.cloudflare?.enabled ?? false,
-          timeoutMs: next.timeout,
-        },
-        [],
-      );
-    state.currentConfig = nextConfig;
+    const advisor = next.advisor
+      ? normalizeAdvisorConfig(
+          {
+            ...config.advisor,
+            model: next.advisor,
+            enabled: config.advisor?.enabled ?? false,
+            timeoutMs: next.timeout,
+          },
+          [],
+        )
+      : undefined;
+    state.currentConfig = { ...nextConfig, advisor };
+
     if (next.pin === 'auto') delete state.pinnedTierByProfile[profile];
     else state.pinnedTierByProfile[profile] = next.pin;
     state.thinkingByProfile[profile] = thinkingOf(next);
@@ -396,11 +391,7 @@ export const createRouterUIRuntime = (
       if (requestEpoch !== epoch || profile !== state.selectedProfile) return;
       if (event.decision) observation = snapshotDecision(event.decision);
       if (event.stage === 'selected') {
-        if (
-          event.decision?.advisor === 'jev' ||
-          event.decision?.advisor === 'cloudflare' ||
-          event.decision?.advisor === 'classifier'
-        )
+        if (event.decision?.advisor === 'classifier')
           advised = routeOf(event.decision);
       } else if (event.stage === 'generating' && event.decision) {
         actual = routeOf(event.decision);

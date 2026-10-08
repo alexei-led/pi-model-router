@@ -4,22 +4,18 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
+  DEFAULT_CLASSIFIER_CONTEXT,
+  DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CONTEXT_WINDOW,
-  DEFAULT_JEV_CONTEXT,
-  DEFAULT_JEV_RETRY,
   DEFAULT_MAX_TOKENS,
-  MAX_JEV_ATTEMPTS,
-  MAX_JEV_BACKOFF_MS,
-  MAX_JEV_CONTEXT_TURNS,
-  MAX_JEV_STATE_TOKENS,
+  MAX_CLASSIFIER_CONTEXT_TURNS,
+  MAX_CLASSIFIER_RETRIES,
+  MAX_CLASSIFIER_STATE_TOKENS,
 } from './constants';
 import type {
-  ClassifierConfig,
-  CloudflareConfig,
+  AdvisorConfig,
+  ClassifierContextConfig,
   ConfigLoadResult,
-  JevConfig,
-  JevContextConfig,
-  JevRetryConfig,
   ModelDefinition,
   ParsedConfigFile,
   RawRouterConfig,
@@ -140,8 +136,7 @@ export const mergeConfig = (
       medium: mergeRawValue(existing.medium, profile.medium),
       low: mergeRawValue(existing.low, profile.low),
       micro: mergeRawValue(existing.micro, profile.micro),
-      jev: mergeRawValue(existing.jev, profile.jev),
-      cloudflare: mergeRawValue(existing.cloudflare, profile.cloudflare),
+      advisor: mergeRawValue(existing.advisor, profile.advisor),
     };
   }
 
@@ -149,41 +144,22 @@ export const mergeConfig = (
   const overrideModels = isObjectRecord(override.models) ? override.models : {};
   const mergedModels = { ...baseModels, ...overrideModels };
 
-  const mergedJev = mergeRawValue(base.jev, override.jev);
-  const nestedJev = (key: 'context' | 'retry') =>
-    mergeRawValue(
-      isObjectRecord(base.jev) ? base.jev[key] : undefined,
-      isObjectRecord(override.jev) ? override.jev[key] : undefined,
-    );
-  const jev = isObjectRecord(mergedJev)
-    ? { ...mergedJev, context: nestedJev('context'), retry: nestedJev('retry') }
-    : mergedJev;
-  const mergedCloudflare = mergeRawValue(base.cloudflare, override.cloudflare);
-  const cloudflare = isObjectRecord(mergedCloudflare)
+  const mergedAdvisor = mergeRawValue(base.advisor, override.advisor);
+  const advisor = isObjectRecord(mergedAdvisor)
     ? {
-        ...mergedCloudflare,
-        ...Object.fromEntries(
-          (['context', 'retry'] as const).map((key) => [
-            key,
-            mergeRawValue(
-              isObjectRecord(base.cloudflare)
-                ? base.cloudflare[key]
-                : undefined,
-              isObjectRecord(override.cloudflare)
-                ? override.cloudflare[key]
-                : undefined,
-            ),
-          ]),
+        ...mergedAdvisor,
+        context: mergeRawValue(
+          isObjectRecord(base.advisor) ? base.advisor.context : undefined,
+          isObjectRecord(override.advisor)
+            ? override.advisor.context
+            : undefined,
         ),
       }
-    : mergedCloudflare;
+    : mergedAdvisor;
   return {
     ui: mergeRawValue(base.ui, override.ui),
-    jev,
-    advisor: override.advisor ?? base.advisor,
-    cloudflare,
+    advisor,
     debug: override.debug ?? base.debug,
-    classifierModel: override.classifierModel ?? base.classifierModel,
     phaseBias: override.phaseBias ?? base.phaseBias,
     maxSessionBudget: override.maxSessionBudget ?? base.maxSessionBudget,
     rules: override.rules ?? base.rules,
@@ -431,100 +407,90 @@ export const normalizeTierConfig = (
 // Node turns larger setTimeout delays into 1 ms rather than waiting longer.
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
-export const DEFAULT_JEV_CONFIG = {
-  model: 'jev-1.13.0',
-  timeoutMs: 1500,
+export const DEFAULT_ADVISOR_CONFIG = {
+  timeoutMs: DEFAULT_CLASSIFIER_TIMEOUT_MS,
   confidenceThreshold: 0.65,
   probabilityThreshold: 0.8,
   maxStateTokens: 3000,
-  mode: 'advisory',
+  maxRetries: 1,
 } as const;
 
-export const isJevEndpoint = (value: unknown): value is string => {
-  if (typeof value !== 'string') return false;
+export const normalizeClassifierRef = (value: unknown): string | undefined => {
+  if (typeof value !== 'string' || value.length > 512) return undefined;
   try {
-    const url = new URL(value);
-    return (
-      url.protocol === 'https:' &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash
-    );
+    const { provider, modelId } = parseCanonicalModelRef(value.trim());
+    if (provider === 'router') return undefined;
+    return provider + '/' + modelId;
   } catch {
-    return false;
+    return undefined;
   }
 };
 
-const normalizeJevContext = (raw: unknown): JevContextConfig | undefined => {
-  if (raw === undefined) return { ...DEFAULT_JEV_CONTEXT };
+const normalizeClassifierContext = (
+  raw: unknown,
+): ClassifierContextConfig | undefined => {
+  if (raw === undefined) return { ...DEFAULT_CLASSIFIER_CONTEXT };
   if (
     !isObjectRecord(raw) ||
-    Object.keys(raw).some((key) => !Object.hasOwn(DEFAULT_JEV_CONTEXT, key))
+    Object.keys(raw).some(
+      (key) => !Object.hasOwn(DEFAULT_CLASSIFIER_CONTEXT, key),
+    )
   )
     return undefined;
-  const context = { ...DEFAULT_JEV_CONTEXT, ...raw };
+  const context = { ...DEFAULT_CLASSIFIER_CONTEXT, ...raw };
   if (
     typeof context.previousTurns !== 'number' ||
     !Number.isSafeInteger(context.previousTurns) ||
     context.previousTurns < 0 ||
-    context.previousTurns > MAX_JEV_CONTEXT_TURNS ||
+    context.previousTurns > MAX_CLASSIFIER_CONTEXT_TURNS ||
     typeof context.maxHistoryTokens !== 'number' ||
     !Number.isInteger(context.maxHistoryTokens) ||
     context.maxHistoryTokens < 0 ||
-    context.maxHistoryTokens > MAX_JEV_STATE_TOKENS ||
+    context.maxHistoryTokens > MAX_CLASSIFIER_STATE_TOKENS ||
     typeof context.maxToolTokens !== 'number' ||
     !Number.isInteger(context.maxToolTokens) ||
     context.maxToolTokens < 0 ||
-    context.maxToolTokens > MAX_JEV_STATE_TOKENS ||
+    context.maxToolTokens > MAX_CLASSIFIER_STATE_TOKENS ||
     !['none', 'last', 'last-error'].includes(context.toolResults)
   )
     return undefined;
   return context;
 };
 
-const normalizeJevRetry = (raw: unknown): JevRetryConfig | undefined => {
-  if (raw === undefined) return { ...DEFAULT_JEV_RETRY };
-  if (
-    !isObjectRecord(raw) ||
-    Object.keys(raw).some((key) => !Object.hasOwn(DEFAULT_JEV_RETRY, key))
-  )
-    return undefined;
-  const retry = { ...DEFAULT_JEV_RETRY, ...raw };
-  if (
-    typeof retry.maxAttempts !== 'number' ||
-    !Number.isSafeInteger(retry.maxAttempts) ||
-    retry.maxAttempts < 1 ||
-    retry.maxAttempts > MAX_JEV_ATTEMPTS ||
-    typeof retry.backoffMs !== 'number' ||
-    !Number.isSafeInteger(retry.backoffMs) ||
-    retry.backoffMs < 0 ||
-    retry.backoffMs > MAX_JEV_BACKOFF_MS
-  )
-    return undefined;
-  return retry;
-};
-
-export const normalizeJevConfig = (
+export const normalizeAdvisorConfig = (
   raw: unknown,
   warnings: string[],
-): JevConfig | undefined => {
+): AdvisorConfig | undefined => {
   if (raw === undefined) return undefined;
   const invalid = (): undefined => {
-    warnings.push('Ignored invalid Jev configuration.');
+    warnings.push(
+      'Ignored invalid advisor configuration. Configure a Pi classifier reference; credentials and endpoints belong to Pi.',
+    );
     return undefined;
   };
-  if (!isObjectRecord(raw)) return invalid();
-  const value: Record<string, unknown> = { ...DEFAULT_JEV_CONFIG, ...raw };
-  const context = normalizeJevContext(value.context);
-  if (!context) return invalid();
-  const retry = normalizeJevRetry(value.retry);
-  if (!retry) return invalid();
+  const allowed = [
+    'enabled',
+    'model',
+    'timeoutMs',
+    'confidenceThreshold',
+    'probabilityThreshold',
+    'maxStateTokens',
+    'context',
+    'maxRetries',
+    'temperature',
+  ];
   if (
+    !isObjectRecord(raw) ||
+    Object.keys(raw).some((key) => !allowed.includes(key))
+  )
+    return invalid();
+  const value: Record<string, unknown> = { ...DEFAULT_ADVISOR_CONFIG, ...raw };
+  const model = normalizeClassifierRef(value.model);
+  const context = normalizeClassifierContext(value.context);
+  if (
+    !model ||
+    !context ||
     (value.enabled !== undefined && typeof value.enabled !== 'boolean') ||
-    (value.endpoint !== undefined && !isJevEndpoint(value.endpoint)) ||
-    typeof value.model !== 'string' ||
-    !/^[a-zA-Z0-9._-]{1,128}$/.test(value.model) ||
     typeof value.timeoutMs !== 'number' ||
     !Number.isFinite(value.timeoutMs) ||
     value.timeoutMs <= 0 ||
@@ -540,95 +506,52 @@ export const normalizeJevConfig = (
     typeof value.maxStateTokens !== 'number' ||
     !Number.isInteger(value.maxStateTokens) ||
     value.maxStateTokens < 1 ||
-    value.maxStateTokens > MAX_JEV_STATE_TOKENS ||
-    value.mode !== 'advisory' ||
-    (value.apiKey !== undefined &&
-      (typeof value.apiKey !== 'string' || /[\r\n]/.test(value.apiKey)))
+    value.maxStateTokens > MAX_CLASSIFIER_STATE_TOKENS ||
+    typeof value.maxRetries !== 'number' ||
+    !Number.isSafeInteger(value.maxRetries) ||
+    value.maxRetries < 0 ||
+    value.maxRetries > MAX_CLASSIFIER_RETRIES ||
+    (value.temperature !== undefined &&
+      (typeof value.temperature !== 'number' ||
+        !Number.isFinite(value.temperature) ||
+        value.temperature <= 0))
   )
     return invalid();
-  if (Object.hasOwn(raw, 'apiKey') || Object.hasOwn(raw, 'endpoint')) {
-    warnings.push(
-      'Jev credentials and endpoint are now managed by Pi. Use /login typesafe and remove jev.apiKey/jev.endpoint from router config.',
-    );
-  }
-  const customEndpoint =
-    value.endpoint !== undefined &&
-    value.endpoint !== 'https://api.typesafe.ai/v1/systemone';
-  if (customEndpoint)
-    warnings.push(
-      'Jev disabled: migrate the custom endpoint to Pi provider configuration before removing the legacy endpoint field.',
-    );
   return {
-    enabled: value.enabled === true && !customEndpoint,
-    model: value.model,
+    enabled: value.enabled === true,
+    model,
     timeoutMs: value.timeoutMs,
     confidenceThreshold: value.confidenceThreshold,
     probabilityThreshold: value.probabilityThreshold,
     maxStateTokens: value.maxStateTokens,
     context,
-    retry,
-    mode: 'advisory',
+    maxRetries: value.maxRetries,
+    ...(typeof value.temperature === 'number'
+      ? { temperature: value.temperature }
+      : {}),
   };
 };
 
-/** Reuse the existing bounded tuning policy without accepting credentials/endpoints. */
-export const normalizeCloudflareConfig = (
-  raw: unknown,
-  warnings: string[],
-): CloudflareConfig | undefined => {
-  if (raw === undefined) return undefined;
-  const allowed = [
-    'enabled',
-    'timeoutMs',
-    'confidenceThreshold',
-    'probabilityThreshold',
-    'maxStateTokens',
-    'context',
-    'retry',
-    'mode',
-  ];
-  if (
-    !isObjectRecord(raw) ||
-    Object.keys(raw).some((key) => !allowed.includes(key))
-  ) {
-    warnings.push('Ignored invalid Cloudflare configuration.');
-    return undefined;
-  }
-  const normalized = normalizeJevConfig(raw, []);
-  if (!normalized || (normalized.retry?.maxAttempts ?? 2) > 2) {
-    warnings.push('Ignored invalid Cloudflare configuration.');
-    return undefined;
-  }
-  const { model: _model, ...tuning } = normalized;
-  return tuning;
-};
-
-// Remove every project Jev setting before merging with user-owned credentials.
-export const stripProjectJevConfig = (
+/** Project configuration cannot select a destination or authorize advisor text. */
+export const stripProjectAdvisorConfig = (
   raw: RawRouterConfig,
   warnings: string[],
 ): RawRouterConfig => {
-  const { jev: ignored, advisor, cloudflare, ...project } = raw;
-  let cloudflareFound = advisor !== undefined || cloudflare !== undefined;
-  let found = ignored !== undefined;
+  const { advisor, ...project } = raw;
+  let found = advisor !== undefined;
   if (isObjectRecord(project.profiles)) {
     project.profiles = Object.fromEntries(
       Object.entries(project.profiles).map(([name, profile]) => {
         if (!isObjectRecord(profile)) return [name, profile];
-        const { jev, cloudflare, ...tiers } = profile;
-        if (cloudflare !== undefined) cloudflareFound = true;
-        if (jev !== undefined) found = true;
+        const { advisor, ...tiers } = profile;
+        if (advisor !== undefined) found = true;
         return [name, tiers];
       }),
     );
   }
-  if (cloudflareFound)
-    warnings.push(
-      'Ignored project Cloudflare/advisor settings: configure only in user config.',
-    );
   if (found)
     warnings.push(
-      'Ignored project Jev settings: configure Jev only in user config.',
+      'Ignored project advisor settings: classifier selection, tuning and profile approvals belong only in user config.',
     );
   return project;
 };
@@ -701,19 +624,38 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       }
     }
 
-    const jev = isObjectRecord(profileRecord.jev)
-      ? { enabled: profileRecord.jev.enabled === true }
-      : undefined;
+    let advisor: RouterProfile['advisor'];
+    if (profileRecord.advisor !== undefined) {
+      const rawApproval = profileRecord.advisor;
+      if (
+        isObjectRecord(rawApproval) &&
+        Array.isArray(rawApproval.models) &&
+        Object.keys(rawApproval).every((key) => key === 'models') &&
+        rawApproval.models.every(
+          (ref) => normalizeClassifierRef(ref) !== undefined,
+        )
+      ) {
+        advisor = {
+          models: [
+            ...new Set(
+              rawApproval.models.map(
+                (ref) => normalizeClassifierRef(ref) as string,
+              ),
+            ),
+          ],
+        };
+      } else
+        warnings.push(
+          'Ignored invalid profile advisor approval. List exact Pi classifier references in advisor.models.',
+        );
+    }
     normalizedProfiles[name] = {
       ...(baselineTier ? { baselineTier } : {}),
       high,
       medium,
       low,
       micro,
-      jev,
-      cloudflare: isObjectRecord(profileRecord.cloudflare)
-        ? { enabled: profileRecord.cloudflare.enabled === true }
-        : undefined,
+      advisor,
     };
   }
 
@@ -731,59 +673,6 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   if (raw.maxSessionBudget !== undefined && maxSessionBudget === undefined)
     warnings.push('Invalid maxSessionBudget. Ignored.');
 
-  // Resolve classifierModel — accepts string or { model, thinking } object
-  let classifierModel: ClassifierConfig | undefined;
-  const rawClassifier = raw.classifierModel;
-  if (typeof rawClassifier === 'string' && rawClassifier.trim()) {
-    const resolved = resolveModelRef(
-      rawClassifier.trim(),
-      hasModels ? normalizedModels : undefined,
-    );
-    try {
-      parseCanonicalModelRef(resolved.canonicalRef);
-      classifierModel = { model: resolved.canonicalRef };
-    } catch {
-      warnings.push('Invalid classifierModel model reference. Ignored.');
-    }
-  } else if (isObjectRecord(rawClassifier)) {
-    const modelRef =
-      typeof rawClassifier.model === 'string' ? rawClassifier.model.trim() : '';
-    if (modelRef) {
-      const resolved = resolveModelRef(
-        modelRef,
-        hasModels ? normalizedModels : undefined,
-      );
-      try {
-        parseCanonicalModelRef(resolved.canonicalRef);
-        const thinking = isThinkingLevel(rawClassifier.thinking)
-          ? rawClassifier.thinking
-          : undefined;
-        if (rawClassifier.thinking !== undefined && !thinking) {
-          warnings.push(
-            'classifierModel has an invalid thinking level. Ignored.',
-          );
-        }
-        const timeoutMs =
-          typeof rawClassifier.timeoutMs === 'number' &&
-          Number.isFinite(rawClassifier.timeoutMs) &&
-          rawClassifier.timeoutMs > 0 &&
-          rawClassifier.timeoutMs <= MAX_TIMER_DELAY_MS
-            ? rawClassifier.timeoutMs
-            : undefined;
-        if (rawClassifier.timeoutMs !== undefined && timeoutMs === undefined) {
-          warnings.push('classifierModel has an invalid timeoutMs. Ignored.');
-        }
-        classifierModel = { model: resolved.canonicalRef, thinking, timeoutMs };
-      } catch {
-        warnings.push('Invalid classifierModel model reference. Ignored.');
-      }
-    } else {
-      warnings.push(
-        'classifierModel object is missing the "model" field. Ignored.',
-      );
-    }
-  }
-
   const statusLine = isObjectRecord(raw.ui) ? raw.ui.statusLine : undefined;
   if (
     raw.ui !== undefined &&
@@ -797,14 +686,8 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   return {
     config: {
       ui: { statusLine: statusLine === 'detailed' ? 'detailed' : 'compact' },
-      jev: normalizeJevConfig(raw.jev, warnings),
-      advisor:
-        raw.advisor === 'clef' || raw.advisor === 'clef-flash'
-          ? raw.advisor
-          : 'jev',
-      cloudflare: normalizeCloudflareConfig(raw.cloudflare, warnings),
+      advisor: normalizeAdvisorConfig(raw.advisor, warnings),
       debug: typeof raw.debug === 'boolean' ? raw.debug : false,
-      classifierModel,
       maxSessionBudget,
       profiles: normalizedProfiles,
       models: hasModels ? normalizedModels : undefined,
@@ -822,7 +705,7 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
   const mergeWarnings: string[] = [];
   const merged = mergeConfig(
     mergeConfig(baseConfig, globalResult.config, mergeWarnings),
-    stripProjectJevConfig(projectResult.config, projectResult.warnings),
+    stripProjectAdvisorConfig(projectResult.config, projectResult.warnings),
     mergeWarnings,
   );
   const normalized = normalizeConfig(merged);

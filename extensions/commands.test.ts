@@ -281,10 +281,10 @@ describe('/router status', () => {
   it('keeps advisor credentials out of short status', async () => {
     const { run, lastNotice } = setup((s) => {
       s.currentConfig = normalizeConfig({
-        jev: { enabled: true, apiKey: 'synthetic', timeoutMs: 3000 },
+        advisor: { enabled: true, apiKey: 'synthetic', timeoutMs: 3000 },
         profiles: {
           balanced: {
-            jev: { enabled: true },
+            advisor: { enabled: true },
             high: { model: 'openai/gpt-4o' },
           },
         },

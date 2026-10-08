@@ -11,13 +11,13 @@ import {
   events,
   message,
   model,
-  nativeJevRegistry,
+  typeSafeClassifierRegistry,
 } from './test/fixtures';
 import type { RawRouterConfig } from './types';
 import * as ui from './ui';
 
 const stateMocks = vi.hoisted(() => ({
-  advisors: {} as Pick<RawRouterConfig, 'jev' | 'classifierModel'>,
+  advisors: {} as Pick<RawRouterConfig, 'advisor'>,
   loadLastRouterProfile: vi.fn(),
   saveLastRouterProfile: vi.fn(),
 }));
@@ -37,7 +37,7 @@ vi.mock('./config', async (importOriginal) => {
         ...stateMocks.advisors,
         profiles: {
           balanced: {
-            jev: { enabled: true },
+            advisor: { models: ['typesafe/jev-latest'] },
             high: { model: 'openai/gpt-4o' },
             medium: { model: 'openai/gpt-4o-mini' },
             micro: { model: 'openai/tiny', thinking: 'off' },
@@ -95,7 +95,7 @@ describe('index.ts (orchestrator)', () => {
     mode: 'tui',
     cwd: '/mock/cwd',
     modelRegistry: {
-      ...nativeJevRegistry(),
+      ...typeSafeClassifierRegistry(),
       find: vi
         .fn()
         .mockImplementation((provider: string, id: string) =>
@@ -128,16 +128,15 @@ describe('index.ts (orchestrator)', () => {
 
   it('passes only public status fields across the UI boundary', async () => {
     stateMocks.advisors = {
-      jev: {
+      advisor: {
         enabled: true,
         apiKey: 'private-key-sentinel',
         endpoint: 'https://private-endpoint.example/v1/systemone',
-        model: 'jev-1.13.0',
+        model: 'typesafe/jev-latest',
         timeoutMs: 750,
         confidenceThreshold: 0.65,
         probabilityThreshold: 0.8,
         maxStateTokens: 3000,
-        mode: 'advisory',
       },
     };
     const status = vi.spyOn(ui, 'updateRouterUIStrip');
@@ -301,113 +300,6 @@ describe('index.ts (orchestrator)', () => {
       thinkingByProfile: { balanced: { micro: 'off' } },
     });
   });
-
-  it.each(['classifier', 'jev'] as const)(
-    'persists only safe %s metadata through real provider and appendEntry callbacks',
-    async (source) => {
-      const privateText = 'private-key remote task text explanation';
-      if (source === 'classifier')
-        stateMocks.advisors = {
-          classifierModel: { model: 'openai/classifier' },
-        };
-      else
-        stateMocks.advisors = {
-          jev: {
-            enabled: true,
-            model: 'jev-1.13.0',
-            timeoutMs: 750,
-            confidenceThreshold: 0.65,
-            probabilityThreshold: 0.8,
-            maxStateTokens: 3000,
-            mode: 'advisory',
-          },
-        };
-      const fetch = vi.fn<typeof globalThis.fetch>(async () => {
-        const id = 'high|openai%2Fgpt-4o|medium';
-        return new Response(
-          JSON.stringify({
-            answers: {
-              route: {
-                type: 'choice',
-                choice: id,
-                confidence: 1,
-                probabilities: { [id]: 1, uncertain: 0 },
-                reasoning: privateText,
-              },
-            },
-          }),
-        );
-      });
-      vi.stubGlobal('fetch', fetch);
-      try {
-        routerExtension(mockPi);
-        const ctx = buildMockCtx();
-        ctx.modelRegistry.find.mockImplementation(
-          (provider: string, id: string) => model(id, { provider }),
-        );
-        const delegate = vi.fn(() => done());
-        if (source === 'classifier')
-          delegate.mockReturnValueOnce(
-            done(`Tier: high\nReasoning: ${privateText}`),
-          );
-        Object.assign(ctx.modelRegistry, {
-          ...nativeJevRegistry(privateText),
-          streamSimple: delegate,
-        });
-        for (const handler of handlersFor('session_start'))
-          await handler({ reason: 'new' }, ctx);
-        const command = mockPi.registerCommand.mock.calls.find(
-          ([name]) => name === 'router',
-        )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1];
-        await command.handler(
-          'log on',
-          ctx as unknown as ExtensionCommandContext,
-        );
-        const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
-        const stream = provider?.streamSimple?.(
-          model('balanced', { provider: 'router' }),
-          normalizeContext({
-            messages: [
-              {
-                role: 'user',
-                content: `design security. ${privateText}`,
-                timestamp: 1,
-              },
-            ],
-          }),
-        );
-        if (!stream) throw new Error('Missing registered router stream');
-        for await (const _event of stream) {
-          /* Drain the actual provider callback. */
-        }
-        expect((await stream.result()).stopReason).toBe('stop');
-        // Omitted zero-mass options are accepted, so the Jev choice is acted on.
-        expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
-          lastDecision: { reasonCode: source },
-          debugHistory: [{ reasonCode: source }],
-        });
-        await notifyDiagnostics(ctx);
-        const output = JSON.stringify([
-          ctx.ui.notify.mock.calls,
-          mockPi.appendEntry.mock.calls,
-          ctx.ui.setStatus.mock.calls,
-          ctx.ui.setWidget.mock.calls,
-        ]);
-        for (const text of [
-          privateText,
-          'typesafe.ai',
-          'reasoning',
-          'apiKey',
-          'endpoint',
-        ])
-          expect(output).not.toContain(text);
-        expect(delegate).toHaveBeenCalledTimes(source === 'classifier' ? 2 : 1);
-        expect(fetch).toHaveBeenCalledTimes(source === 'jev' ? 1 : 0);
-      } finally {
-        vi.unstubAllGlobals();
-      }
-    },
-  );
 
   it.each([
     undefined,
@@ -725,14 +617,14 @@ describe('index.ts (orchestrator)', () => {
       'keeps per-tier effort after internal display sync (deferred=%s)',
       async (deferred) => {
         stateMocks.advisors = {
-          jev: {
+          advisor: {
             enabled: true,
-            model: 'jev-1.13.0',
+            model: 'typesafe/jev-latest',
+            maxRetries: 1,
             timeoutMs: 750,
             confidenceThreshold: 0.65,
             probabilityThreshold: 0.8,
             maxStateTokens: 3000,
-            mode: 'advisory',
           },
         };
         const ctx = buildMockCtx();
@@ -812,7 +704,6 @@ describe('index.ts (orchestrator)', () => {
               lastDecision: {
                 tier,
                 thinking: tier === 'micro' ? 'off' : 'medium',
-                advisor: 'jev',
               },
             });
           }

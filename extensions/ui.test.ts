@@ -6,9 +6,9 @@ import type { RouterUISnapshot, RoutingDecision } from './types';
 import {
   formatAdvisorDetail,
   formatAdvisorFooter,
+  formatClassifierStats,
   formatDecision,
   formatGenerationDetail,
-  formatJevStats,
   formatModelRef,
   formatPinSummary,
   formatThinkingSummary,
@@ -84,9 +84,9 @@ describe('ui.ts', () => {
     expect(
       formatDecision({
         ...decision,
-        advisor: 'jev',
+        advisor: 'classifier',
       } as unknown as RoutingDecision),
-    ).toContain('[🧭 Jev ✓]');
+    ).toContain('[🧠 Classifier ✓]');
     expect(formatModelRef('openai/gpt-4o')).toBe('openai/gpt-4o');
     expect(formatModelRef(undefined)).toBe('none');
   });
@@ -100,8 +100,8 @@ describe('ui.ts', () => {
   it('labels uncertainty once in compact mode', () => {
     const footer = formatAdvisorFooter({
       ...decision,
-      advisor: 'jev-fallback',
-      jev: {
+      advisor: 'classifier-fallback',
+      classification: {
         outcome: 'uncertain',
         choice: 'uncertain',
         confidence: 0.73,
@@ -113,8 +113,8 @@ describe('ui.ts', () => {
     expect(footer).not.toContain('73%');
     const detail = formatAdvisorDetail({
       ...decision,
-      advisor: 'jev-fallback',
-      jev: {
+      advisor: 'classifier-fallback',
+      classification: {
         outcome: 'uncertain',
         choice: 'uncertain',
         confidence: 0.73,
@@ -140,8 +140,8 @@ describe('ui.ts', () => {
       expect(
         formatAdvisorFooter({
           ...decision,
-          advisor: 'jev-fallback',
-          jev: { outcome, latencyMs: 5000, httpStatus: 429 },
+          advisor: 'classifier-fallback',
+          classification: { outcome, latencyMs: 5000, httpStatus: 429 },
         }),
       ).toContain(expected);
     },
@@ -150,7 +150,7 @@ describe('ui.ts', () => {
   it('counts unique requests, not shared calls, cached calls or tool continuations', () => {
     const first: RoutingDecision = {
       ...decision,
-      jev: {
+      classification: {
         requestId: '00000000-0000-4000-8000-000000000001',
         outcome: 'selected',
         choice: 'high',
@@ -159,7 +159,7 @@ describe('ui.ts', () => {
     };
     const second: RoutingDecision = {
       ...decision,
-      jev: {
+      classification: {
         requestId: '00000000-0000-4000-8000-000000000002',
         outcome: 'deadline',
         latencyMs: 5000,
@@ -175,11 +175,11 @@ describe('ui.ts', () => {
       decision,
       {
         ...decision,
-        jev: { outcome: 'selected', choice: 'low', latencyMs: 200 },
+        classification: { outcome: 'selected', choice: 'low', latencyMs: 200 },
       },
     ];
-    const stats = formatJevStats(history).join('\n');
-    expect(stats).toContain('2 unique HTTP requests in 8 retained decisions');
+    const stats = formatClassifierStats(history).join('\n');
+    expect(stats).toContain('2 unique advice requests in 8 retained decisions');
     expect(stats).toContain('selected: 1/2 (50.0%)');
     expect(stats).toContain('deadline: 1/2 (50.0%)');
     expect(stats).toContain('high=1');
@@ -187,15 +187,17 @@ describe('ui.ts', () => {
     expect(stats).toContain('2550ms');
     expect(stats).toContain('1 decisions without request IDs excluded');
     expect(stats).not.toContain('00000000');
-    expect(formatJevStats([]).join('\n')).toContain('Median Jev latency: n/a');
-    expect(formatJevStats([]).join('\n')).not.toContain('NaN');
+    expect(formatClassifierStats([]).join('\n')).toContain(
+      'Median Classifier latency: n/a',
+    );
+    expect(formatClassifierStats([]).join('\n')).not.toContain('NaN');
   });
 
   it('shows context composition without persisting or rendering input text', () => {
     const detail = formatAdvisorDetail({
       ...decision,
-      advisor: 'jev',
-      jev: {
+      advisor: 'classifier',
+      classification: {
         outcome: 'selected',
         latencyMs: 100,
         estimatedInputTokens: 700,
@@ -214,7 +216,7 @@ describe('ui.ts', () => {
       'state≈295 tokens: 20 current + 225 dialogue/2 turns + 50 tool/1 results; truncated=1',
     );
     expect(detail).toContain('request≈700 tokens');
-    expect(detail).toContain('Jev usage=640 input tokens');
+    expect(detail).toContain('Classifier usage=640 input tokens');
   });
 
   it('formats sorted pins and thinking overrides', () => {
@@ -265,7 +267,7 @@ describe('ui.ts lifecycle strip', () => {
     }
   });
 
-  it.each(['jev', 'clef', 'clef-flash', 'classifier'] as const)(
+  it.each(['classifier', 'clef', 'clef-flash', 'classifier'] as const)(
     'shows %s advice through one persistent surface and leaves other statuses alone',
     (advisor) => {
       const ctx = context();
@@ -338,7 +340,7 @@ describe('ui.ts lifecycle strip', () => {
       pin: 'auto',
       baseline: 'medium',
       budget: undefined,
-      advisor: 'jev',
+      advisor: 'classifier',
       timeout: 1500,
       thinkingHigh: undefined,
       thinkingMedium: undefined,
@@ -347,9 +349,10 @@ describe('ui.ts lifecycle strip', () => {
     },
     eligible: {},
     history: [],
+    classifiers: [],
     privacy: {
-      jevApproved: undefined,
-      cloudflareApproved: undefined,
+      advisorEnabled: false,
+      approvedModels: [],
       auth: 'unknown',
     },
   };

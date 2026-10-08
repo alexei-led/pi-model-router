@@ -9,9 +9,9 @@ import type {
   StatusLineMode,
 } from './types';
 import {
+  CLASSIFIER_OUTCOMES,
   isAdvisorOutcome,
   isRoutingReasonCode,
-  JEV_OUTCOMES,
   ROUTER_TIERS,
 } from './types';
 import { routeReason, routerTone } from './ui/presentation';
@@ -61,14 +61,6 @@ export const formatAdvisorLabel = (
       const reason = formatBypassReason(decision);
       return reason ? `advice skipped: ${reason}` : 'advice bypassed';
     }
-    case 'cloudflare':
-      return `🧭 ${decision.cloudflare?.model === '@cf/cloudflare/clef-flash' ? 'Clef Flash' : 'Clef'} ✓`;
-    case 'cloudflare-fallback':
-      return `🧭 ${decision.cloudflare?.model === '@cf/cloudflare/clef-flash' ? 'Clef Flash' : 'Clef'} ↪ base`;
-    case 'jev':
-      return '🧭 Jev ✓';
-    case 'jev-fallback':
-      return '🧭 Jev ↪ base';
     case 'classifier':
       return '🧠 Classifier ✓';
     case 'classifier-fallback':
@@ -91,18 +83,12 @@ export const formatAdvisorDetail = (
 ): string | undefined => {
   const label = formatAdvisorLabel(decision);
   if (!label) return undefined;
-  const metrics = decision.cloudflare ?? decision.jev;
-  const service = decision.cloudflare
-    ? metrics?.model === '@cf/cloudflare/clef-flash'
-      ? 'Clef Flash'
-      : 'Clef'
-    : 'Jev';
+  const metrics = decision.classification;
+  const service = metrics?.model ?? 'Classifier';
   const latencyMs = metrics?.latencyMs ?? decision.routingLatencyMs;
   const parts = [label];
   if (metrics) {
     if (metrics.model) parts.push(metrics.model);
-    if (metrics.resolvedModel && metrics.resolvedModel !== metrics.model)
-      parts.push(`resolved=${metrics.resolvedModel}`);
     const time = formatRunTime(metrics.startedAt);
     if (time) parts.push(`started=${time}`);
     parts.push(
@@ -148,17 +134,19 @@ export const formatAdvisorDetail = (
       parts.push(`request≈${metrics.estimatedInputTokens} tokens`);
     if (metrics.actualInputTokens !== undefined)
       parts.push(`${service} usage=${metrics.actualInputTokens} input tokens`);
+    if (metrics.actualOutputTokens !== undefined)
+      parts.push(`output=${metrics.actualOutputTokens} tokens`);
+    if (metrics.costUsd !== undefined)
+      parts.push(
+        `advisor cost=${metrics.costUsd.toFixed(6)} (catalog, not billing)`,
+      );
     if (metrics.httpStatus !== undefined)
       parts.push(`HTTP ${metrics.httpStatus}`);
     if (metrics.attempts !== undefined && metrics.attempts > 1)
       parts.push(`attempts=${metrics.attempts}`);
     if (metrics.responseIssue) parts.push(`response=${metrics.responseIssue}`);
     if (metrics.httpStatus === 401)
-      parts.push(
-        decision.cloudflare
-          ? 'Check Cloudflare authentication through Pi.'
-          : 'Check TypeSafe authentication through Pi (/login typesafe).',
-      );
+      parts.push('Check classifier authentication through Pi.');
     if (metrics.httpStatus === 422)
       parts.push(`${service} rejected the request shape.`);
     if (metrics.httpStatus === 429 || metrics.httpStatus === 529)
@@ -180,12 +168,8 @@ export const formatAdvisorFooter = (
 ): string => {
   const label = formatAdvisorLabel(decision);
   if (!label) return '';
-  const metrics = decision.cloudflare ?? decision.jev;
-  const service = decision.cloudflare
-    ? metrics?.model === '@cf/cloudflare/clef-flash'
-      ? 'Clef Flash'
-      : 'Clef'
-    : 'Jev';
+  const metrics = decision.classification;
+  const service = metrics?.model ?? 'Classifier';
   if (!metrics)
     return ` · ${label}${decision.errorClass ? `: ${decision.errorClass}` : ''}`;
   const confidence =
@@ -240,15 +224,17 @@ export const formatAdvisorFooter = (
   return ` · 🧭 ${service}${summary.startsWith(':') ? '' : ' '}${summary} · ${latency}${extra}${reuse}`;
 };
 
-const formatAdvisorStats = (
+export const formatClassifierStats = (
   history: readonly RoutingDecision[],
-  field: 'jev' | 'cloudflare',
-  service: string,
 ): string[] => {
-  const requests = new Map<string, NonNullable<RoutingDecision['jev']>>();
+  const service = 'Classifier';
+  const requests = new Map<
+    string,
+    NonNullable<RoutingDecision['classification']>
+  >();
   let legacy = 0;
   for (const decision of history) {
-    const metrics = decision[field];
+    const metrics = decision.classification;
     if (!metrics) continue;
     if (!metrics.requestId) {
       legacy += 1;
@@ -268,7 +254,7 @@ const formatAdvisorStats = (
         (latencies[Math.floor((latencies.length - 1) / 2)] ?? 0)) /
       2
     : undefined;
-  const outcomes = JEV_OUTCOMES.map(
+  const outcomes = CLASSIFIER_OUTCOMES.map(
     (outcome) =>
       [
         outcome,
@@ -276,7 +262,7 @@ const formatAdvisorStats = (
       ] as const,
   );
   return [
-    `${service} stats: ${samples.length} unique HTTP requests in ${history.length} retained decisions (not session lifetime).`,
+    `${service} stats: ${samples.length} unique advice requests in ${history.length} retained decisions (not session lifetime).`,
     `Advised tiers: ${ROUTER_TIERS.map((tier) => `${tier}=${samples.filter((entry) => entry.choice === tier).length}`).join(', ')}.`,
     ...outcomes
       .filter(([, count]) => count > 0)
@@ -292,12 +278,6 @@ const formatAdvisorStats = (
       : []),
   ];
 };
-
-export const formatJevStats = (history: readonly RoutingDecision[]): string[] =>
-  formatAdvisorStats(history, 'jev', 'Jev');
-export const formatCloudflareStats = (
-  history: readonly RoutingDecision[],
-): string[] => formatAdvisorStats(history, 'cloudflare', 'Cloudflare');
 
 export const formatGenerationDetail = (
   decision: RoutingDecision,

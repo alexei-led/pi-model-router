@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.12.0] - 2026-10-08
+
+Require Pi 1.1.0 and route through any Pi-registered classifier.
+
+### Changes
+
+- Replace provider-specific Jev/Clef transports and the chat-classifier fallback with one typed `modelRegistry.classify()` path. Any registered text classifier can be selected by canonical `provider/model` reference. Pi owns classifier API conversion and authentication.
+- Require explicit user enablement and exact per-profile model approvals. Project configuration cannot choose classifiers or grant approval. Route only bounded text; never attach transcript images.
+- Use Pi model pricing tiers for hypothetical cache-cost comparisons, and add long-context pricing regression coverage.
+- Update the lockfile and peer dependency range to Pi 1.1.0.
+
+### Upgrade
+
+Replace `jev`, `cloudflare`, `classifierModel`, and string advisor settings with `advisor: { enabled, model, ... }` in user config and `profiles.<name>.advisor.models` containing exact canonical classifier references. Configure provider credentials and models in Pi. See [classifier setup](docs/classifier-advisor.md).
+
+
 ## [0.11.0] - 2026-10-06
 
 Unify routing controls under `/router` and add the advisor-neutral Signal Panel.

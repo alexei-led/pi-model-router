@@ -1,191 +1,248 @@
 import type {
-  AssistantMessageEventStream,
-  Context,
+  ClassifierContext,
+  ClassifierModel,
+  ClassifierResult,
 } from '@earendil-works/pi-ai';
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
-import { runClassifier } from './classifier';
-import { done, events, failure, model } from './test/fixtures';
+import { createCandidate } from './choice';
+import { runClassifierDetailed } from './classifier';
+import type {
+  AdvisorConfig,
+  ClassifierRegistry,
+  ClassifierRequest,
+} from './types';
 
-const setup = () => {
-  const streamSimple = vi.fn<ExtensionContext['modelRegistry']['streamSimple']>(
-    () => done('Tier: high\nReasoning: Analyze: complex design'),
-  );
-  const registry = {
-    find: () => model(),
-    streamSimple,
-  } as unknown as ExtensionContext['modelRegistry'];
-  const context: Context = {
-    systemPrompt: 'private instructions',
-    tools: [],
-    messages: [{ role: 'user', content: 'design system', timestamp: 1 }],
-  };
-  return { registry, context, streamSimple };
+const model: ClassifierModel<'custom-decisions'> = {
+  type: 'classifier',
+  provider: 'custom',
+  id: 'decision:model/v2',
+  name: 'Configured decision model',
+  api: 'custom-decisions',
+  baseUrl: 'https://fixture.invalid',
+  input: ['text'],
+  contextWindow: 64000,
+  cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
 };
-
-describe('classifier', () => {
-  it.each(['uncertain', 'unknown'])('rejects %s advice', async (tier) => {
-    const s = setup();
-    s.streamSimple.mockReturnValue(done(`Tier: ${tier}\nReasoning: untrusted`));
-    expect(
-      await runClassifier('test/primary', s.registry, s.context),
-    ).toBeUndefined();
-  });
-  it.each(['micro', 'low', 'medium', 'high'])(
-    'retains valid %s classifier advice',
-    async (tier) => {
-      const s = setup();
-      s.streamSimple.mockReturnValue(
-        done(`Tier: ${tier}\nReasoning: untrusted`),
-      );
-      expect(
-        await runClassifier('test/primary', s.registry, s.context),
-      ).toEqual({ tier });
+const config: AdvisorConfig = {
+  enabled: true,
+  model: 'custom/decision:model/v2',
+  timeoutMs: 1500,
+  confidenceThreshold: 0.65,
+  probabilityThreshold: 0.8,
+  maxStateTokens: 3000,
+  maxRetries: 1,
+};
+const candidates = [
+  createCandidate({
+    tier: 'medium',
+    model: 'generation/base',
+    thinking: 'off',
+  }),
+  createCandidate({
+    tier: 'high',
+    model: 'generation/strong',
+    thinking: 'high',
+  }),
+];
+const request = (
+  overrides: Partial<ClassifierRequest> = {},
+): ClassifierRequest => ({
+  context: {
+    messages: [{ role: 'user', content: 'Synthetic task', timestamp: 1 }],
+  },
+  candidates,
+  profile: { models: ['custom/decision:model/v2'] },
+  baselineTier: 'medium',
+  routingDeadline: performance.now() + 1500,
+  ...overrides,
+});
+const classifierResult = (): ClassifierResult => ({
+  api: model.api,
+  provider: model.provider,
+  model: model.id,
+  timestamp: 1,
+  stopReason: 'stop',
+  answers: {
+    route: {
+      type: 'choice',
+      choice: candidates[1]?.id ?? '',
+      confidence: 0.9,
+      probabilities: {
+        [candidates[0]?.id ?? '']: 0.1,
+        [candidates[1]?.id ?? '']: 0.9,
+        uncertain: 0,
+      },
     },
-  );
-  it('uses isolated registry requests, keeps colons, and forwards cancellation', async () => {
-    const s = setup();
-    const abort = new AbortController();
-    expect(
-      await runClassifier(
-        'test/primary',
-        s.registry,
-        s.context,
-        'planning',
-        'low',
-        abort.signal,
-      ),
-    ).toEqual({ tier: 'high' });
-    const call = s.streamSimple.mock.calls[0];
-    expect(call?.[1]).not.toHaveProperty('systemPrompt');
-    expect(call?.[1]).not.toHaveProperty('tools');
-    expect(call?.[2]).toMatchObject({ maxTokens: 256, reasoning: 'low' });
-    abort.abort();
-    expect(call?.[2]?.signal?.aborted).toBe(true);
-  });
-  it.each(['malformed', 'error', 'aborted', 'unterminated'] as const)(
-    'ignores %s responses',
-    async (kind) => {
-      const s = setup();
-      s.streamSimple.mockReturnValue(
-        kind === 'malformed'
-          ? done('Tier: giant')
-          : kind === 'unterminated'
-            ? events()
-            : failure(kind),
-      );
-      expect(
-        await runClassifier('test/primary', s.registry, s.context),
-      ).toBeUndefined();
+  },
+  usage: {
+    input: 50,
+    output: 2,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 52,
+    cost: {
+      input: 0.00005,
+      output: 0.000004,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0.000054,
     },
-  );
-  it('ignores a classifier stream creation rejection', async () => {
-    const s = setup();
-    s.streamSimple.mockImplementationOnce(() => {
-      throw new Error('classifier unavailable');
-    });
-    await expect(
-      runClassifier('test/primary', s.registry, s.context),
-    ).resolves.toBeUndefined();
-  });
-  it('returns only the tier, discarding classifier explanation text', async () => {
-    const s = setup();
-    const result = await runClassifier('test/primary', s.registry, s.context);
-    expect(result).toEqual({ tier: 'high' });
-  });
-  it('returns no advice when the classifier times out', async () => {
-    const s = setup();
-    const hangingStream = {
-      [Symbol.asyncIterator]: () => ({
-        next: () => new Promise<never>(() => {}),
-      }),
-    } as unknown as AssistantMessageEventStream;
-    s.streamSimple.mockReturnValue(hangingStream);
-    const timeout = new AbortController();
-    const timeoutSpy = vi
-      .spyOn(AbortSignal, 'timeout')
-      .mockReturnValue(timeout.signal);
-    try {
-      const pending = runClassifier('test/primary', s.registry, s.context);
-      timeout.abort();
-      await expect(pending).resolves.toBeUndefined();
-    } finally {
-      timeoutSpy.mockRestore();
-    }
-  });
-  it('returns no advice when the caller aborts an active classifier', async () => {
-    const s = setup();
-    const hangingStream = {
-      [Symbol.asyncIterator]: () => ({
-        next: () => new Promise<never>(() => {}),
-      }),
-    } as unknown as AssistantMessageEventStream;
-    s.streamSimple.mockReturnValue(hangingStream);
-    const abort = new AbortController();
-    const pending = runClassifier(
-      'test/primary',
-      s.registry,
-      s.context,
-      undefined,
-      undefined,
-      abort.signal,
-    );
-    abort.abort();
-    await expect(pending).resolves.toBeUndefined();
-  });
-  it('does not recursively invoke router classifiers or start aborted calls', async () => {
-    const s = setup();
-    expect(
-      await runClassifier('router/auto', s.registry, s.context),
-    ).toBeUndefined();
-    expect(
-      await runClassifier(
-        'test/primary',
-        s.registry,
-        s.context,
-        undefined,
-        undefined,
-        AbortSignal.abort(),
-      ),
-    ).toBeUndefined();
-    expect(s.streamSimple).not.toHaveBeenCalled();
-  });
+  },
+});
+const registry = (): ClassifierRegistry => ({
+  findOfType: vi.fn(() => model),
+  classify: vi.fn(async () => classifierResult()),
 });
 
-describe('classifier shared absolute deadline', () => {
-  it('does no work with an expired deadline', async () => {
-    const s = setup();
-    expect(
-      await runClassifier(
-        'test/primary',
-        s.registry,
-        s.context,
-        undefined,
-        undefined,
-        undefined,
-        performance.now() - 1,
-      ),
-    ).toBeUndefined();
-    expect(s.streamSimple).not.toHaveBeenCalled();
+describe('Pi classifier registry routing', () => {
+  it.each([
+    'typesafe-system-one',
+    'cloudflare-workers-ai-system-one',
+    'openai-decisions',
+    'llama-cpp-classify',
+    'custom-decisions',
+  ])(
+    'uses Pi typed classify for %s without a router-specific wire path',
+    async (api) => {
+      const current = registry();
+      current.findOfType = vi.fn(() => ({ ...model, api }));
+      const result = await runClassifierDetailed(config, request(), current);
+      expect(result.diagnostics).toMatchObject({
+        outcome: 'selected',
+        model: 'custom/decision:model/v2',
+        actualInputTokens: 50,
+        actualOutputTokens: 2,
+        costUsd: 0.000054,
+      });
+      expect(result.advice?.candidateId).toBe(candidates[1]?.id);
+      expect(current.findOfType).toHaveBeenCalledWith(
+        'classifier',
+        'custom',
+        'decision:model/v2',
+      );
+      expect(current.classify).toHaveBeenCalledOnce();
+      const [, context, options] =
+        vi.mocked(current.classify).mock.calls[0] ?? [];
+      expect(context?.questions.route?.type).toBe('choice');
+      expect(context?.questions.route).toHaveProperty('criteria');
+      expect(context?.images).toBeUndefined();
+      expect(options).toMatchObject({ maxRetries: 1 });
+      expect(options).not.toHaveProperty('apiKey');
+      expect(options).not.toHaveProperty('onPayload');
+    },
+  );
+
+  it('requires exact per-profile approval for the configured classifier', async () => {
+    const current = registry();
+    const result = await runClassifierDetailed(
+      config,
+      request({ profile: { models: ['other/private'] } }),
+      current,
+    );
+    expect(result.diagnostics.outcome).toBe('unavailable');
+    expect(current.classify).not.toHaveBeenCalled();
   });
-  it('uses only the remaining monotonic time rather than its independent default timeout', async () => {
-    const s = setup();
-    s.streamSimple.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
-    } as AssistantMessageEventStream);
-    const started = performance.now();
+
+  it('uses only the model Pi registered and never fabricates metadata', async () => {
+    const current = registry();
+    current.findOfType = vi.fn(() => undefined);
     expect(
-      await runClassifier(
-        'test/primary',
-        s.registry,
-        s.context,
-        undefined,
-        undefined,
-        undefined,
-        started + 35,
-      ),
-    ).toBeUndefined();
-    expect(performance.now() - started).toBeLessThan(300);
-    expect(s.streamSimple.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+      (await runClassifierDetailed(config, request(), current)).diagnostics
+        .outcome,
+    ).toBe('unavailable');
+    expect(current.classify).not.toHaveBeenCalled();
+  });
+
+  it('bounds custom classifier implementations that ignore abort', async () => {
+    const current = registry();
+    current.classify = vi.fn(
+      () => new Promise<ClassifierResult>(() => undefined),
+    );
+    const result = await runClassifierDetailed(
+      { ...config, timeoutMs: 20 },
+      request(),
+      current,
+    );
+    expect(result.diagnostics.outcome).toBe('deadline');
+    expect(
+      vi.mocked(current.classify).mock.calls[0]?.[2]?.signal?.aborted,
+    ).toBe(true);
+  });
+
+  it('drops provider error text but keeps safe numeric usage', async () => {
+    const current = registry();
+    current.classify = vi.fn(async () => ({
+      ...classifierResult(),
+      stopReason: 'error' as const,
+      errorMessage: 'private-provider-detail',
+      answers: {},
+    }));
+    const result = await runClassifierDetailed(config, request(), current);
+    expect(result.advice).toBeUndefined();
+    expect(result.diagnostics.costUsd).toBe(0.000054);
+    expect(JSON.stringify(result)).not.toContain('private-provider-detail');
+  });
+
+  it('excludes system prompts, thinking, tool arguments and images from the bounded state', async () => {
+    const current = registry();
+    let observed: ClassifierContext | undefined;
+    current.classify = vi.fn(async (_model, context) => {
+      observed = context;
+      return classifierResult();
+    });
+    await runClassifierDetailed(
+      config,
+      request({
+        context: {
+          systemPrompt: 'system-secret',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Synthetic task' },
+                { type: 'image', data: 'image-secret', mimeType: 'image/png' },
+              ],
+              timestamp: 1,
+            },
+            {
+              role: 'assistant',
+              api: 'test',
+              provider: 'generation',
+              model: 'base',
+              content: [
+                { type: 'thinking', thinking: 'thinking-secret' },
+                {
+                  type: 'toolCall',
+                  id: '1',
+                  name: 'read',
+                  arguments: { path: 'argument-secret' },
+                },
+              ],
+              timestamp: 2,
+              stopReason: 'toolUse',
+              usage: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  total: 0,
+                },
+              },
+            },
+          ],
+        },
+      }),
+      current,
+    );
+    expect(observed?.state).toHaveProperty('currentRequest');
+    expect(JSON.stringify(observed)).not.toMatch(
+      /system-secret|image-secret|thinking-secret|argument-secret/,
+    );
   });
 });

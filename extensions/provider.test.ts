@@ -8,7 +8,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { normalizeConfig } from './config';
 import { registerRouterProvider, waitForRegistry } from './provider';
 import {
@@ -17,14 +17,10 @@ import {
   failure,
   message,
   model,
-  nativeJevRegistry,
   required,
+  typeSafeClassifierRegistry,
 } from './test/fixtures';
-import type {
-  JevConfig,
-  JevContextState,
-  RouterRequestObservation,
-} from './types';
+import type { AdvisorConfig, RouterRequestObservation } from './types';
 
 type State = Parameters<typeof registerRouterProvider>[1];
 type MutableState = { -readonly [K in keyof State]: State[K] };
@@ -40,7 +36,7 @@ const setup = () => {
     () => done(),
   );
   const registry = {
-    ...nativeJevRegistry(),
+    ...typeSafeClassifierRegistry(),
     find: (provider: string, id: string) =>
       models.find((m) => m.provider === provider && m.id === id),
     streamSimple: delegate,
@@ -311,7 +307,7 @@ describe('router provider', () => {
         contextTruncated: false,
         shadow: {
           previousModel: 'test/primary',
-          stayAllReadUsd: 0.14,
+          stayAllReadUsd: expect.closeTo(0.14, 10),
           switchAllNewUsd: 0.258,
         },
       },
@@ -527,24 +523,9 @@ describe('router provider', () => {
     expect(s.delegate).not.toHaveBeenCalled();
   });
 
-  it('resolves classifier choices against partial profiles', async () => {
-    const s = setup();
-    s.state.currentConfig.profiles.balanced = {
-      medium: { model: 'test/primary' },
-    };
-    s.state.currentConfig.classifierModel = { model: 'test/small' };
-    delete s.state.pinnedTierByProfile.balanced;
-    s.delegate.mockReturnValueOnce(done('Tier: high\nReasoning: complex'));
-    expect((await consume(s.stream())).result.stopReason).toBe('stop');
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      reasonCode: 'baseline',
-    });
-  });
-
   it('does not trust an orphan Google tool result or call a classifier for it', async () => {
     const s = setup();
-    s.state.currentConfig.classifierModel = { model: 'test/small' };
+    enableAdvisors(s);
     delete s.state.pinnedTierByProfile.balanced;
     await consume(
       s.stream({
@@ -562,26 +543,6 @@ describe('router provider', () => {
     );
     expect(s.delegate).toHaveBeenCalledOnce();
     expect(s.state.lastDecision?.reasonCode).not.toBe('continuation');
-  });
-
-  it('does not persist classifier explanation text in a decision sink', async () => {
-    const s = setup();
-    delete s.state.pinnedTierByProfile.balanced;
-    s.state.currentConfig.classifierModel = { model: 'test/small' };
-    s.delegate.mockReturnValueOnce(
-      done('Tier: high\nReasoning: do not persist this explanation'),
-    );
-
-    await consume(s.stream());
-
-    expect(s.state.lastDecision?.reasonCode).toBe('classifier');
-    expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
-      expect.objectContaining({ reasonCode: 'classifier' }),
-    );
-    const recorded = JSON.stringify(
-      s.actions.recordDebugDecision.mock.calls[0],
-    );
-    expect(recorded).not.toContain('do not persist');
   });
 
   it('routes images to a capable model and errors when none exists', async () => {
@@ -699,9 +660,8 @@ describe('router provider', () => {
     it('offers the advisor only routes that fit', async () => {
       const s = fitSetup();
       enableAdvisors(s);
-      const fetch = mockChoice('low');
       await consume(s.stream(large()));
-      expect(fetch).not.toHaveBeenCalled();
+      expect(vi.mocked(s.registry.classify)).not.toHaveBeenCalled();
       expect(s.state.lastDecision).toMatchObject({
         tier: 'high',
         bypassReason: 'single-candidate',
@@ -759,7 +719,7 @@ describe('four-level provider routing', () => {
       micro: { model: 'test/small' },
     };
     delete s.state.pinnedTierByProfile.balanced;
-    s.state.currentConfig.classifierModel = { model: 'test/primary' };
+    enableAdvisors(s);
     await consume(s.stream(mechanicalContext));
     expect(s.delegate).toHaveBeenCalledOnce();
     expect(s.delegate.mock.calls[0]?.[0].id).toBe('small');
@@ -838,27 +798,6 @@ describe('four-level provider routing', () => {
     });
   });
 
-  it('accepts a semantic classifier tier without applying a prompt-derived floor', async () => {
-    const s = setup();
-    delete s.state.pinnedTierByProfile.balanced;
-    s.state.currentConfig.classifierModel = { model: 'test/primary' };
-    s.delegate.mockReturnValueOnce(done('Tier: low\nReasoning: cheap'));
-    await consume(
-      s.stream({
-        messages: [
-          { role: 'user', content: 'design a migration', timestamp: 1 },
-        ],
-      }),
-    );
-    expect(s.delegate).toHaveBeenCalledTimes(2);
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'low',
-      reasonCode: 'classifier',
-      isClassifier: true,
-    });
-    expect(advisorOf(s.state.lastDecision)).toBe('classifier');
-  });
-
   it('supports partial profiles and reports only unavailable pinned routes', async () => {
     const s = setup();
     s.state.currentConfig.profiles.balanced = {
@@ -879,2033 +818,240 @@ describe('four-level provider routing', () => {
   });
 });
 
-const jevConfig: JevConfig = {
-  enabled: true,
-  model: 'jev-1.13.0',
-  timeoutMs: 750,
-  confidenceThreshold: 0.65,
-  probabilityThreshold: 0.8,
-  maxStateTokens: 3000,
-  mode: 'advisory',
-};
-const enableAdvisors = (s: ReturnType<typeof setup>) => {
-  s.state.currentConfig.jev = { ...jevConfig };
-  required(s.state.currentConfig.profiles.balanced).jev = { enabled: true };
-  s.state.currentConfig.classifierModel = { model: 'test/small' };
-  delete s.state.pinnedTierByProfile.balanced;
-};
-type ChoiceRequest = {
-  state: JevContextState;
-  questions: { route: { criteria: Record<string, string> } };
-};
-const choiceResponse = (init: RequestInit | undefined, tier = 'medium') => {
-  const body = JSON.parse(String(init?.body)) as ChoiceRequest;
-  const ids = Object.keys(body.questions.route.criteria);
-  const selected = ids.find((id) => id.startsWith(`${tier}|`)) ?? 'uncertain';
-  return new Response(
-    JSON.stringify({
-      answers: {
-        route: {
-          type: 'choice',
-          choice: selected,
-          confidence: 0.99,
-          probabilities: Object.fromEntries(
-            ids.map((id) => [id, id === selected ? 1 : 0]),
-          ),
-          reasoning: 'remote explanation must not escape',
-        },
-      },
-    }),
-  );
-};
-const mockChoice = (tier = 'medium') => {
-  const transport = vi.fn<typeof fetch>(async (_url, init) =>
-    choiceResponse(init, tier),
-  );
-  vi.stubGlobal('fetch', transport);
-  return transport;
-};
 const userContext = (text = 'implement a parser', timestamp = 1): Context => ({
   messages: [{ role: 'user', content: text, timestamp }],
 });
-const astraSetup = () => {
-  const s = setup();
-  s.models.splice(
-    0,
-    s.models.length,
-    ...['gpt-6-astra', 'gpt-5.6-luna', 'gpt-5.6-sol'].map((id) =>
-      model(id, {
-        provider: 'openai-codex-personal',
-        thinkingLevelMap: {
-          ...(id === 'gpt-6-astra' ? { off: null } : {}),
-          minimal: 'low',
-          xhigh: 'xhigh',
-          max: 'max',
-        },
-      }),
-    ),
-  );
-  s.state.currentConfig = normalizeConfig({
-    jev: jevConfig,
-    models: {
-      frontier: { model: 'openai-codex-personal/gpt-6-astra' },
-      worker: { model: 'openai-codex-personal/gpt-5.6-luna' },
-      fast: { model: 'openai-codex-personal/gpt-5.6-luna' },
-    },
-    profiles: {
-      balanced: {
-        jev: { enabled: true },
-        high: {
-          model: 'frontier',
-          thinking: 'high',
-          fallbacks: ['openai-codex-personal/gpt-5.6-sol'],
-        },
-        medium: { model: 'worker', thinking: 'max' },
-        low: { model: 'fast', thinking: 'max' },
-        micro: { model: 'fast', thinking: 'off' },
-      },
-    },
-  }).config;
-  delete s.state.pinnedTierByProfile.balanced;
-  return s;
+
+const classifierModel = {
+  type: 'classifier' as const,
+  provider: 'typesafe',
+  id: 'jev-latest',
+  name: 'Jev',
+  api: 'typesafe-system-one' as const,
+  baseUrl: 'https://api.typesafe.ai/v1/',
+  input: ['text'] as 'text'[],
+  contextWindow: 64000,
+  cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
 };
-const toolMessage = (provider = 'test', id = 'primary') =>
-  message({
-    api: provider === 'google' ? 'google-generative-ai' : 'openai-completions',
-    provider,
-    model: id,
-    timestamp: 2,
-    stopReason: 'toolUse',
-    content: [
-      {
-        type: 'toolCall',
-        id: 'call-1',
-        name: 'read',
-        arguments: {},
-        ...(provider === 'google'
-          ? { thoughtSignature: 'opaque-signature' }
-          : {}),
-      },
-    ],
-  });
-const toolContext = (
-  first = userContext(),
-  assistant = toolMessage(),
-): Context => ({
-  messages: [
-    ...first.messages,
-    assistant,
-    {
-      role: 'toolResult',
-      toolCallId: 'call-1',
-      toolName: 'read',
-      content: [{ type: 'text', text: 'untrusted tool text' }],
-      isError: false,
-      timestamp: 3,
-    },
-  ],
-});
-const finishTool = (assistant = toolMessage()) =>
-  events({ type: 'done', reason: 'toolUse', message: assistant });
-const gatedFinishTool = (gate: Promise<void>, assistant = toolMessage()) =>
-  (async function* () {
-    await gate;
-    yield { type: 'done', reason: 'toolUse', message: assistant };
-  })() as unknown as AssistantMessageEventStream;
-
-describe('Jev provider integration', () => {
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it.each([false, true])(
-    'offers and accepts high/Astra after alias normalization (image=%s)',
-    async (image) => {
-      const s = astraSetup();
-      const fetch = mockChoice('high');
-      const context = userContext('Synthetic routing task');
-      if (image)
-        context.messages.push({
-          role: 'user',
-          content: [
-            { type: 'image', data: 'synthetic', mimeType: 'image/png' },
-          ],
-          timestamp: 2,
-        });
-
-      const { result } = await consume(s.stream(context));
-
-      expect(result.stopReason).toBe('stop');
-      expect(fetch).toHaveBeenCalledOnce();
-      const body = JSON.parse(
-        String(fetch.mock.calls[0]?.[1]?.body),
-      ) as ChoiceRequest;
-      expect(Object.keys(body.questions.route.criteria)).toEqual([
-        'uncertain',
-        'medium|openai-codex-personal%2Fgpt-5.6-luna|max',
-        'high|openai-codex-personal%2Fgpt-6-astra|high',
-        'low|openai-codex-personal%2Fgpt-5.6-luna|max',
-        'micro|openai-codex-personal%2Fgpt-5.6-luna|off',
-      ]);
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'high',
-        targetLabel: 'openai-codex-personal/gpt-6-astra',
-        thinking: 'high',
-        reasonCode: 'jev',
-        advisor: 'jev',
-      });
-      expect(s.delegate).toHaveBeenCalledOnce();
-      expect(s.delegate.mock.calls[0]?.[0]).toMatchObject({
-        provider: 'openai-codex-personal',
-        id: 'gpt-6-astra',
-      });
-      expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('high');
-    },
-  );
-
-  it('uses medium/Luna baseline when Jev exceeds its cap despite eligible Astra', async () => {
-    vi.useFakeTimers();
-    const s = astraSetup();
-    const fetch = vi.fn<typeof globalThis.fetch>(() => new Promise(() => {}));
-    vi.stubGlobal('fetch', fetch);
-    const pending = consume(s.stream(userContext('Synthetic routing task')));
-
-    await vi.advanceTimersByTimeAsync(749);
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(s.delegate).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    const { result } = await pending;
-
-    expect(result.stopReason).toBe('stop');
-    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
-    expect(s.delegate).toHaveBeenCalledOnce();
-    expect(s.delegate.mock.calls[0]?.[0].id).toBe('gpt-5.6-luna');
-    expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('max');
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      thinking: 'max',
-      reasonCode: 'baseline',
-      advisor: 'jev-fallback',
-    });
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('keeps interleaved stream continuations keyed to their originating turn', async () => {
-    const s = setup();
-    let releaseFirst: () => void = () => undefined;
-    let releaseSecond: () => void = () => undefined;
-    const firstGate = new Promise<void>((resolve) => {
-      releaseFirst = resolve;
-    });
-    const secondGate = new Promise<void>((resolve) => {
-      releaseSecond = resolve;
-    });
-    enableAdvisors(s);
-    const fetch = mockChoice('low');
-    fetch.mockImplementationOnce(async (_url, init) =>
-      choiceResponse(init, 'high'),
-    );
-    const firstAssistant = toolMessage('test', 'primary');
-    const secondAssistant = toolMessage('test', 'small');
-    s.delegate
-      .mockImplementationOnce(() => gatedFinishTool(firstGate, firstAssistant))
-      .mockImplementationOnce(() =>
-        gatedFinishTool(secondGate, secondAssistant),
-      );
-
-    const first = consume(s.stream(userContext('implement first', 1)));
-    const second = consume(s.stream(userContext('implement second', 2)));
-    await vi.waitFor(() => expect(s.delegate).toHaveBeenCalledTimes(2));
-    releaseSecond();
-    await second;
-    releaseFirst();
-    await first;
-
-    await consume(
-      s.stream(toolContext(userContext('implement first', 1), firstAssistant)),
-    );
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      targetLabel: 'test/primary',
-      reasonCode: 'continuation',
-    });
-    await consume(
-      s.stream(
-        toolContext(userContext('implement second', 2), secondAssistant),
-      ),
-    );
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'low',
-      targetLabel: 'test/small',
-      reasonCode: 'continuation',
-    });
-    expect(s.delegate).toHaveBeenCalledTimes(4);
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it.each(['micro', 'low', 'medium', 'high'])(
-    'accepts semantic Jev selection of %s',
-    async (tier) => {
-      const s = setup();
-      enableAdvisors(s);
-      required(s.state.currentConfig.profiles.balanced).micro = {
-        model: 'test/small',
-      };
-      const fetch = mockChoice(tier);
-      await consume(s.stream(userContext('да, сделай')));
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(s.delegate).toHaveBeenCalledOnce();
-      expect(s.state.lastDecision).toMatchObject({ tier, reasonCode: 'jev' });
-      expect(advisorOf(s.state.lastDecision)).toBe('jev');
-    },
-  );
-
-  it.each(['да, сделай', 'yes', 'plese fix 日本語'])(
-    'sends bounded role-labelled history for %s',
-    async (text) => {
-      const s = setup();
-      enableAdvisors(s);
-      required(s.state.currentConfig.jev).maxStateTokens = 75;
-      required(s.state.currentConfig.jev).context = {
-        previousTurns: 2,
-        maxHistoryTokens: 50,
-        toolResults: 'last',
-        maxToolTokens: 25,
-      };
-      const fetch = mockChoice();
-      const context = toolContext(userContext('前の依頼: improve the parser'));
-      context.systemPrompt = 'PRIVATE_SYSTEM';
-      context.messages.push({ role: 'user', content: text, timestamp: 4 });
-      await consume(s.stream(context));
-      const body = JSON.parse(
-        String(fetch.mock.calls[0]?.[1]?.body),
-      ) as ChoiceRequest;
-      expect(body.state.currentRequest.text).toBe(text);
-      expect(body.state.recentDialogue[0]?.text).toContain('前の依頼');
-      expect(body.state.recentToolEvidence[0]?.text).toBe(
-        'untrusted tool text',
-      );
-      const metrics = required(s.state.lastDecision?.jev?.context);
-      expect(
-        metrics.currentRequestTokens +
-          metrics.historyTokens +
-          metrics.toolTokens,
-      ).toBeLessThanOrEqual(75);
-      expect(JSON.stringify(body)).not.toContain('PRIVATE_SYSTEM');
-      expect(JSON.stringify(body)).not.toContain(
-        'synthetic-private-key-never-log',
-      );
-    },
-  );
-
-  it.each([
-    'uncertain',
-    'invalid-id',
-    'http-error',
-    'malformed',
-    'transport-error',
-  ])(
-    'falls straight to baseline after active Jev %s, never to classifier',
-    async (kind) => {
-      const s = setup();
-      enableAdvisors(s);
-      const transport = vi.fn<typeof fetch>(async (_url, init) => {
-        if (kind === 'transport-error') throw new Error('private-test-key');
-        if (kind === 'http-error') return new Response('', { status: 500 });
-        if (kind === 'malformed') return new Response('{}');
-        const response = await choiceResponse(
-          init,
-          kind === 'uncertain' ? kind : 'high',
-        ).json();
-        if (kind === 'invalid-id')
-          response.answers.route.choice = 'foreign-model';
-        return new Response(JSON.stringify(response));
-      });
-      vi.stubGlobal('fetch', transport);
-      await consume(s.stream(userContext()));
-      // Only a documented transient status is retried, once, inside the budget.
-      expect(transport).toHaveBeenCalledTimes(kind === 'http-error' ? 2 : 1);
-      expect(s.delegate).toHaveBeenCalledOnce();
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'medium',
-        reasonCode: 'baseline',
-      });
-      expect(advisorOf(s.state.lastDecision)).toBe('jev-fallback');
-    },
-  );
-
-  it('routes a split low-confidence distribution up instead of discarding the answer', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(s.state.currentConfig.profiles.balanced).micro = {
-      model: 'test/small',
-    };
-    const transport = vi.fn<typeof fetch>(async (_url, init) => {
-      const body = JSON.parse(String(init?.body)) as ChoiceRequest;
-      const ids = Object.keys(body.questions.route.criteria);
-      const find = (tier: string) =>
-        ids.find((id) => id.startsWith(`${tier}|`)) ?? 'uncertain';
-      return new Response(
-        JSON.stringify({
-          answers: {
-            route: {
-              type: 'choice',
-              choice: find('micro'),
-              confidence: 0.3,
-              probabilities: Object.fromEntries(
-                ids.map((id) => [
-                  id,
-                  id === find('micro') ? 0.5 : id === find('high') ? 0.5 : 0,
-                ]),
-              ),
-            },
-          },
-        }),
-      );
-    });
-    vi.stubGlobal('fetch', transport);
-    await consume(s.stream(userContext()));
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reasonCode: 'jev',
-      jev: {
-        choice: 'micro',
-        selectedTier: 'high',
-        selectionBasis: 'probability',
-      },
-    });
-    expect(advisorOf(s.state.lastDecision)).toBe('jev');
-  });
-
-  it.each([true, false])(
-    'disabled Jev uses only the configured compatibility path (classifier=%s)',
-    async (classifier) => {
-      const s = setup();
-      enableAdvisors(s);
-      required(s.state.currentConfig.jev).enabled = false;
-      const fetch = mockChoice();
-      if (classifier) {
-        required(s.state.currentConfig.profiles.balanced).micro = {
-          model: 'test/small',
-        };
-        s.delegate.mockReturnValueOnce(
-          done('Tier: micro\nReasoning: semantic selection'),
-        );
-      } else s.state.currentConfig.classifierModel = undefined;
-      await consume(s.stream(userContext()));
-      expect(fetch).not.toHaveBeenCalled();
-      expect(s.delegate).toHaveBeenCalledTimes(classifier ? 2 : 1);
-      expect(s.state.lastDecision).toMatchObject({
-        tier: classifier ? 'micro' : 'medium',
-        reasonCode: classifier ? 'classifier' : 'baseline',
-      });
-    },
-  );
-
-  it('missing Pi TypeSafe authentication uses baseline without a second advisor', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice();
-    const classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
-      async (target) => ({
+const classifierConfig: AdvisorConfig = {
+  enabled: true,
+  model: 'typesafe/jev-latest',
+  timeoutMs: 1500,
+  confidenceThreshold: 0.65,
+  probabilityThreshold: 0.8,
+  maxStateTokens: 3000,
+  maxRetries: 1,
+};
+const enableAdvisors = (s: ReturnType<typeof setup>) => {
+  s.state.currentConfig.advisor = { ...classifierConfig };
+  required(s.state.currentConfig.profiles.balanced).advisor = {
+    models: ['typesafe/jev-latest'],
+  };
+  s.registry.findOfType = (() =>
+    classifierModel) as unknown as ExtensionContext['modelRegistry']['findOfType'];
+  s.registry.classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
+    async (target, context) => {
+      const criteria = required(context.questions.route);
+      const choice =
+        Object.keys(criteria.criteria).find((id) => id.startsWith('medium|')) ??
+        '';
+      return {
         api: target.api,
         provider: target.provider,
         model: target.id,
-        answers: {},
-        stopReason: 'error',
-        errorMessage: 'private-auth-sentinel',
-        timestamp: 1,
-      }),
-    );
-    Object.assign(s.registry, { classify });
-    await consume(s.stream(userContext()));
-    expect(classify).toHaveBeenCalledOnce();
-    expect(fetch).not.toHaveBeenCalled();
-    expect(s.delegate).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      reasonCode: 'baseline',
-      advisor: 'jev-fallback',
-    });
-    expect(
-      JSON.stringify(s.actions.recordDebugDecision.mock.calls),
-    ).not.toContain('private-auth-sentinel');
-  });
-
-  it.each(['uncertain', 'unknown', 'micro'])(
-    'uses baseline for unavailable classifier choice %s',
-    async (tier) => {
-      const s = setup();
-      delete s.state.pinnedTierByProfile.balanced;
-      s.state.currentConfig.classifierModel = { model: 'test/small' };
-      s.delegate.mockReturnValueOnce(done(`Tier: ${tier}\nReasoning: ignored`));
-      const fetch = mockChoice();
-      await consume(s.stream(userContext()));
-      expect(fetch).not.toHaveBeenCalled();
-      expect(s.delegate).toHaveBeenCalledTimes(2);
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'medium',
-        reasonCode: 'baseline',
-      });
-      expect(advisorOf(s.state.lastDecision)).toBe('classifier-fallback');
-    },
-  );
-
-  it('propagates caller abort during classifier-only advice without baseline generation', async () => {
-    const s = setup();
-    delete s.state.pinnedTierByProfile.balanced;
-    s.state.currentConfig.classifierModel = { model: 'test/small' };
-    const controller = new AbortController();
-    s.delegate.mockImplementationOnce(() => {
-      controller.abort();
-      return done('Tier: high\nReasoning: ignored');
-    });
-    const { result } = await consume(
-      s.stream(userContext(), controller.signal),
-    );
-    expect(result.stopReason).toBe('aborted');
-    expect(s.delegate).toHaveBeenCalledOnce();
-  });
-
-  it('applies only a local allowlisted pair and delegates once through Pi', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('high');
-    expect((await consume(s.stream(userContext()))).result.stopReason).toBe(
-      'stop',
-    );
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(s.delegate).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reasonCode: 'jev',
-    });
-    expect(advisorOf(s.state.lastDecision)).toBe('jev');
-    const recorded = JSON.stringify(s.actions.recordDebugDecision.mock.calls);
-    for (const value of [
-      'private-test-key',
-      'typesafe.ai',
-      'implement a parser',
-      'remote explanation',
-    ])
-      expect(recorded).not.toContain(value);
-    expect(s.state.lastDecision?.routingLatencyMs).toBeGreaterThanOrEqual(0);
-  });
-
-  it('keeps Jev provenance when generation falls back to an explicit target', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(s.state.currentConfig.profiles.balanced).high = {
-      model: 'test/primary',
-      fallbacks: ['test/fallback'],
-    };
-    mockChoice('high');
-    s.delegate.mockReturnValueOnce(failure()).mockReturnValueOnce(done());
-
-    await consume(s.stream(userContext()));
-
-    expect(s.state.lastDecision).toMatchObject({
-      targetLabel: 'test/fallback',
-      reasonCode: 'fallback',
-      isFallback: true,
-    });
-    expect(advisorOf(s.state.lastDecision)).toBe('jev');
-  });
-
-  it.each(['pin', 'single', 'budget', 'disabled-profile'] as const)(
-    'skips external advice for %s',
-    async (kind) => {
-      const s = setup();
-      enableAdvisors(s);
-      const fetch = mockChoice();
-      if (kind === 'pin') s.state.pinnedTierByProfile.balanced = 'low';
-      if (kind === 'single')
-        s.state.currentConfig.profiles.balanced = {
-          medium: { model: 'test/primary' },
-          jev: { enabled: true },
-        };
-      if (kind === 'budget') {
-        s.state.currentConfig.maxSessionBudget = 1;
-        s.state.accumulatedCost = 2;
-      }
-      if (kind === 'disabled-profile') {
-        required(s.state.currentConfig.profiles.balanced).jev = {
-          enabled: false,
-        };
-        s.state.currentConfig.classifierModel = undefined;
-      }
-      const context = userContext('implement a parser');
-      await consume(s.stream(context));
-      expect(fetch).not.toHaveBeenCalled();
-      expect(s.delegate).toHaveBeenCalledOnce();
-      expect(advisorOf(s.state.lastDecision)).toBe(
-        kind === 'disabled-profile' ? 'none' : 'bypassed',
-      );
-      expect(s.state.lastDecision?.bypassReason).toBe(
-        {
-          pin: 'pinned',
-          single: 'single-candidate',
-          budget: 'budget',
-          'disabled-profile': undefined,
-        }[kind],
-      );
-      expect(s.actions.recordDebugDecision).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          advisor: kind === 'disabled-profile' ? 'none' : 'bypassed',
-        }),
-      );
-    },
-  );
-
-  it('names a tool turn that cannot reuse its route as the bypass reason', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    mockChoice();
-    await consume(
-      s.stream(
-        toolContext(userContext('same task', 1), toolMessage('test', 'small')),
-      ),
-    );
-    expect(s.state.lastDecision).toMatchObject({
-      reasonCode: 'baseline',
-      advisor: 'bypassed',
-      bypassReason: 'tool-continuation',
-    });
-  });
-
-  it.each([undefined, 20_000, 2_000])(
-    'gives the classifier its configured budget (%s) as the routing deadline',
-    async (timeoutMs) => {
-      const s = setup();
-      delete s.state.pinnedTierByProfile.balanced;
-      s.state.currentConfig.classifierModel = {
-        model: 'test/small',
-        timeoutMs,
-      };
-      s.delegate.mockReturnValueOnce(done('Tier: low\nReasoning: cheap'));
-      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
-      try {
-        await consume(s.stream(userContext()));
-        const budget = timeoutSpy.mock.calls[0]?.[0] ?? 0;
-        const expected = timeoutMs ?? 10_000;
-        expect(budget).toBeGreaterThan(expected - 500);
-        expect(budget).toBeLessThanOrEqual(expected);
-      } finally {
-        timeoutSpy.mockRestore();
-      }
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'low',
-        reasonCode: 'classifier',
-      });
-    },
-  );
-
-  it.each(['none', 'jev', 'classifier'] as const)(
-    "keeps routing through a tier's eligible fallback once the advisor treats it as a real candidate (%s)",
-    async (advisor) => {
-      for (const unavailable of ['missing', 'image'] as const) {
-        const s = setup();
-        s.state.currentConfig = normalizeConfig({
-          profiles: {
-            balanced: {
-              baselineTier: 'medium',
-              high: { model: 'test/small' },
-              medium: {
-                model: 'test/primary',
-                fallbacks: ['test/fallback'],
-              },
-            },
-          },
-        }).config;
-        delete s.state.pinnedTierByProfile.balanced;
-        // The image estimate alone would overflow the 1024-token fixture window.
-        required(s.models.find((entry) => entry.id === 'small')).contextWindow =
-          8192;
-        if (advisor === 'jev') enableAdvisors(s);
-        if (advisor === 'classifier') {
-          s.state.currentConfig.classifierModel = { model: 'test/small' };
-          // First delegate call answers the classifier's own query.
-          s.delegate.mockReturnValueOnce(
-            done('Tier: medium\nReasoning: keep baseline'),
-          );
-        }
-        // Both tiers now offer a real candidate (high's primary, medium's
-        // eligible fallback), so the advisor picks between them explicitly.
-        const fetch = mockChoice('medium');
-        const context = userContext();
-        if (unavailable === 'missing') s.models.shift();
-        else {
-          required(s.models[0]).input = ['text'];
-          context.messages.push({
-            role: 'user',
-            content: [
-              { type: 'image', data: 'synthetic', mimeType: 'image/png' },
-            ],
-            timestamp: 2,
-          });
-        }
-        expect((await consume(s.stream(context))).result.stopReason).toBe(
-          'stop',
-        );
-        if (advisor === 'none') {
-          expect(fetch).not.toHaveBeenCalled();
-          expect(s.delegate).toHaveBeenCalledOnce();
-        } else if (advisor === 'jev') {
-          expect(fetch).toHaveBeenCalledOnce();
-          expect(s.delegate).toHaveBeenCalledOnce();
-        } else {
-          expect(fetch).not.toHaveBeenCalled();
-          expect(s.delegate).toHaveBeenCalledTimes(2);
-        }
-        expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('fallback');
-        // The fallback ref is the tier's only eligible candidate here, so it
-        // is what routing actually chose (isFallback), not a mid-stream
-        // fallback from a failed primary attempt — provenance stays the
-        // advisor's, not 'fallback'.
-        expect(s.state.lastDecision).toMatchObject({
-          tier: 'medium',
-          targetLabel: 'test/fallback',
-          isFallback: true,
-          reasonCode: advisor === 'none' ? 'baseline' : advisor,
-        });
-        expect(advisorOf(s.state.lastDecision)).toBe(
-          advisor === 'none' ? 'none' : advisor,
-        );
-      }
-    },
-  );
-
-  it.each(['jev', 'classifier'] as const)(
-    'keeps non-reasoning primaries eligible for %s with implicit thinking',
-    async (advisor) => {
-      const s = setup();
-      enableAdvisors(s);
-      if (advisor === 'classifier') s.state.currentConfig.jev = undefined;
-      required(s.models[0]).reasoning = false;
-      const fetch = mockChoice('medium');
-      if (advisor === 'classifier')
-        s.delegate.mockReturnValueOnce(
-          done('Tier: medium\nReasoning: semantic'),
-        );
-      expect((await consume(s.stream(userContext()))).result.stopReason).toBe(
-        'stop',
-      );
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'medium',
-        thinking: 'off',
-        reasonCode: advisor,
-      });
-      expect(advisorOf(s.state.lastDecision)).toBe(advisor);
-      expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('primary');
-      expect(s.delegate.mock.calls.at(-1)?.[2]?.reasoning).toBeUndefined();
-      if (advisor === 'jev') {
-        expect(fetch).toHaveBeenCalledOnce();
-        const body = JSON.parse(
-          String(fetch.mock.calls[0]?.[1]?.body),
-        ) as ChoiceRequest;
-        expect(Object.keys(body.questions.route.criteria)).toContain(
-          'medium|test%2Fprimary|off',
-        );
-      } else expect(fetch).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each(['jev', 'classifier'] as const)(
-    'releases the %s guard after terminal abort/error without retrying generation',
-    async (advisor) => {
-      for (const kind of [
-        'aborted',
-        'visible-error',
-        'visible-abort',
-      ] as const) {
-        const s = setup();
-        enableAdvisors(s);
-        if (advisor === 'classifier') s.state.currentConfig.jev = undefined;
-        const fetch = mockChoice('high');
-        const reason = kind === 'visible-error' ? 'error' : 'aborted';
-        const terminal: AssistantMessageEvent = {
-          type: 'error',
-          reason,
-          error: message({ stopReason: reason }),
-        };
-        const failed =
-          kind === 'aborted'
-            ? events(terminal)
-            : events(
-                {
-                  type: 'text_delta',
-                  contentIndex: 0,
-                  delta: 'partial',
-                  partial: message(),
-                },
-                terminal,
-              );
-        if (advisor === 'classifier')
-          s.delegate.mockReturnValueOnce(
-            done('Tier: high\nReasoning: semantic'),
-          );
-        s.delegate.mockReturnValueOnce(failed);
-        const first = await consume(s.stream(userContext()));
-        expect(first.result.stopReason).toBe(reason);
-        expect(
-          first.received.filter((event) => event.type === 'error'),
-        ).toHaveLength(1);
-        expect(s.delegate).toHaveBeenCalledTimes(
-          advisor === 'classifier' ? 2 : 1,
-        );
-        if (advisor === 'classifier')
-          s.delegate.mockReturnValueOnce(
-            done('Tier: high\nReasoning: semantic'),
-          );
-        expect((await consume(s.stream(userContext()))).result.stopReason).toBe(
-          'stop',
-        );
-        expect(s.state.lastDecision).toMatchObject({
-          tier: 'high',
-          reasonCode: advisor,
-        });
-        expect(advisorOf(s.state.lastDecision)).toBe(advisor);
-        expect(s.delegate).toHaveBeenCalledTimes(
-          advisor === 'classifier' ? 4 : 2,
-        );
-        expect(fetch).toHaveBeenCalledTimes(advisor === 'jev' ? 2 : 0);
-      }
-    },
-  );
-
-  it.each([
-    ['uncertain', 'high', 'gpt-6-astra', 'jev-fallback'],
-    ['micro', 'micro', 'gpt-5.6-luna', 'jev'],
-    ['low', 'low', 'gpt-5.6-luna', 'jev'],
-  ] as const)(
-    'uses high as baseline without overriding confident %s advice',
-    async (choice, tier, target, advisor) => {
-      const s = astraSetup();
-      required(s.state.currentConfig.profiles.balanced).baselineTier = 'high';
-      const fetch = mockChoice(choice);
-      await consume(s.stream(userContext()));
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(s.delegate.mock.calls[0]?.[0].id).toBe(target);
-      expect(s.state.lastDecision).toMatchObject({ tier, advisor });
-    },
-  );
-
-  it('still honors the budget before a high baseline and skips Jev', async () => {
-    const s = astraSetup();
-    required(s.state.currentConfig.profiles.balanced).baselineTier = 'high';
-    s.state.currentConfig.maxSessionBudget = 0.01;
-    s.state.accumulatedCost = 1;
-    const fetch = mockChoice('high');
-    await consume(s.stream(userContext()));
-    expect(fetch).not.toHaveBeenCalled();
-    expect(s.state.lastDecision?.tier).not.toBe('high');
-    expect(s.state.lastDecision?.isBudgetForced).toBe(true);
-  });
-
-  it('reuses the Jev route on a repeated call for the same user turn', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('high');
-    for (const timestamp of [1, 2, 3, 3])
-      await consume(s.stream(userContext('implement a parser', timestamp)));
-    expect(fetch).toHaveBeenCalledTimes(3);
-    expect(s.delegate).toHaveBeenCalledTimes(4);
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reasonCode: 'jev',
-      advisor: 'jev',
-    });
-  });
-
-  it('reuses the actual fallback route without reusing its old generation metrics', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('medium');
-    s.delegate.mockReturnValueOnce(failure());
-    await consume(s.stream(userContext()));
-    expect(s.state.lastDecision?.generation?.attempts).toBe(2);
-    s.delegate.mockImplementationOnce(() => {
-      expect(s.state.lastDecision?.generation).toBeUndefined();
-      return done();
-    });
-    await consume(s.stream(userContext()));
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
-      'primary',
-      'fallback',
-      'fallback',
-    ]);
-    expect(s.state.lastDecision?.generation).toMatchObject({
-      attempts: 1,
-      reportedCostUsd: 0.01,
-    });
-  });
-
-  it('offers a fallback-only baseline tier to Jev and gives it the abstention mass', async () => {
-    const s = setup();
-    let offered: string[] = [];
-    s.state.currentConfig = normalizeConfig({
-      profiles: {
-        balanced: {
-          baselineTier: 'high',
-          high: { model: 'test/unavailable', fallbacks: ['test/fallback'] },
-          medium: { model: 'test/primary' },
-          low: { model: 'test/small' },
-        },
-      },
-    }).config;
-    enableAdvisors(s);
-    const transport = vi.fn<typeof fetch>(async (_url, init) => {
-      const body = JSON.parse(String(init?.body)) as ChoiceRequest;
-      const ids = Object.keys(body.questions.route.criteria);
-      offered = ids;
-      const high = ids.find((id) => id.startsWith('high|'));
-      // Below confidenceThreshold, so selection falls to cumulative
-      // probability: low+medium (0.2) stays under probabilityThreshold
-      // (0.8); only once high's own mass (0.45) plus the abstained
-      // 'uncertain' mass (credited to baselineTier 'high') is added does
-      // cumulative (1.0) clear the threshold.
-      return Response.json({
-        answers: {
-          route: {
-            type: 'choice',
-            choice: high,
-            confidence: 0.1,
-            probabilities: Object.fromEntries(
-              ids.map((id) => [
-                id,
-                id === 'uncertain' ? 0.35 : id === high ? 0.45 : 0.1,
-              ]),
-            ),
-          },
-        },
-      });
-    });
-    vi.stubGlobal('fetch', transport);
-    expect((await consume(s.stream(userContext()))).result.stopReason).toBe(
-      'stop',
-    );
-    expect(transport).toHaveBeenCalledOnce();
-    expect(offered).toContain('high|test%2Ffallback|medium');
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      targetLabel: 'test/fallback',
-      advisor: 'jev',
-      reasonCode: 'jev',
-      isFallback: true,
-    });
-    expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
-  });
-
-  it('updates the cached target when a reused decision falls back', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('medium');
-    await consume(s.stream(userContext()));
-    s.delegate.mockReturnValueOnce(failure());
-    await consume(s.stream(userContext()));
-    expect(s.state.lastDecision?.targetLabel).toBe('test/fallback');
-    await consume(s.stream(userContext()));
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
-      'primary',
-      'primary',
-      'fallback',
-      'fallback',
-    ]);
-    expect(s.state.lastDecision?.generation?.attempts).toBe(1);
-  });
-
-  it('isolates identical transcripts by caller session and preserves cache affinity', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('high');
-    for (const session of ['parent', 'child', 'parent'])
-      await consume(s.stream(userContext(), undefined, session));
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(s.delegate.mock.calls.map((call) => call[2]?.sessionId)).toEqual([
-      'parent',
-      'child',
-      'parent',
-    ]);
-  });
-
-  it('scopes reuse to the native session when the caller omits a session ID', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('high');
-    let sessionId = 'parent';
-    Object.assign(required(s.state.lastExtensionContext).sessionManager, {
-      getSessionId: () => sessionId,
-    });
-    for (const next of ['parent', 'child', 'parent']) {
-      sessionId = next;
-      await consume(s.stream(userContext()));
-    }
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(
-      s.delegate.mock.calls.every((call) => call[2]?.sessionId === undefined),
-    ).toBe(true);
-  });
-
-  it('shares one in-flight Jev request across concurrent calls for one turn', async () => {
-    const s = astraSetup();
-    let resolveFetch: (response: Response) => void = () => undefined;
-    const fetch = vi.fn<typeof globalThis.fetch>(
-      () =>
-        new Promise((resolve) => {
-          resolveFetch = resolve;
-        }),
-    );
-    vi.stubGlobal('fetch', fetch);
-
-    const first = consume(s.stream(userContext('implement a parser')));
-    const second = consume(s.stream(userContext('implement a parser')));
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-    resolveFetch(choiceResponse(fetch.mock.calls[0]?.[1], 'high'));
-
-    await Promise.all([first, second]);
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(s.delegate).toHaveBeenCalledTimes(2);
-    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
-      'gpt-6-astra',
-      'gpt-6-astra',
-    ]);
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reasonCode: 'jev',
-      advisor: 'jev',
-    });
-  });
-
-  it('cancels one waiter without cancelling a shared Jev request or generating for it', async () => {
-    const s = astraSetup();
-    let resolveFetch: (response: Response) => void = () => undefined;
-    const fetch = vi.fn<typeof globalThis.fetch>(
-      () =>
-        new Promise((resolve) => {
-          resolveFetch = resolve;
-        }),
-    );
-    vi.stubGlobal('fetch', fetch);
-    const controller = new AbortController();
-    const first = consume(s.stream(userContext(), controller.signal));
-    const second = consume(s.stream(userContext()));
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-    controller.abort();
-    expect((await first).result.stopReason).toBe('aborted');
-    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
-    expect(s.delegate).not.toHaveBeenCalled();
-    resolveFetch(choiceResponse(fetch.mock.calls[0]?.[1], 'high'));
-    await second;
-    expect(s.delegate).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reuse: 'shared',
-      jev: { outcome: 'selected' },
-    });
-  });
-
-  it('aborts the transport when the final Jev waiter cancels', async () => {
-    const s = astraSetup();
-    const fetch = vi.fn<typeof globalThis.fetch>(
-      () => new Promise(() => undefined),
-    );
-    vi.stubGlobal('fetch', fetch);
-    const controller = new AbortController();
-    const pending = consume(s.stream(userContext(), controller.signal));
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-    controller.abort();
-    expect((await pending).result.stopReason).toBe('aborted');
-    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
-    expect(s.delegate).not.toHaveBeenCalled();
-  });
-
-  it('reports the same original deadline for a late-joining waiter', async () => {
-    vi.useFakeTimers();
-    try {
-      const s = astraSetup();
-      const fetch = vi.fn<typeof globalThis.fetch>(
-        () => new Promise(() => undefined),
-      );
-      vi.stubGlobal('fetch', fetch);
-      required(s.state.currentConfig.jev).timeoutMs = 5000;
-      const first = consume(s.stream(userContext()));
-      await vi.advanceTimersByTimeAsync(3000);
-      const second = consume(s.stream(userContext()));
-      await vi.advanceTimersByTimeAsync(2000);
-      await Promise.all([first, second]);
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(s.delegate).toHaveBeenCalledTimes(2);
-      expect(s.state.lastDecision).toMatchObject({
-        advisor: 'jev-fallback',
-        errorClass: 'deadline',
-        jev: { outcome: 'deadline', timeoutMs: 5000 },
-      });
-      await consume(s.stream(userContext()));
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(s.state.lastDecision).toMatchObject({
-        reuse: 'same-turn',
-        jev: { outcome: 'deadline' },
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it.each(['test', 'google'])(
-    'reuses a validated %s tool route on ordinary Pi hosts without an auth identity API',
-    async (provider) => {
-      const s = setup();
-      enableAdvisors(s);
-      const fetch = mockChoice();
-      required(s.models[0]).provider = provider;
-      required(s.state.currentConfig.profiles.balanced).medium = {
-        model: `${provider}/primary`,
-      };
-      const assistant = toolMessage(provider);
-      s.delegate.mockReturnValueOnce(finishTool(assistant));
-      await consume(s.stream(userContext()));
-      await consume(s.stream(toolContext(userContext(), assistant)));
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(s.delegate).toHaveBeenCalledTimes(2);
-      expect(s.state.lastDecision?.reasonCode).toBe('continuation');
-      expect(advisorOf(s.state.lastDecision)).toBe('jev');
-      expect(s.delegate.mock.calls[1]?.[0].provider).toBe(provider);
-    },
-  );
-
-  it.each(['jev', 'classifier'] as const)(
-    'clears stale %s diagnostics on a reused continuation',
-    async (source) => {
-      const s = setup();
-      enableAdvisors(s);
-      if (source === 'jev') {
-        const fetch = vi
-          .fn<typeof globalThis.fetch>()
-          .mockResolvedValue(new Response(null, { status: 503 }));
-        vi.stubGlobal('fetch', fetch);
-      } else {
-        s.state.currentConfig.jev = undefined;
-        s.delegate.mockReturnValueOnce(
-          done('Tier: medium\nReasoning: semantic selection'),
-        );
-      }
-      s.delegate.mockReturnValueOnce(finishTool());
-      await consume(s.stream(userContext()));
-      expect(s.state.lastDecision?.routingLatencyMs).toBeGreaterThanOrEqual(0);
-      if (source === 'jev')
-        expect(s.state.lastDecision?.errorClass).toBe('advisor-unavailable');
-      else expect(s.state.lastDecision?.isClassifier).toBe(true);
-      await consume(s.stream(toolContext()));
-      expect(s.state.lastDecision?.reasonCode).toBe('continuation');
-      expect(s.state.lastDecision?.isClassifier).toBeUndefined();
-      expect(s.state.lastDecision?.routingLatencyMs).toBeUndefined();
-      expect(s.state.lastDecision?.errorClass).toBeUndefined();
-      expect(advisorOf(s.state.lastDecision)).toBe(
-        source === 'jev' ? 'jev-fallback' : 'classifier',
-      );
-    },
-  );
-
-  it('bounds continuation history to the last 16 completed turns', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('low');
-    for (let timestamp = 1; timestamp <= 17; timestamp++) {
-      s.delegate.mockReturnValueOnce(finishTool(toolMessage('test', 'small')));
-      await consume(s.stream(userContext('same task', timestamp)));
-    }
-    await consume(
-      s.stream(
-        toolContext(userContext('same task', 2), toolMessage('test', 'small')),
-      ),
-    );
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'low',
-      reasonCode: 'continuation',
-    });
-    expect(advisorOf(s.state.lastDecision)).toBe('jev');
-    await consume(
-      s.stream(
-        toolContext(userContext('same task', 1), toolMessage('test', 'small')),
-      ),
-    );
-    // The evicted record is not reused, but the latest route for the same
-    // model still keeps the loop off the baseline.
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'low',
-      reasonCode: 'continuation',
-      bypassReason: 'tool-continuation',
-    });
-    expect(s.state.lastDecision?.reuse).toBeUndefined();
-    expect(advisorOf(s.state.lastDecision)).toBe('bypassed');
-    expect(fetch).toHaveBeenCalledTimes(17);
-  });
-
-  it.each([
-    [
-      'keeps the advised route when the turn key changes',
-      'rewrite',
-      'low',
-      'small',
-    ],
-    [
-      'keeps baseline when no route names the prior model',
-      'foreign',
-      'medium',
-      'primary',
-    ],
-    ['keeps an explicit pin over the prior model', 'pin', 'high', 'primary'],
-  ] as const)('%s', async (_name, kind, tier, target) => {
-    const s = setup();
-    enableAdvisors(s);
-    mockChoice('low');
-    const history: Context = {
-      messages: [
-        { role: 'user', content: 'earlier', timestamp: 1 },
-        message({ content: [{ type: 'text', text: 'long tool output' }] }),
-        { role: 'user', content: 'same task', timestamp: 2 },
-      ],
-    };
-    s.delegate.mockReturnValueOnce(finishTool(toolMessage('test', 'small')));
-    await consume(s.stream(history));
-    expect(s.state.lastDecision).toMatchObject({ tier: 'low' });
-    // A context transform (for example, pruning) rewrites older history.
-    const rewritten: Context = {
-      messages: [
-        required(history.messages[0]),
-        message({ content: [{ type: 'text', text: '[pruned]' }] }),
-        required(history.messages[2]),
-      ],
-    };
-    const prior =
-      kind === 'foreign'
-        ? toolMessage('test', 'other')
-        : toolMessage('test', 'small');
-    if (kind === 'pin') s.state.pinnedTierByProfile.balanced = 'high';
-    await consume(s.stream(toolContext(rewritten, prior)));
-    expect(s.state.lastDecision).toMatchObject({ tier });
-    expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe(target);
-  });
-
-  it.each([
-    'tool-id',
-    'user-identity',
-    'profile',
-    'provider',
-    'branch',
-    'branch-rewind',
-    'pin',
-    'thinking',
-    'config-reload',
-    'stale-target',
-    'unsupported-target',
-  ] as const)(
-    'invalidates continuation on %s without calling advisors',
-    async (kind) => {
-      const s = setup();
-      enableAdvisors(s);
-      const fetch = mockChoice();
-      s.delegate.mockReturnValueOnce(finishTool());
-      await consume(s.stream(userContext()));
-      let context = toolContext();
-      if (kind === 'tool-id') {
-        const last = context.messages.at(-1);
-        if (last?.role === 'toolResult') last.toolCallId = 'foreign';
-      }
-      if (kind === 'user-identity')
-        context = toolContext(userContext('implement a parser', 99));
-      if (kind === 'profile') required(s.state.lastDecision).profile = 'other';
-      if (kind === 'provider') {
-        required(s.state.currentConfig.profiles.balanced).medium = {
-          model: 'work/primary',
-        };
-        s.models.push(model('primary', { provider: 'work' }));
-      }
-      if (kind === 'branch')
-        required(s.state.lastExtensionContext).sessionManager.getBranch = () =>
-          [{ id: 'other-branch' }] as ReturnType<
-            ExtensionContext['sessionManager']['getBranch']
-          >;
-      if (kind === 'branch-rewind')
-        required(s.state.lastExtensionContext).sessionManager.getBranch =
-          () => [];
-      if (kind === 'pin') s.state.pinnedTierByProfile.balanced = 'high';
-      if (kind === 'thinking')
-        s.state.thinkingByProfile.balanced = { medium: 'high' };
-      if (kind === 'config-reload')
-        s.state.currentConfig = { ...s.state.currentConfig };
-      if (kind === 'stale-target') s.models.shift();
-      if (kind === 'unsupported-target')
-        required(s.models[0]).thinkingLevelMap = { medium: null };
-      await consume(s.stream(context));
-      expect(fetch).toHaveBeenCalledOnce();
-      expect(s.state.lastDecision?.reasonCode).not.toBe('continuation');
-      expect(
-        s.delegate.mock.calls.every(([target]) => target.id !== 'small'),
-      ).toBe(true);
-    },
-  );
-
-  it('explicit new user instructions win over a tool continuation', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('high');
-    s.delegate.mockReturnValueOnce(finishTool());
-    await consume(s.stream(userContext()));
-    const context = toolContext();
-    context.messages.push({
-      role: 'user',
-      content: 'design authentication',
-      timestamp: 4,
-    });
-    await consume(s.stream(context));
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reasonCode: 'jev',
-    });
-  });
-
-  it('keeps the actual Google fallback stable across tool results', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice();
-    required(s.models[0]).provider = 'google';
-    required(s.models[1]).provider = 'google';
-    required(s.state.currentConfig.profiles.balanced).medium = {
-      model: 'google/primary',
-      fallbacks: ['google/fallback'],
-    };
-    const assistant = toolMessage('google', 'fallback');
-    s.delegate
-      .mockReturnValueOnce(failure())
-      .mockReturnValueOnce(finishTool(assistant));
-    await consume(s.stream(userContext()));
-    await consume(s.stream(toolContext(userContext(), assistant)));
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
-      'primary',
-      'fallback',
-      'fallback',
-    ]);
-    expect(s.state.lastDecision).toMatchObject({
-      reasonCode: 'continuation',
-      targetLabel: 'google/fallback',
-    });
-  });
-
-  it('offers only image-capable primary pairs to Jev', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice('high');
-    required(s.models[2]).input = ['text'];
-    const context: Context = {
-      messages: [
-        {
-          role: 'user',
-          timestamp: 1,
-          content: [
-            { type: 'text', text: 'what is shown?' },
-            { type: 'image', data: 'abc', mimeType: 'image/png' },
-          ],
-        },
-      ],
-    };
-    await consume(s.stream(context));
-    const body = JSON.parse(
-      String(fetch.mock.calls[0]?.[1]?.body),
-    ) as ChoiceRequest;
-    expect(Object.keys(body.questions.route.criteria).join(' ')).not.toContain(
-      'low|',
-    );
-    expect(s.state.lastDecision?.tier).toBe('high');
-    expect(s.delegate).toHaveBeenCalledOnce();
-  });
-
-  it('prefers a valid lower route after the budget removes an unavailable medium', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice();
-    s.state.currentConfig.maxSessionBudget = 1;
-    s.state.accumulatedCost = 2;
-    required(s.state.currentConfig.profiles.balanced).medium = {
-      model: 'test/missing',
-    };
-    await consume(s.stream(userContext('think hard about this question')));
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'low',
-      reasonCode: 'budget',
-      isBudgetForced: true,
-    });
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it.each([false, true])(
-    'preserves a signed Google target after crossing the soft budget (unavailable=%s)',
-    async (unavailable) => {
-      const s = setup();
-      s.state.pinnedTierByProfile = {};
-      s.state.currentConfig = normalizeConfig({
-        maxSessionBudget: 0.005,
-        profiles: {
-          balanced: {
-            high: { model: 'google/primary' },
-            medium: { model: 'test/fallback' },
-          },
-        },
-      }).config;
-      required(s.models[0]).provider = 'google';
-      const first = userContext('implement a parser');
-      const assistant = toolMessage('google');
-      // The explicit pin remains authoritative after crossing the soft budget.
-      s.state.pinnedTierByProfile.balanced = 'high';
-      s.delegate.mockReturnValueOnce(finishTool(assistant));
-      await consume(s.stream(first));
-      expect(s.state.accumulatedCost).toBeGreaterThan(0.005);
-      if (unavailable) s.models.shift();
-      const { result } = await consume(s.stream(toolContext(first, assistant)));
-      if (unavailable) {
-        expect(result.stopReason).toBe('error');
-        expect(s.delegate).toHaveBeenCalledOnce();
-      } else {
-        expect(result.stopReason).toBe('stop');
-        expect(s.delegate).toHaveBeenCalledTimes(2);
-        expect(s.delegate.mock.calls[1]?.[0]).toMatchObject({
-          provider: 'google',
-          id: 'primary',
-        });
-        expect(s.state.lastDecision?.reasonCode).toBe('pinned');
-      }
-    },
-  );
-
-  it.each([
-    ['google', 'google-generative-ai'],
-    ['google-vertex', 'google-vertex'],
-    ['google-work', 'google-generative-ai'],
-    ['google-gemini-cli', 'google-gemini-cli'],
-  ] as const)(
-    'preserves signed continuations for %s using %s and forbids cross-model fallbacks',
-    async (provider, api) => {
-      for (const signature of ['toolCall', 'text', 'thinking'] as const) {
-        const s = setup();
-        s.state.pinnedTierByProfile = {};
-        s.state.currentConfig = normalizeConfig({
-          profiles: {
-            balanced: {
-              high: { model: `${provider}/primary`, fallbacks: ['test/small'] },
-              medium: { model: 'test/fallback' },
-            },
-          },
-        }).config;
-        Object.assign(required(s.models[0]), { provider, api });
-        const assistant = toolMessage(provider);
-        assistant.api = api;
-        assistant.content = [
-          { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
-        ];
-        if (signature === 'toolCall') {
-          assistant.content = [
-            {
-              type: 'toolCall',
-              id: 'call-1',
-              name: 'read',
-              arguments: {},
-              thoughtSignature: 'opaque-signature',
-            },
-          ];
-        } else {
-          assistant.content.unshift(
-            signature === 'text'
-              ? {
-                  type: 'text',
-                  text: 'Reading',
-                  textSignature: 'opaque-signature',
-                }
-              : {
-                  type: 'thinking',
-                  thinking: 'Reading',
-                  thinkingSignature: 'opaque-signature',
-                },
-          );
-        }
-        const context = toolContext(userContext(), assistant);
-        await consume(s.stream(context));
-        expect(s.delegate.mock.calls[0]?.[0]).toMatchObject({
-          provider,
-          api,
-          id: 'primary',
-        });
-        s.delegate.mockReturnValueOnce(failure());
-        const { result } = await consume(s.stream(context));
-        expect(result.stopReason).toBe('error');
-        expect(s.delegate).toHaveBeenCalledTimes(2);
-      }
-    },
-  );
-
-  it('fails plainly rather than replaying Google signatures on a different target', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const fetch = mockChoice();
-    const { result } = await consume(
-      s.stream(toolContext(userContext(), toolMessage('google', 'foreign'))),
-    );
-    expect(result.stopReason).toBe('error');
-    expect(result.errorMessage).toContain('compatible route');
-    expect(fetch).not.toHaveBeenCalled();
-    expect(s.delegate).not.toHaveBeenCalled();
-  });
-
-  it('maps an unsupported effort to its clamped level before Jev, offering at most one candidate per tier', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(required(s.state.currentConfig.profiles.balanced).high).thinking =
-      'high';
-    // Disables medium thinking on the shared "primary" model. The medium
-    // tier's primary ref no longer drops (and falls through to its
-    // configured fallback "test/fallback"); it clamps up to 'high' and
-    // stays the sole medium candidate.
-    required(s.models[0]).thinkingLevelMap = { medium: null };
-    const fetch = mockChoice('high');
-    await consume(s.stream(userContext()));
-    const body = JSON.parse(
-      String(fetch.mock.calls[0]?.[1]?.body),
-    ) as ChoiceRequest;
-    const ids = Object.keys(body.questions.route.criteria);
-    // high, medium (clamped to 'high' on its own primary), low, plus uncertain
-    expect(ids).toHaveLength(4);
-    expect(ids).toContain('medium|test%2Fprimary|high');
-    expect(ids).not.toContain('medium|test%2Ffallback|medium');
-    expect(s.state.lastDecision?.tier).toBe('high');
-  });
-
-  it('revalidates Jev choice after registry capabilities change', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(required(s.state.currentConfig.profiles.balanced).high).thinking =
-      'high';
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<typeof fetch>(async (_url, init) => {
-        required(s.models[0]).thinkingLevelMap = { high: null };
-        return choiceResponse(init, 'high');
-      }),
-    );
-    await consume(s.stream(userContext()));
-    expect(s.state.lastDecision?.reasonCode).not.toBe('jev');
-    expect(s.state.lastDecision?.tier).toBe('medium');
-    expect(s.state.lastDecision?.jev).toMatchObject({
-      choice: 'high',
-      outcome: 'unavailable',
-    });
-    expect(s.delegate).toHaveBeenCalledOnce();
-  });
-
-  it.each([
-    [1500, 900],
-    [3000, 2000],
-    [5000, 4000],
-  ])(
-    'accepts Jev within a %i ms budget after %i ms',
-    async (timeoutMs, delayMs) => {
-      vi.useFakeTimers({
-        toFake: ['setTimeout', 'clearTimeout', 'performance'],
-      });
-      try {
-        const s = setup();
-        enableAdvisors(s);
-        required(s.state.currentConfig.jev).timeoutMs = timeoutMs;
-        const transport = vi.fn<typeof fetch>(
-          (_url, init) =>
-            new Promise((resolve) => {
-              setTimeout(() => resolve(choiceResponse(init, 'high')), delayMs);
-            }),
-        );
-        vi.stubGlobal('fetch', transport);
-        const pending = consume(s.stream(userContext()));
-        await vi.advanceTimersByTimeAsync(delayMs - 1);
-        expect(s.delegate).not.toHaveBeenCalled();
-        await vi.advanceTimersByTimeAsync(1);
-        expect((await pending).result.stopReason).toBe('stop');
-        expect(transport).toHaveBeenCalledOnce();
-        expect(s.delegate).toHaveBeenCalledOnce();
-        expect(s.state.lastDecision).toMatchObject({
-          tier: 'high',
-          reasonCode: 'jev',
-          advisor: 'jev',
-          routingLatencyMs: delayMs,
-        });
-      } finally {
-        vi.useRealTimers();
-      }
-    },
-  );
-
-  it.each([500, 750, 1500, 3000, 5000])(
-    'bounds Jev to its configured %i ms budget and falls directly to baseline',
-    async (timeoutMs) => {
-      vi.useFakeTimers({
-        toFake: ['setTimeout', 'clearTimeout', 'performance'],
-      });
-      try {
-        const s = setup();
-        enableAdvisors(s);
-        required(s.state.currentConfig.jev).timeoutMs = timeoutMs;
-        const transport = vi.fn<typeof fetch>(() => new Promise(() => {}));
-        vi.stubGlobal('fetch', transport);
-        const pending = consume(s.stream(userContext()));
-        await vi.advanceTimersByTimeAsync(0);
-        const cap = timeoutMs;
-        await vi.advanceTimersByTimeAsync(cap - 1);
-        expect(s.delegate).not.toHaveBeenCalled();
-        await vi.advanceTimersByTimeAsync(1);
-        expect((await pending).result.stopReason).toBe('stop');
-        expect(transport).toHaveBeenCalledOnce();
-        expect(transport.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
-        expect(s.delegate).toHaveBeenCalledOnce();
-        expect(s.state.lastDecision).toMatchObject({
-          tier: 'medium',
-          reasonCode: 'baseline',
-          errorClass: 'deadline',
-          routingLatencyMs: cap,
-        });
-      } finally {
-        vi.useRealTimers();
-      }
-    },
-  );
-
-  it('retains the independent 10-second classifier-only bound', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
-    try {
-      vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
-        const controller = new AbortController();
-        setTimeout(() => controller.abort(), ms);
-        return controller.signal;
-      });
-      const s = setup();
-      delete s.state.pinnedTierByProfile.balanced;
-      s.state.currentConfig.classifierModel = { model: 'test/small' };
-      let classifierSignal: AbortSignal | undefined;
-      s.delegate.mockImplementationOnce((_model, _context, options) => {
-        classifierSignal = options?.signal;
-        return {
-          [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
-        } as AssistantMessageEventStream;
-      });
-      const pending = consume(s.stream(userContext()));
-      await vi.advanceTimersByTimeAsync(9999);
-      expect(s.delegate).toHaveBeenCalledOnce();
-      expect(classifierSignal?.aborted).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
-      expect((await pending).result.stopReason).toBe('stop');
-      expect(classifierSignal?.aborted).toBe(true);
-      expect(s.delegate).toHaveBeenCalledTimes(2);
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'medium',
-        reasonCode: 'baseline',
-        errorClass: 'deadline',
-        routingLatencyMs: 10000,
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('cancels the request rather than starting local generation after advisor abort', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    const controller = new AbortController();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<typeof fetch>(async () => {
-        controller.abort();
-        throw new Error('private-test-key');
-      }),
-    );
-    const { result } = await consume(
-      s.stream(userContext(), controller.signal),
-    );
-    expect(result.stopReason).toBe('aborted');
-    expect(s.delegate).not.toHaveBeenCalled();
-    expect(JSON.stringify(result)).not.toContain('private-test-key');
-  });
-
-  it('preserves explicitly configured cross-provider fallbacks but never discovers another account', async () => {
-    const s = setup();
-    required(s.models[0]).provider = 'openai';
-    required(s.models[1]).provider = 'anthropic';
-    s.models.push(model('available', { provider: 'personal' }));
-    required(s.state.currentConfig.profiles.balanced).medium = {
-      model: 'openai/primary',
-      fallbacks: ['anthropic/fallback'],
-    };
-    s.delegate.mockReturnValueOnce(failure());
-    await consume(s.stream());
-    expect(s.delegate.mock.calls.map(([target]) => target.provider)).toEqual([
-      'openai',
-      'anthropic',
-    ]);
-    expect(s.state.lastDecision).toMatchObject({
-      targetProvider: 'anthropic',
-      reasonCode: 'fallback',
-    });
-    s.delegate.mockClear();
-    s.delegate.mockImplementation(() => failure());
-    await consume(s.stream());
-    expect(s.delegate.mock.calls.map(([target]) => target.provider)).toEqual([
-      'openai',
-      'anthropic',
-    ]);
-  });
-
-  it('validates fallback effort against its own live model, clamping to its equivalent level', async () => {
-    const s = setup();
-    // The primary supports 'medium' fine; only the fallback lacks it, so a
-    // clamp driven by the primary's capabilities would wrongly keep 'medium'.
-    required(s.models[1]).thinkingLevelMap = { medium: null };
-    s.delegate.mockReturnValueOnce(failure());
-    const { result } = await consume(s.stream());
-    expect(result.stopReason).toBe('stop');
-    expect(s.delegate).toHaveBeenCalledTimes(2);
-    expect(s.delegate.mock.calls[0]?.[0].id).toBe('primary');
-    expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('medium');
-    // 'medium' clamps up to 'high' on the fallback's own live model.
-    expect(s.delegate.mock.calls[1]?.[0].id).toBe('fallback');
-    expect(s.delegate.mock.calls[1]?.[2]?.reasoning).toBe('high');
-    expect(s.state.lastDecision).toMatchObject({
-      targetLabel: 'test/fallback',
-      thinking: 'high',
-    });
-    // Pi's footer follows the attempt that runs, not the first choice.
-    expect(
-      s.actions.syncPiThinkingLevel.mock.calls.map(([level]) => level),
-    ).toEqual(['medium', 'high']);
-  });
-
-  it('shows the level an override runs at, not the requested level', async () => {
-    const s = setup();
-    required(s.models[0]).thinkingLevelMap = { off: null };
-    s.state.thinkingByProfile = {
-      balanced: { high: 'off', medium: 'off', low: 'off', micro: 'off' },
-    };
-    await consume(s.stream());
-    expect(s.delegate.mock.calls[0]?.[2]?.reasoning).toBe('minimal');
-    expect(s.actions.syncPiThinkingLevel).toHaveBeenCalledWith('minimal');
-    expect(s.actions.syncPiThinkingLevel).not.toHaveBeenCalledWith('off');
-  });
-
-  it.each([
-    [
-      'an undeclared route runs xhigh',
-      { xhigh: 'xhigh' },
-      undefined,
-      { xhigh: 'xhigh' },
-    ],
-    ['a tier asks for max its model lacks', undefined, 'max', undefined],
-    ['a route runs max', { max: 'max' }, undefined, { max: 'max' }],
-  ] as const)(
-    'lists router xhigh and max only when %s',
-    (_label, primaryLevels, highThinking, expected) => {
-      const s = setup();
-      if (primaryLevels)
-        required(s.models[0]).thinkingLevelMap = { ...primaryLevels };
-      if (highThinking)
-        s.state.currentConfig = normalizeConfig({
-          profiles: {
-            balanced: {
-              high: { model: 'test/primary', thinking: highThinking },
-              low: { model: 'test/small' },
-            },
-          },
-        }).config;
-      registerRouterProvider(s.api, s.state, s.actions);
-      const router = required(
-        s.register.mock.calls
-          .at(-1)?.[1]
-          .models?.find((entry) => entry.id === 'balanced'),
-      );
-      if (router.type === 'image' || router.type === 'classifier')
-        throw new Error('Expected a chat router model');
-      expect(router.thinkingLevelMap).toEqual(expected);
-    },
-  );
-});
-
-const cloudflareSetup = () => {
-  const s = setup();
-  enableAdvisors(s);
-  s.state.currentConfig.advisor = 'clef';
-  s.state.currentConfig.cloudflare = required(
-    normalizeConfig({ cloudflare: { enabled: true }, profiles: {} }).config
-      .cloudflare,
-  );
-  required(s.state.currentConfig.profiles.balanced).cloudflare = {
-    enabled: true,
-  };
-  s.registry.findOfType = vi.fn(() => ({
-    type: 'classifier',
-    api: 'cloudflare-workers-ai-system-one',
-    provider: 'cloudflare-workers-ai',
-    id: '@cf/cloudflare/clef',
-  })) as unknown as ExtensionContext['modelRegistry']['findOfType'];
-  const classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
-    async (_model, context) => {
-      const id = required(
-        Object.keys(required(context.questions.route).criteria).find((id) =>
-          id.startsWith('high|'),
-        ),
-      );
-      return {
-        api: 'cloudflare-workers-ai-system-one',
-        provider: 'cloudflare-workers-ai',
-        model: '@cf/cloudflare/clef',
-        timestamp: 1,
+        timestamp: Date.now(),
         stopReason: 'stop',
         answers: {
           route: {
             type: 'choice',
-            choice: id,
-            confidence: 0.9,
-            probabilities: { [id]: 1 },
+            choice,
+            confidence: 0.99,
+            probabilities: Object.fromEntries(
+              Object.keys(criteria.criteria).map((id) => [
+                id,
+                id === choice ? 1 : 0,
+              ]),
+            ),
           },
         },
       };
     },
   );
-  s.registry.classify = classify;
-  return { ...s, classify };
+  delete s.state.pinnedTierByProfile.balanced;
+};
+const configureChoice = (s: ReturnType<typeof setup>, tier: string) => {
+  enableAdvisors(s);
+  s.registry.classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
+    async (target, context) => {
+      const q = required(context.questions.route);
+      const ids = Object.keys(q.criteria);
+      const choice =
+        ids.find((id) => id.startsWith(tier + '|')) ?? ids[0] ?? '';
+      return {
+        api: target.api,
+        provider: target.provider,
+        model: target.id,
+        timestamp: Date.now(),
+        stopReason: 'stop',
+        answers: {
+          route: {
+            type: 'choice',
+            choice,
+            confidence: 0.99,
+            probabilities: Object.fromEntries(
+              ids.map((id) => [id, id === choice ? 1 : 0]),
+            ),
+          },
+        },
+      };
+    },
+  );
 };
 
-describe('Cloudflare provider integration', () => {
-  it('uses the selected Cloudflare advisor, never Jev/chat, and reuses same-turn advice', async () => {
-    const s = cloudflareSetup();
-    const fetch = vi.fn<typeof globalThis.fetch>();
-    vi.stubGlobal('fetch', fetch);
+describe('Pi classifier provider integration', () => {
+  it('routes with an explicitly approved Pi classifier and reuses advice on the turn', async () => {
+    const s = setup();
+    configureChoice(s, 'high');
     await consume(s.stream(userContext()));
-    await consume(s.stream(userContext()));
-    expect(s.classify).toHaveBeenCalledOnce();
-    expect(fetch).not.toHaveBeenCalled();
-    expect(s.delegate).toHaveBeenCalledTimes(2);
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reasonCode: 'cloudflare',
-      advisor: 'cloudflare',
-      reuse: 'same-turn',
-      cloudflare: { model: '@cf/cloudflare/clef', outcome: 'selected' },
-    });
-    expect(s.state.lastDecision?.jev).toBeUndefined();
-  });
-
-  it.each([
-    'global-consent',
-    'profile-consent',
-    'registry-unavailable',
-    'auth-error',
-    'invalid-advice',
-  ] as const)(
-    'falls directly to baseline when %s; never a second advisor',
-    async (mode) => {
-      const s = cloudflareSetup();
-      if (mode === 'global-consent')
-        required(s.state.currentConfig.cloudflare).enabled = false;
-      if (mode === 'profile-consent')
-        required(s.state.currentConfig.profiles.balanced).cloudflare =
-          undefined;
-      if (mode === 'registry-unavailable')
-        s.registry.findOfType = vi.fn(() => undefined);
-      if (mode === 'auth-error')
-        s.classify.mockRejectedValue(new Error('secret auth error'));
-      if (mode === 'invalid-advice')
-        s.classify.mockResolvedValue({
-          stopReason: 'stop',
-          answers: {
-            route: {
-              type: 'choice',
-              choice: 'foreign',
-              confidence: 1,
-              probabilities: { foreign: 1 },
-            },
-          },
-        } as unknown as Awaited<ReturnType<typeof s.classify>>);
-      const fetch = vi.fn<typeof globalThis.fetch>();
-      vi.stubGlobal('fetch', fetch);
-      await consume(s.stream(userContext()));
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'medium',
-        advisor: 'cloudflare-fallback',
-      });
-      expect(s.delegate).toHaveBeenCalledOnce();
-      expect(fetch).not.toHaveBeenCalled();
-      expect(s.state.lastDecision?.jev).toBeUndefined();
-      expect(JSON.stringify(s.state.lastDecision)).not.toContain('secret');
-    },
-  );
-
-  it.each(['pin', 'budget', 'tool-continuation'] as const)(
-    'preserves advisor bypass for %s',
-    async (mode) => {
-      const s = cloudflareSetup();
-      if (mode === 'pin') s.state.pinnedTierByProfile.balanced = 'low';
-      if (mode === 'budget') {
-        s.state.currentConfig.maxSessionBudget = 1;
-        s.state.accumulatedCost = 2;
-      }
-      await consume(
-        s.stream(
-          mode === 'tool-continuation'
-            ? toolContext(userContext())
-            : userContext(),
-        ),
-      );
-      expect(s.classify).not.toHaveBeenCalled();
-      expect(s.delegate).toHaveBeenCalledOnce();
-    },
-  );
-
-  it('revalidates live capabilities before generation', async () => {
-    const s = cloudflareSetup();
-    const original = s.classify.getMockImplementation();
-    s.classify.mockImplementation(async (...args) => {
-      const result = await required(original)(...args);
-      // High primary vanishes while the request is in flight. Medium fallback survives.
-      s.models.shift();
-      return result;
-    });
-    await consume(s.stream(userContext()));
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      advisor: 'cloudflare-fallback',
-      cloudflare: { outcome: 'unavailable' },
-    });
-    expect(s.delegate.mock.calls[0]?.[0].id).toBe('fallback');
-  });
-
-  it('rejects advice from a replaced config without poisoning the new-config turn cache', async () => {
-    const s = cloudflareSetup();
-    const original = s.classify.getMockImplementation();
-    s.classify.mockImplementationOnce(async (...args) => {
-      const result = await required(original)(...args);
-      s.state.currentConfig = { ...s.state.currentConfig };
-      return result;
-    });
-    await consume(s.stream(userContext()));
-    expect(s.state.lastDecision).toMatchObject({
-      advisor: 'cloudflare-fallback',
-      cloudflare: { outcome: 'unavailable' },
-    });
-    await consume(s.stream(userContext()));
-    expect(s.classify).toHaveBeenCalledTimes(2);
-    expect(s.state.lastDecision?.advisor).toBe('cloudflare');
-  });
-
-  it('shares a flight and cancels only the departing waiter', async () => {
-    const s = cloudflareSetup();
-    const original = s.classify.getMockImplementation();
-    let complete = () => {};
-    let transportSignal: AbortSignal | undefined;
-    s.classify.mockImplementation(
-      (...args) =>
-        new Promise((resolve) => {
-          transportSignal = args[2]?.signal;
-          complete = () => {
-            void required(original)(...args).then(resolve);
-          };
-        }),
-    );
-    const controller = new AbortController();
-    const first = consume(s.stream(userContext(), controller.signal));
-    const second = consume(s.stream(userContext()));
-    await vi.waitFor(() => expect(s.classify).toHaveBeenCalledOnce());
-    controller.abort();
-    expect((await first).result.stopReason).toBe('aborted');
-    expect(transportSignal?.aborted).toBe(false);
-    expect(s.delegate).not.toHaveBeenCalled();
-    complete();
-    await second;
+    expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce();
     expect(s.delegate).toHaveBeenCalledOnce();
     expect(s.state.lastDecision).toMatchObject({
-      advisor: 'cloudflare',
-      reuse: 'shared',
+      tier: 'high',
+      reasonCode: 'classifier',
+      advisor: 'classifier',
+      isClassifier: true,
     });
-  });
-
-  it('aborts the final waiter transport and never generates for native aborted stopReason', async () => {
-    const s = cloudflareSetup();
-    let transportSignal: AbortSignal | undefined;
-    s.classify.mockImplementation((_model, _context, options) => {
-      transportSignal = options?.signal;
-      return new Promise(() => {});
-    });
-    const controller = new AbortController();
-    const pending = consume(s.stream(userContext(), controller.signal));
-    await vi.waitFor(() => expect(s.classify).toHaveBeenCalledOnce());
-    controller.abort();
-    expect((await pending).result.stopReason).toBe('aborted');
-    expect(transportSignal?.aborted).toBe(true);
-    expect(s.delegate).not.toHaveBeenCalled();
-    s.classify.mockResolvedValue({
-      stopReason: 'aborted',
-      answers: {},
-    } as unknown as Awaited<ReturnType<typeof s.classify>>);
-    expect(
-      (await consume(s.stream(userContext('next', 2)))).result.stopReason,
-    ).toBe('aborted');
-    expect(s.delegate).not.toHaveBeenCalled();
-  });
-});
-
-describe('Cloudflare reuse and authorization edges', () => {
-  it('reuses the validated tool route without a second advisor', async () => {
-    const s = cloudflareSetup();
-    const assistant = toolMessage();
-    s.delegate.mockReturnValueOnce(finishTool(assistant));
     await consume(s.stream(userContext()));
-    await consume(s.stream(toolContext(userContext(), assistant)));
-    expect(s.classify).toHaveBeenCalledOnce();
+    expect(s.registry.classify).toHaveBeenCalledOnce();
+  });
+  it('does not classify when profile consent omits the selected configured classifier', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    required(s.state.currentConfig.profiles.balanced).advisor = { models: [] };
+    await consume(s.stream(userContext()));
+    expect(vi.mocked(s.registry.classify)).not.toHaveBeenCalled();
+    expect(s.state.lastDecision?.reasonCode).toBe('baseline');
+  });
+  it('invalidates same-turn advice when exact profile consent is revoked', async () => {
+    const s = setup();
+    configureChoice(s, 'high');
+    const context = userContext();
+    await consume(s.stream(context));
+    expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce();
+    required(s.state.currentConfig.profiles.balanced).advisor = { models: [] };
+    await consume(s.stream(context));
+    expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'baseline',
+      advisor: 'classifier-fallback',
+    });
+  });
+  it('reuses the classified route through a valid tool continuation', async () => {
+    const s = setup();
+    configureChoice(s, 'high');
+    const user = userContext();
+    const toolCall = message({
+      content: [
+        { type: 'toolCall', id: 'tool-1', name: 'read', arguments: {} },
+      ],
+      stopReason: 'toolUse',
+    });
+    s.delegate.mockReturnValueOnce(
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: toolCall,
+      }),
+    );
+    await consume(s.stream(user));
+    await consume(
+      s.stream({
+        messages: [
+          ...user.messages,
+          toolCall,
+          {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'read',
+            content: [{ type: 'text', text: 'fixture' }],
+            isError: false,
+            timestamp: 2,
+          },
+        ],
+      }),
+    );
+    expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce();
     expect(s.delegate).toHaveBeenCalledTimes(2);
     expect(s.state.lastDecision).toMatchObject({
       tier: 'high',
       reasonCode: 'continuation',
-      advisor: 'cloudflare',
       reuse: 'continuation',
     });
   });
-
-  it('bypasses advice with only one eligible tier candidate', async () => {
-    const s = cloudflareSetup();
-    const profile = required(s.state.currentConfig.profiles.balanced);
-    profile.high = undefined;
-    profile.low = undefined;
-    await consume(s.stream(userContext()));
-    expect(s.classify).not.toHaveBeenCalled();
-    expect(s.state.lastDecision).toMatchObject({
-      advisor: 'bypassed',
-      bypassReason: 'single-candidate',
+  it('falls back directly to a local baseline on invalid advice', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    s.registry.classify = async (target) => ({
+      api: target.api,
+      provider: target.provider,
+      model: target.id,
+      timestamp: 1,
+      stopReason: 'error',
+      errorMessage: 'private provider detail',
+      answers: {},
     });
+    await consume(s.stream(userContext()));
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'baseline',
+      advisor: 'classifier-fallback',
+      errorClass: 'advisor-unavailable',
+    });
+    expect(
+      JSON.stringify(s.actions.recordDebugDecision.mock.calls),
+    ).not.toContain('private provider detail');
   });
-
-  it('does not accept stale advice after in-place consent revocation', async () => {
-    const s = cloudflareSetup();
-    const original = s.classify.getMockImplementation();
-    s.classify.mockImplementationOnce(async (...args) => {
-      const result = await required(original)(...args);
-      required(s.state.currentConfig.cloudflare).enabled = false;
-      return result;
-    });
-    await consume(s.stream(userContext()));
-    expect(s.state.lastDecision).toMatchObject({
-      advisor: 'cloudflare-fallback',
-      cloudflare: { outcome: 'unavailable' },
-    });
-    await consume(s.stream(userContext()));
-    expect(s.classify).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision?.cloudflare?.outcome).toBe('unavailable');
-    expect(s.state.lastDecision?.reuse).not.toBe('same-turn');
+  it('aborts advice without starting baseline generation', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    s.registry.classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
+      (_model, _context, options) =>
+        new Promise((resolve) =>
+          options?.signal?.addEventListener(
+            'abort',
+            () =>
+              resolve({
+                api: 'typesafe-system-one',
+                provider: 'typesafe',
+                model: 'jev-latest',
+                timestamp: 1,
+                stopReason: 'aborted',
+                answers: {},
+              }),
+            { once: true },
+          ),
+        ),
+    );
+    const controller = new AbortController();
+    const pending = consume(s.stream(userContext(), controller.signal));
+    await vi.waitFor(() =>
+      expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce(),
+    );
+    controller.abort();
+    expect((await pending).result.stopReason).toBe('aborted');
+    expect(s.delegate).not.toHaveBeenCalled();
+  });
+  it('bypasses advice for a pin and a single available tier', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    s.state.pinnedTierByProfile.balanced = 'low';
+    await consume(s.stream());
+    expect(s.registry.classify).not.toHaveBeenCalled();
+    s.state.pinnedTierByProfile.balanced = undefined;
+    s.state.currentConfig.profiles.balanced = { low: { model: 'test/small' } };
+    await consume(s.stream());
+    expect(s.registry.classify).not.toHaveBeenCalled();
   });
 });

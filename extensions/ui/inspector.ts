@@ -41,7 +41,7 @@ const fieldNames: Record<keyof RouterUIControls, string> = {
   pin: 'Pin tier',
   baseline: 'Baseline',
   budget: 'Soft budget ($)',
-  advisor: 'Advisor',
+  advisor: 'Classifier model',
   timeout: 'Advisor deadline (ms)',
   thinkingHigh: 'High effort',
   thinkingMedium: 'Medium effort',
@@ -164,9 +164,11 @@ export const formatRouterUISnapshot = (
               (key) =>
                 `${fieldNames[key]}: ${display((snapshot.pendingControls ?? snapshot.controls)[key])}`,
             ),
-            `Pi classifier: ${snapshot.classifierModel ?? 'not configured'} (used only when external advice is inactive)`,
-            `TypeSafe approval: ${display(snapshot.privacy.jevApproved)}`,
-            `Cloudflare approval: ${display(snapshot.privacy.cloudflareApproved)}`,
+            'Classifier models: ' +
+              snapshot.classifiers.map((model) => model.model).join(', '),
+            'Advisor enabled: ' + snapshot.privacy.advisorEnabled,
+            'Approved models: ' +
+              (snapshot.privacy.approvedModels.join(', ') || 'none'),
             'Credentials and consent are read-only. Selecting an advisor does not grant approval.',
             'Session edits activate on the next user turn. No configuration file writes.',
           ]
@@ -407,7 +409,12 @@ export class RouterUIInspector implements Component {
     ) {
       const choices =
         field === 'advisor'
-          ? ['jev', 'clef', 'clef-flash']
+          ? [
+              ...new Set([
+                this.editor.draft.advisor,
+                ...this.snapshot.classifiers.map((model) => model.model),
+              ]),
+            ]
           : field.startsWith('thinking')
             ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
             : ['auto', ...ROUTER_TIERS];
@@ -533,10 +540,15 @@ export class RouterUIInspector implements Component {
             ),
             '',
             heading('Advisor authorization · read-only'),
-            `Jev approval: ${display(s.privacy.jevApproved)}`,
-            `Cloudflare approval: ${display(s.privacy.cloudflareApproved)}`,
-            `Pi classifier: ${s.classifierModel ?? 'not configured'}`,
-            'Pi classifier is used only when external advice is inactive.',
+            'Advisor enabled: ' + s.privacy.advisorEnabled,
+            'Selected model approved: ' +
+              Boolean(
+                this.editor.draft.advisor &&
+                  s.privacy.approvedModels.includes(this.editor.draft.advisor),
+              ),
+            'Approved models: ' +
+              (s.privacy.approvedModels.join(', ') || 'none'),
+            'Models come from Pi classifier registry; Pi owns authentication.',
             'Selecting an advisor does not grant consent.',
             'Recent text can contain private data. Filtering is not redaction.',
             'Advisor failure → baseline, never a second advisor.',
@@ -624,7 +636,7 @@ export class RouterUIInspector implements Component {
           ...wrapTextWithAnsi(
             color(
               selected,
-              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor) : display(this.editor.draft[field])}`,
+              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'not configured') : display(this.editor.draft[field])}`,
             ),
             w,
           ),

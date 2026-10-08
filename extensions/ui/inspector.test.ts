@@ -21,7 +21,7 @@ const controls: RouterUIControls = {
   pin: 'auto',
   baseline: 'medium',
   budget: 5,
-  advisor: 'jev',
+  advisor: undefined,
   timeout: 1500,
   thinkingHigh: undefined,
   thinkingMedium: undefined,
@@ -41,9 +41,10 @@ const fixture = () => {
     },
     eligible: {},
     history: [],
+    classifiers: [],
     privacy: {
-      jevApproved: undefined,
-      cloudflareApproved: false,
+      advisorEnabled: false,
+      approvedModels: [],
       auth: 'unknown',
     },
   };
@@ -196,7 +197,7 @@ describe('ui/inspector.ts', () => {
     const custom = vi.fn();
     const ctx = { mode: 'rpc', ui: { custom } } as unknown as ExtensionContext;
     expect(await openRouterInspector(ctx, f.adapters, 'settings')).toContain(
-      'Cloudflare approval: false',
+      'Approved models: none',
     );
     expect(await openRouterInspector(ctx, f.adapters, 'settings')).toContain(
       'High effort:',
@@ -258,7 +259,7 @@ describe('ui/inspector.ts', () => {
     await f.draft.apply();
     expect(f.adapters.getSnapshot().actual).toEqual(actual);
     expect(f.adapters.getSnapshot().pendingControls?.advisor).toBe('clef');
-    expect(f.adapters.getSnapshot().privacy.cloudflareApproved).toBe(false);
+    expect(f.adapters.getSnapshot().privacy.advisorEnabled).toBe(false);
     expect(f.draft.message).toContain('next user turn');
     f.update({
       pendingControls: {
@@ -362,7 +363,12 @@ describe('ui/inspector.ts', () => {
     const history = [
       { advice, generationCostUsd: 0.2 },
       { advice, reuse: 'continuation' as const },
-      { advice: { advisor: 'jev' as const, outcome: 'selected' as const } },
+      {
+        advice: {
+          advisor: 'classifier' as const,
+          outcome: 'selected' as const,
+        },
+      },
     ];
     const text = formatRouterUIUsage(history).join('\n');
     expect(text).toContain('Unique advice requests: 1');
