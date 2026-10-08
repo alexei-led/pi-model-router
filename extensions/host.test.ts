@@ -5,9 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { onTestFinished, test } from 'vitest';
 
-test('Pi RPC loads the router provider without dispatching a model', {
-  timeout: 20_000,
-}, () => {
+const runRouterCLI = (args: string[], input?: string) => {
   const cwd = mkdtempSync(join(tmpdir(), 'pi-router-host-'));
   onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
   const agentDir = join(cwd, 'agent');
@@ -18,12 +16,10 @@ test('Pi RPC loads the router provider without dispatching a model', {
       profiles: { offline: { medium: { model: 'openai/gpt-6.1-sol' } } },
     }),
   );
-  const result = spawnSync(
+  return spawnSync(
     process.execPath,
     [
       resolve('node_modules/@earendil-works/pi-coding-agent/dist/cli.js'),
-      '--mode',
-      'rpc',
       '--no-extensions',
       '--no-skills',
       '--no-prompt-templates',
@@ -34,6 +30,7 @@ test('Pi RPC loads the router provider without dispatching a model', {
       resolve('extensions/index.ts'),
       '--model',
       'router/offline',
+      ...args,
     ],
     {
       cwd,
@@ -43,10 +40,19 @@ test('Pi RPC loads the router provider without dispatching a model', {
         PI_CODING_AGENT_DIR: agentDir,
         PI_OFFLINE: '1',
       },
-      input: '{"id":"state","type":"get_state"}\n',
+      ...(input === undefined ? {} : { input }),
       encoding: 'utf8',
       timeout: 15_000,
     },
+  );
+};
+
+test('Pi RPC loads the router provider without dispatching a model', {
+  timeout: 20_000,
+}, () => {
+  const result = runRouterCLI(
+    ['--mode', 'rpc'],
+    '{"id":"state","type":"get_state"}\n',
   );
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stderr, /Failed to load extension|Error:/);
@@ -74,49 +80,17 @@ for (const view of ['usage', 'settings', 'status', ''] as const) {
     test(`Pi ${mode} exposes ${view || 'overview'} text without inference`, {
       timeout: 20_000,
     }, () => {
-      const cwd = mkdtempSync(join(tmpdir(), 'pi-router-inspector-'));
-      onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
-      const agentDir = join(cwd, 'agent');
-      mkdirSync(agentDir);
-      writeFileSync(
-        join(agentDir, 'model-router.json'),
-        JSON.stringify({
-          profiles: { offline: { medium: { model: 'openai/gpt-6.1-sol' } } },
-        }),
-      );
-      const result = spawnSync(
-        process.execPath,
+      const input =
+        mode === 'rpc'
+          ? JSON.stringify({ type: 'prompt', message: `/router ${view}` }) +
+            '\n'
+          : undefined;
+      const result = runRouterCLI(
         [
-          resolve('node_modules/@earendil-works/pi-coding-agent/dist/cli.js'),
-          '--no-extensions',
-          '--no-skills',
-          '--no-prompt-templates',
-          '--no-themes',
-          '--no-context-files',
-          '--no-session',
-          '--extension',
-          resolve('extensions/index.ts'),
-          '--model',
-          'router/offline',
           ...(mode === 'print' ? ['--print'] : ['--mode', mode]),
           ...(mode === 'rpc' ? [] : [`/router ${view}`]),
         ],
-        {
-          cwd,
-          env: {
-            PATH: process.env.PATH ?? '',
-            HOME: cwd,
-            PI_CODING_AGENT_DIR: agentDir,
-            PI_OFFLINE: '1',
-          },
-          encoding: 'utf8',
-          input:
-            mode === 'rpc'
-              ? JSON.stringify({ type: 'prompt', message: `/router ${view}` }) +
-                '\n'
-              : undefined,
-          timeout: 15_000,
-        },
+        input,
       );
       assert.equal(result.status, 0, result.stderr);
       const expected =

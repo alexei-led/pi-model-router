@@ -66,7 +66,7 @@ describe('Signal Panel presentation', () => {
       expect(textBar(ratio)).toHaveLength(12);
       expect(
         budgetLines({ ...snapshot, accumulatedCost: ratio * 2 }).join('\n'),
-      ).toContain(Math.round(ratio * 100) + '%');
+      ).toContain(`${Math.round(ratio * 100)}%`);
     },
   );
   it.each([undefined, NaN, Infinity, -1])(

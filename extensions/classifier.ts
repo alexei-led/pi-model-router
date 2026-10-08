@@ -5,12 +5,13 @@ import {
   selectRoute,
   validCandidates,
 } from './choice';
-import { normalizeAdvisorConfig, parseCanonicalModelRef } from './config';
+import { normalizeAdvisorConfig } from './config';
 import { MAX_CLASSIFIER_ESTIMATED_REQUEST_TOKENS } from './constants';
 import {
   buildClassifierContext,
   estimateClassifierRequestTokens,
 } from './context';
+import { parseCanonicalModelRef } from './domain';
 import type {
   AdvisorConfig,
   ClassifierDependencies,

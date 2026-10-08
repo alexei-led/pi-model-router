@@ -48,7 +48,6 @@ describe('router UI runtime boundary', () => {
       decision: {
         profile: 'auto',
         tier: 'medium',
-        phase: 'implementation',
         targetProvider: 'openai',
         targetModelId: 'medium',
         targetLabel: 'openai/medium',

@@ -98,8 +98,10 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Lint, formatting, imports, and typecheck
         run: npm run check
-      - name: Test
-        run: npm test
+      - name: Tests and coverage
+        run: npm run test:coverage
+      - name: Unused production code and dependencies
+        run: npm run check:unused
       - name: Package dry run
         run: npm run pack:dry
       - name: Check npm package version

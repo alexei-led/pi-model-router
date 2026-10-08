@@ -6,7 +6,7 @@ import {
   isRouterTier,
   isThinkingLevel,
   parseCanonicalModelRef,
-} from './config';
+} from './domain';
 import type {
   CacheCostShadow,
   ClassifierContextMetrics,
@@ -30,8 +30,6 @@ import {
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
 
-const isPhase = (value: unknown) =>
-  value === 'planning' || value === 'implementation' || value === 'lightweight';
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 const isModelRef = (value: unknown) => {
@@ -60,7 +58,6 @@ const isPersistedReasonCode = (value: unknown): boolean =>
 const isDecision = (value: unknown): value is RoutingDecision =>
   isObjectRecord(value) &&
   isRouterTier(value.tier) &&
-  isPhase(value.phase) &&
   isThinkingLevel(value.thinking) &&
   isFiniteNumber(value.timestamp) &&
   ['profile', 'targetProvider', 'targetModelId', 'targetLabel'].every(
@@ -144,7 +141,6 @@ export const isRouterPersistedState = (
     (value.debugHistory === undefined ||
       (Array.isArray(value.debugHistory) &&
         value.debugHistory.every(isDecision))) &&
-    (value.lastPhase === undefined || isPhase(value.lastPhase)) &&
     (value.lastNonRouterModel === undefined ||
       isModelRef(value.lastNonRouterModel)) &&
     (value.accumulatedCost === undefined ||
@@ -303,7 +299,6 @@ export const snapshotDecision = (
 ): RoutingDecision => ({
   profile: decision.profile,
   tier: decision.tier,
-  phase: decision.phase,
   targetProvider: decision.targetProvider,
   targetModelId: decision.targetModelId,
   targetLabel: decision.targetLabel,
@@ -368,7 +363,6 @@ export const buildPersistedState = ({
     debugEnabled,
     widgetEnabled,
     debugHistory: debugHistory.map(snapshotDecision),
-    lastPhase: lastDecision?.phase,
     lastDecision: lastDecision ? snapshotDecision(lastDecision) : undefined,
     lastNonRouterModel,
     accumulatedCost,

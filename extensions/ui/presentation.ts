@@ -90,7 +90,7 @@ export const budgetLines = (snapshot: RouterUISnapshot): string[] => {
   return [
     'Soft generation budget · session',
     !budget
-      ? `Budget unset · recorded cost ${known ? '$' + cost.toFixed(4) : 'unknown'}`
+      ? `Budget unset · recorded cost ${known ? `$${cost.toFixed(4)}` : 'unknown'}`
       : !known
         ? `Recorded cost unknown / $${budget.toFixed(2)}`
         : `${textBar(cost / budget)} ${Math.round((cost / budget) * 100)}% · $${cost.toFixed(4)} / $${budget.toFixed(2)}`,

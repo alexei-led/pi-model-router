@@ -1,4 +1,5 @@
-import { normalizeAdvisorConfig, parseCanonicalModelRef } from '../config';
+import { normalizeAdvisorConfig } from '../config';
+import { parseCanonicalModelRef } from '../domain';
 import { availableRoutePairs, preservesRouteCoverage } from '../routing';
 import { snapshotDecision } from '../state';
 import type {
@@ -15,7 +16,7 @@ import type {
   RoutingDecision,
 } from '../types';
 import { ROUTER_TIERS } from '../types';
-import { validateRouterUIControls } from './inspector';
+import { validateRouterUIControls } from './controls';
 
 const thinkingFields = {
   high: 'thinkingHigh',
@@ -168,7 +169,7 @@ export const createRouterUIRuntime = (
       value.advisor !== state.currentConfig.advisor?.model &&
       !registry
         .getModelsOfType('classifier')
-        .some((model) => model.provider + '/' + model.id === value.advisor)
+        .some((model) => `${model.provider}/${model.id}` === value.advisor)
     )
       return false;
     if (value.baseline !== 'auto' && !config[value.baseline]) return false;
@@ -239,7 +240,7 @@ export const createRouterUIRuntime = (
         )
           .filter((model) => model.input.includes('text'))
           .map((model) => ({
-            model: model.provider + '/' + model.id,
+            model: `${model.provider}/${model.id}`,
             name: model.name,
           }))
           .sort((a, b) => a.model.localeCompare(b.model)) ?? [],

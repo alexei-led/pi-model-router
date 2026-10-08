@@ -6,8 +6,9 @@ import {
   type UserMessage,
 } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
-import { normalizeConfig, THINKING_LEVELS } from './config';
+import { normalizeConfig } from './config';
 import { extractTextFromContent, hasImageAttachment } from './context';
+import { THINKING_LEVELS } from './domain';
 import {
   availableRoutePairs,
   BASELINE_TIER_ORDER,
@@ -15,7 +16,6 @@ import {
   decisionForPair,
   effortAdjustments,
   fitContextRoutes,
-  phaseForTier,
   preservesRouteCoverage,
   primaryRoutePairs,
   resolveRoutePair,
@@ -74,15 +74,11 @@ describe('routing context helpers', () => {
 });
 
 describe('eligible baseline routing', () => {
-  it('uses the fixed medium, high, low, micro order independently of text', () => {
+  it('uses the fixed medium, high, low, micro order', () => {
     const profile = allTierProfile();
     const pairs = availableRoutePairs(profile, findFixtureModel, false);
     expect(BASELINE_TIER_ORDER).toEqual(['medium', 'high', 'low', 'micro']);
-    expect(
-      ['pwd', 'design a migration', 'да, сделай', '¿Puedes ayudar?', '!!!'].map(
-        () => selectBaselineRoute('p', profile, pairs).pair.tier,
-      ),
-    ).toEqual(['medium', 'medium', 'medium', 'medium', 'medium']);
+    expect(selectBaselineRoute('p', profile, pairs).pair.tier).toBe('medium');
   });
 
   it.each([
@@ -268,7 +264,6 @@ describe('route capability validation', () => {
     ).toBe('off');
   });
 
-  // Level maps copied from the live pi registry (2026-09-24).
   const astra = model('astra', {
     thinkingLevelMap: {
       off: null,
@@ -424,7 +419,7 @@ describe('route capability validation', () => {
     );
   });
 
-  it('accepts an unsupported override by clamping instead of dropping input coverage', () => {
+  it('keeps image coverage when an unsupported override clamps its effort to off', () => {
     const profile: RouterProfile = {
       medium: { model: 'test/text' },
       low: { model: 'test/image', thinking: 'off' },
@@ -434,9 +429,6 @@ describe('route capability validation', () => {
         input: id === 'image' ? ['image'] : ['text'],
         reasoning: id !== 'image',
       });
-    // 'low' has no allowed level but 'off' (reasoning:false), so overriding
-    // its tier to 'high' clamps back down to 'off' instead of dropping the
-    // route: image coverage survives the override.
     expect(preservesRouteCoverage(profile, findModel, { low: 'high' })).toBe(
       true,
     );
@@ -446,9 +438,6 @@ describe('route capability validation', () => {
   });
 
   it('empties coverage only when a declared reasoning:false excludes every level the live model allows', () => {
-    // The route declares reasoning:false (only 'off' is ever permitted), but
-    // the live model never exposes 'off' (an always-thinking model): no
-    // allowed level exists, independent of any override.
     const alwaysThinks = model('image', {
       input: ['image'],
       reasoning: true,
@@ -518,7 +507,7 @@ describe('route capability validation', () => {
     ]);
   });
 
-  it('parses normalized canonical refs directly and keeps fallback alias metadata', () => {
+  it('keeps the first deduplicated fallback after clamping to its declared effort', () => {
     const config = normalizeConfig({
       models: {
         primary: { model: 'test/model-a' },
@@ -537,9 +526,6 @@ describe('route capability validation', () => {
     }).config;
     const profile = required(config.profiles.p);
     const pairs = availableRoutePairs(profile, findFixtureModel, false);
-    // 'restricted' (declared thinkingLevels: ['high']) now clamps the tier's
-    // 'medium' request up to 'high' instead of being dropped, so it wins the
-    // per-model dedup ahead of 'backup' (declared ['medium']).
     expect(pairs).toEqual([
       { tier: 'medium', model: 'test/model-a', thinking: 'medium' },
       { tier: 'medium', model: 'test/fallback', thinking: 'high' },
@@ -553,16 +539,6 @@ describe('route capability validation', () => {
 });
 
 describe('routing decisions', () => {
-  it.each(ROUTER_TIERS)('maps %s to a stable phase', (tier) => {
-    expect(phaseForTier(tier)).toBe(
-      tier === 'high'
-        ? 'planning'
-        : tier === 'medium'
-          ? 'implementation'
-          : 'lightweight',
-    );
-  });
-
   it('constructs continuation and fallback decisions without prompt data', () => {
     expect(
       decisionForPair(

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  mergeConfig,
-  normalizeConfig,
-  resolveModelRef,
-  resolveProfileName,
-} from './config';
+import { normalizeConfig, resolveModelRef, resolveProfileName } from './config';
 import { buildPersistedState, isRouterPersistedState } from './state';
 import type { RouterConfig } from './types';
 
@@ -24,17 +19,6 @@ describe('configuration boundaries', () => {
       thinking: 'off',
     });
   });
-  it.each([null, [], 'wrong'])(
-    'ignores malformed profile entries %j while preserving valid config',
-    (value) => {
-      const override = {
-        profiles: { broken: value },
-      } as unknown as RouterConfig;
-      expect(
-        normalizeConfig(mergeConfig(base, override)).config.profiles,
-      ).toEqual(normalizeConfig(base).config.profiles);
-    },
-  );
   it('loads legacy keyword config with a fixed value-free deprecation warning', () => {
     const result = normalizeConfig({
       ...base,
@@ -56,21 +40,6 @@ describe('configuration boundaries', () => {
 });
 
 describe('persisted state boundary', () => {
-  const valid = { enabled: true, selectedProfile: 'balanced', timestamp: 1 };
-  it.each([
-    { accumulatedCost: -1 },
-    { accumulatedCost: 'broken' },
-    { accumulatedCost: Number.NaN },
-    { pinByProfile: { balanced: 'ultra' } },
-    { thinkingByProfile: { balanced: null } },
-    { thinkingByProfile: { balanced: { high: 'invalid' } } },
-    { debugHistory: [null] },
-    { lastDecision: { tier: 'high' } },
-    { lastNonRouterModel: 'invalid' },
-    { debugEnabled: 'yes' },
-  ])('rejects corrupted optional fields %j', (invalid) => {
-    expect(isRouterPersistedState({ ...valid, ...invalid })).toBe(false);
-  });
   it('snapshots nested maps independently of live state', () => {
     const thinking = { balanced: { high: 'high' as const } };
     const state = buildPersistedState({

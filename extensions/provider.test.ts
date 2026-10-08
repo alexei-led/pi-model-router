@@ -10,7 +10,8 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { normalizeConfig } from './config';
-import { registerRouterProvider, waitForRegistry } from './provider';
+import { registerRouterProvider } from './provider';
+import { waitForRegistry } from './provider-runtime';
 import {
   done,
   events,
@@ -206,7 +207,7 @@ describe('router provider', () => {
     expect(s.actions.persistState).toHaveBeenCalledOnce();
   });
 
-  it('records the decision, flagged as failed, when every fallback in the chain fails', async () => {
+  it('records failed fallback decisions without persisting remote error text', async () => {
     const s = setup();
     s.delegate.mockImplementation(() => failure());
     expect((await consume(s.stream())).result.stopReason).toBe('error');
@@ -214,8 +215,6 @@ describe('router provider', () => {
     expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
       expect.objectContaining({ tier: 'medium', isGenerationFailed: true }),
     );
-    // The thrown error's message (the delegate's remote text) must not leak
-    // into the persisted decision sink.
     const recorded = JSON.stringify(
       s.actions.recordDebugDecision.mock.calls[0],
     );
@@ -467,6 +466,77 @@ describe('router provider', () => {
     expect(received.map((e) => e.type)).toEqual(['done']);
   });
 
+  it('buffers a physical start event until content while preserving event order', async () => {
+    const s = setup();
+    const partial = message({
+      content: [],
+      model: 'primary',
+      stopReason: 'pending',
+    });
+    const response = message({ content: [{ type: 'text', text: 'answer' }] });
+    s.delegate.mockReturnValueOnce(
+      events(
+        { type: 'start', partial },
+        {
+          type: 'text_delta',
+          contentIndex: 0,
+          delta: 'answer',
+          partial: response,
+        },
+        { type: 'done', reason: 'stop', message: response },
+      ),
+    );
+    const { received, result } = await consume(s.stream());
+    expect(received.map((event) => event.type)).toEqual([
+      'start',
+      'text_delta',
+      'done',
+    ]);
+    expect(received[0]).toMatchObject({
+      type: 'start',
+      partial: { provider: 'test', model: 'primary' },
+    });
+    expect(result).toMatchObject({ provider: 'test', model: 'primary' });
+  });
+
+  it('keeps explicit fallback order and records the final physical model', async () => {
+    const s = setup();
+    s.state.currentConfig = normalizeConfig({
+      profiles: {
+        balanced: {
+          medium: {
+            model: 'test/primary',
+            fallbacks: ['test/small', 'test/fallback'],
+          },
+        },
+      },
+    }).config;
+    s.delegate
+      .mockReturnValueOnce(failure())
+      .mockReturnValueOnce(failure())
+      .mockReturnValueOnce(
+        events({
+          type: 'done',
+          reason: 'stop',
+          message: message({ model: 'fallback' }),
+        }),
+      );
+    const { result } = await consume(s.stream());
+    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+      'primary',
+      'small',
+      'fallback',
+    ]);
+    expect(result).toMatchObject({ provider: 'test', model: 'fallback' });
+    expect(s.state.lastDecision).toMatchObject({
+      targetProvider: 'test',
+      targetModelId: 'fallback',
+      targetLabel: 'test/fallback',
+      isFallback: true,
+      reasonCode: 'fallback',
+    });
+  });
+
   it('does not retry after output even if the iterator throws', async () => {
     const s = setup();
     let step = 0;
@@ -492,6 +562,55 @@ describe('router provider', () => {
     expect(result.content).toEqual(message().content);
     expect(received.filter((e) => e.type === 'text_delta')).toHaveLength(1);
     expect(s.delegate).toHaveBeenCalledOnce();
+  });
+
+  it('reports a terminal error after visible content as failed without retrying or persisting it', async () => {
+    const s = setup();
+    const remoteError = 'synthetic provider error details';
+    const partial = message({
+      content: [{ type: 'text', text: 'partial' }],
+      stopReason: 'pending',
+    });
+    s.delegate.mockReturnValueOnce(
+      events(
+        {
+          type: 'text_delta',
+          contentIndex: 0,
+          delta: 'partial',
+          partial,
+        },
+        {
+          type: 'error',
+          reason: 'error',
+          error: message({
+            content: [{ type: 'text', text: 'partial' }],
+            stopReason: 'error',
+            errorMessage: remoteError,
+          }),
+        },
+      ),
+    );
+    const observe = vi.fn<(event: RouterRequestObservation) => void>();
+    s.actions.beginRequest.mockReturnValue(observe);
+
+    const { received, result } = await consume(s.stream());
+
+    expect(s.delegate).toHaveBeenCalledOnce();
+    expect(result.stopReason).toBe('error');
+    expect(received.at(-1)).toMatchObject({
+      type: 'error',
+      reason: 'error',
+      error: { errorMessage: remoteError },
+    });
+    expect(observe).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stage: 'failed' }),
+    );
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
+    expect(s.actions.persistState).toHaveBeenCalledOnce();
+    expect(
+      JSON.stringify(s.actions.recordDebugDecision.mock.calls),
+    ).not.toContain(remoteError);
+    expect(JSON.stringify(s.state.lastDecision)).not.toContain(remoteError);
   });
 
   it('returns a terminal error when every stream ends without a terminal event', async () => {
@@ -599,8 +718,7 @@ describe('router provider', () => {
   });
 
   describe('context-window fit', () => {
-    // 'small' has a 1024-token window: 921 tokens at the 0.9 fill.
-    const fitSetup = () => {
+    const smallWindowSetup = () => {
       const s = setup();
       s.state.currentConfig = normalizeConfig({
         profiles: {
@@ -634,7 +752,7 @@ describe('router provider', () => {
         'primary',
       ],
     ])('%s', async (_name, context, target) => {
-      const s = fitSetup();
+      const s = smallWindowSetup();
       await consume(s.stream(context));
       expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe(target);
       expect(s.delegate.mock.calls.at(-1)?.[1].messages).toHaveLength(
@@ -643,7 +761,7 @@ describe('router provider', () => {
     });
 
     it('honors a pin to a small window and truncates instead', async () => {
-      const s = fitSetup();
+      const s = smallWindowSetup();
       s.state.pinnedTierByProfile.balanced = 'low';
       const context: Context = {
         messages: [
@@ -658,7 +776,7 @@ describe('router provider', () => {
     });
 
     it('offers the advisor only routes that fit', async () => {
-      const s = fitSetup();
+      const s = smallWindowSetup();
       enableAdvisors(s);
       await consume(s.stream(large()));
       expect(vi.mocked(s.registry.classify)).not.toHaveBeenCalled();
@@ -666,6 +784,61 @@ describe('router provider', () => {
         tier: 'high',
         bypassReason: 'single-candidate',
       });
+    });
+
+    it('revalidates classifier advice against the current context-window fit', async () => {
+      const s = smallWindowSetup();
+      enableAdvisors(s);
+      const context: Context = {
+        messages: [
+          { role: 'user', content: 'review earlier work', timestamp: 1 },
+          message(),
+          {
+            role: 'user',
+            content: 'continue with the current change',
+            timestamp: 2,
+          },
+        ],
+      };
+      let resolveClassification:
+        | ((response: ClassifierResponse) => void)
+        | undefined;
+      const classify = vi.fn<Classify>(
+        () =>
+          new Promise((resolve) => {
+            resolveClassification = resolve;
+          }),
+      );
+      s.registry.classify = classify;
+      const pending = consume(s.stream(context));
+      await vi.waitFor(() => expect(classify).toHaveBeenCalledOnce());
+      const call = classify.mock.calls[0];
+      if (!call) throw new Error('Classifier request did not start');
+      const candidateIds = Object.keys(
+        required(call[1].questions.route).criteria,
+      );
+      expect(candidateIds.some((id) => id.startsWith('high|'))).toBe(true);
+      expect(candidateIds.some((id) => id.startsWith('low|'))).toBe(true);
+      const primary = required(
+        s.models.find((target) => target.id === 'primary'),
+      );
+      primary.contextWindow = 1;
+      const resolve = resolveClassification;
+      if (!resolve) throw new Error('Classifier response resolver was not set');
+      resolve(classifierResponse(call[0], call[1], 'high'));
+
+      const { result } = await pending;
+      expect(result.stopReason).toBe('stop');
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'low',
+        targetLabel: 'test/small',
+        reasonCode: 'baseline',
+        advisor: 'classifier-fallback',
+      });
+      expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+        'small',
+      ]);
+      expect(s.delegate.mock.calls[0]?.[1].messages).toEqual(context.messages);
     });
   });
 
@@ -842,6 +1015,34 @@ const classifierConfig: AdvisorConfig = {
   maxStateTokens: 3000,
   maxRetries: 1,
 };
+type Classify = ExtensionContext['modelRegistry']['classify'];
+type ClassifierResponse = Awaited<ReturnType<Classify>>;
+const classifierResponse = (
+  target: Parameters<Classify>[0],
+  context: Parameters<Classify>[1],
+  tier: string,
+): ClassifierResponse => {
+  const criteria = required(context.questions.route).criteria;
+  const ids = Object.keys(criteria);
+  const choice = ids.find((id) => id.startsWith(`${tier}|`)) ?? '';
+  return {
+    api: target.api,
+    provider: target.provider,
+    model: target.id,
+    timestamp: Date.now(),
+    stopReason: 'stop',
+    answers: {
+      route: {
+        type: 'choice',
+        choice,
+        confidence: 0.99,
+        probabilities: Object.fromEntries(
+          ids.map((id) => [id, id === choice ? 1 : 0]),
+        ),
+      },
+    },
+  };
+};
 const enableAdvisors = (s: ReturnType<typeof setup>) => {
   s.state.currentConfig.advisor = { ...classifierConfig };
   required(s.state.currentConfig.profiles.balanced).advisor = {
@@ -886,7 +1087,7 @@ const configureChoice = (s: ReturnType<typeof setup>, tier: string) => {
       const q = required(context.questions.route);
       const ids = Object.keys(q.criteria);
       const choice =
-        ids.find((id) => id.startsWith(tier + '|')) ?? ids[0] ?? '';
+        ids.find((id) => id.startsWith(`${tier}|`)) ?? ids[0] ?? '';
       return {
         api: target.api,
         provider: target.provider,
@@ -909,6 +1110,50 @@ const configureChoice = (s: ReturnType<typeof setup>, tier: string) => {
 };
 
 describe('Pi classifier provider integration', () => {
+  it('routes varied prompt texts through the same local baseline without advice', async () => {
+    const s = setup();
+    s.models.push(model('tiny'));
+    s.state.currentConfig = normalizeConfig({
+      profiles: {
+        balanced: {
+          high: { model: 'test/primary' },
+          medium: { model: 'test/fallback' },
+          low: { model: 'test/small' },
+          micro: { model: 'test/tiny' },
+        },
+      },
+    }).config;
+    delete s.state.pinnedTierByProfile.balanced;
+    const classify = vi.fn<ExtensionContext['modelRegistry']['classify']>();
+    s.registry.classify = classify;
+    const prompts = [
+      'pwd',
+      'Design a migration plan.',
+      'да, сделай',
+      '¿Puedes ayudar?',
+      '!!!',
+      'Refactor the parser and add boundary tests.',
+    ];
+    for (const [index, prompt] of prompts.entries()) {
+      const { result } = await consume(
+        s.stream(userContext(prompt, index + 1)),
+      );
+      expect(result.stopReason).toBe('stop');
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'medium',
+        reasonCode: 'baseline',
+        advisor: 'none',
+      });
+    }
+    expect(s.state.pinnedTierByProfile.balanced).toBeUndefined();
+    expect(s.state.currentConfig.maxSessionBudget).toBeUndefined();
+    expect(s.state.currentConfig.advisor).toBeUndefined();
+    expect(classify).not.toHaveBeenCalled();
+    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual(
+      prompts.map(() => 'fallback'),
+    );
+  });
+
   it('routes with an explicitly approved Pi classifier and reuses advice on the turn', async () => {
     const s = setup();
     configureChoice(s, 'high');
@@ -1043,6 +1288,67 @@ describe('Pi classifier provider integration', () => {
     expect((await pending).result.stopReason).toBe('aborted');
     expect(s.delegate).not.toHaveBeenCalled();
   });
+  it('shares same-turn classification while one cancelled waiter leaves the other active', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    let resolveClassification:
+      | ((result: ClassifierResponse) => void)
+      | undefined;
+    let classifierSignal: AbortSignal | undefined;
+    const classify = vi.fn<Classify>(
+      (_target, _context, options) =>
+        new Promise((resolve) => {
+          resolveClassification = resolve;
+          classifierSignal = options?.signal;
+        }),
+    );
+    s.registry.classify = classify;
+    const context = userContext('same turn', 10);
+    const cancelled = new AbortController();
+    const active = new AbortController();
+    const first = consume(s.stream(context, cancelled.signal));
+    const second = consume(s.stream(context, active.signal));
+    await vi.waitFor(() => expect(classify).toHaveBeenCalledOnce());
+    cancelled.abort();
+    expect((await first).result.stopReason).toBe('aborted');
+    expect(classifierSignal?.aborted).toBe(false);
+    expect(s.delegate).not.toHaveBeenCalled();
+    const call = classify.mock.calls[0];
+    const resolve = resolveClassification;
+    if (!call || !resolve) throw new Error('Classifier request did not start');
+    resolve(classifierResponse(call[0], call[1], 'high'));
+    expect((await second).result.stopReason).toBe('stop');
+    expect(classify).toHaveBeenCalledOnce();
+    expect(s.delegate).toHaveBeenCalledOnce();
+  });
+
+  it('aborts the shared classifier transport when the final same-turn waiter leaves', async () => {
+    const s = setup();
+    enableAdvisors(s);
+    let classifierSignal: AbortSignal | undefined;
+    const classify = vi.fn<Classify>(
+      (_target, _context, options) =>
+        new Promise(() => {
+          classifierSignal = options?.signal;
+        }),
+    );
+    s.registry.classify = classify;
+    const context = userContext('same turn', 10);
+    const firstAbort = new AbortController();
+    const secondAbort = new AbortController();
+    const first = consume(s.stream(context, firstAbort.signal));
+    const second = consume(s.stream(context, secondAbort.signal));
+    await vi.waitFor(() => expect(classify).toHaveBeenCalledOnce());
+    firstAbort.abort();
+    expect((await first).result.stopReason).toBe('aborted');
+    expect(classifierSignal?.aborted).toBe(false);
+    secondAbort.abort();
+    expect((await second).result.stopReason).toBe('aborted');
+    expect(classifierSignal?.aborted).toBe(true);
+    expect(classify).toHaveBeenCalledOnce();
+    expect(s.delegate).not.toHaveBeenCalled();
+  });
+
   it('bypasses advice for a pin and a single available tier', async () => {
     const s = setup();
     enableAdvisors(s);

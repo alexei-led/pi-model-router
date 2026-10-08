@@ -14,14 +14,16 @@ This procedure is for maintainers. Use npm and the Node.js version selected by `
 ```sh
 npm ci --ignore-scripts
 npm run check
-npm test
+npm run test:coverage
+npm run check:unused
+npm run pack:dry
 npm audit
-npm pack --dry-run --json
 npm publish --dry-run --access public
 ```
 
-`npm run check` runs Biome and strict TypeScript checks. The publication dry run also runs checks and tests.
-Neither dry run establishes OIDC access or creates a release.
+`npm run check` runs Biome and strict TypeScript checks. Biome enforces directional imports, a production-only cognitive-complexity limit, and template-literal style. `npm run test:coverage` runs the full Vitest suite with V8 coverage for all production extension modules. Aggregate gates require 90% statements, 80% branches, 90% functions, and 90% lines. Per-file floors and higher choice/classifier/provider/routing/state branch floors are configured in `vitest.config.ts`. `npm run check:unused` runs Knip in production mode from the published `extensions/index.ts` entrypoint. Tests and fixtures are not part of that production graph. `npm run pack:dry` lists the archive contents for review.
+
+`prepublishOnly` runs these four quality gates. The CI workflow runs the same gates on Node.js 22.19.0 and 24.15.0. The publication dry run also invokes `prepublishOnly`, so it repeats the gates. Neither dry run establishes OIDC access or creates a release.
 
 5. Inspect the package contents.
 

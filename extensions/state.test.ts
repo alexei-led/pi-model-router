@@ -16,7 +16,6 @@ import type { GenerationDiagnostics, RoutingDecision } from './types';
 const decision: RoutingDecision = {
   profile: 'p',
   tier: 'medium',
-  phase: 'implementation',
   targetProvider: 'test',
   targetModelId: 'model',
   targetLabel: 'test/model',
@@ -58,8 +57,10 @@ describe('state.ts', () => {
     for (const invalid of [
       { accumulatedCost: -1 },
       { accumulatedCost: 'broken' },
+      { accumulatedCost: Number.NaN },
       { pinByProfile: { p: 'ultra' } },
       { thinkingByProfile: { p: null } },
+      { thinkingByProfile: { p: { high: 'invalid' } } },
       { debugHistory: [null] },
       { lastDecision: { tier: 'high' } },
       { lastNonRouterModel: 'invalid' },
@@ -336,7 +337,12 @@ describe('state.ts', () => {
       enabled: true,
       selectedProfile: 'p',
       timestamp: 1,
-      lastDecision: { ...decision, reasonCode: 'heuristic' },
+      lastPhase: 'planning',
+      lastDecision: {
+        ...decision,
+        phase: 'implementation',
+        reasonCode: 'heuristic',
+      },
     };
     expect(isRouterPersistedState(restored)).toBe(true);
     const saved = buildPersistedState({
@@ -352,6 +358,38 @@ describe('state.ts', () => {
       accumulatedCost: 0,
     });
     expect(saved.lastDecision?.reasonCode).toBe('legacy');
+  });
+
+  it('accepts historical phase metadata and omits it from new snapshots', () => {
+    const historicalDecision = {
+      ...decision,
+      phase: 'planning',
+    } as unknown as RoutingDecision;
+    const historical = {
+      enabled: true,
+      selectedProfile: 'p',
+      timestamp: 1,
+      lastPhase: 'implementation',
+      lastDecision: historicalDecision,
+      debugHistory: [historicalDecision],
+    };
+    expect(isRouterPersistedState(historical)).toBe(true);
+    expect(snapshotDecision(historicalDecision)).not.toHaveProperty('phase');
+    const saved = buildPersistedState({
+      routerEnabled: true,
+      selectedProfile: 'p',
+      pinnedTierByProfile: {},
+      thinkingByProfile: {},
+      debugEnabled: false,
+      widgetEnabled: false,
+      debugHistory: [historicalDecision],
+      lastDecision: historicalDecision,
+      lastNonRouterModel: undefined,
+      accumulatedCost: 0,
+    });
+    expect(saved).not.toHaveProperty('lastPhase');
+    expect(saved.lastDecision).not.toHaveProperty('phase');
+    expect(saved.debugHistory?.[0]).not.toHaveProperty('phase');
   });
 
   it('accepts only the fixed runtime reason codes', () => {

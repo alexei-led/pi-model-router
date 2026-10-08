@@ -6,7 +6,12 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["extensions/**", "*.json", "!package-lock.json"]
+    "includes": [
+      "extensions/**",
+      "*.json",
+      "vitest.config.ts",
+      "!package-lock.json"
+    ]
   },
   "formatter": {
     "indentStyle": "space",
@@ -22,6 +27,9 @@
     "enabled": true,
     "rules": {
       "preset": "recommended",
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "off"
+      },
       "nursery": {
         "noFloatingPromises": "error",
         "noMisusedPromises": "error",
@@ -36,10 +44,137 @@
       },
       "style": {
         "useImportType": "error",
-        "useNodejsImportProtocol": "error"
+        "useNodejsImportProtocol": "error",
+        "useTemplate": "error"
       }
     }
   },
+  "overrides": [
+    {
+      "includes": [
+        "extensions/**/*.ts",
+        "!extensions/**/*.test.ts",
+        "!extensions/test/**"
+      ],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": {
+              "level": "error",
+              "options": {
+                "maxAllowedComplexity": 68
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "extensions/state.ts",
+        "extensions/ui.ts",
+        "extensions/ui/**/*.ts",
+        "!extensions/ui/controls.ts",
+        "!extensions/ui/presentation.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "./provider": "Forbidden UI/state dependency.",
+                  "./provider-generation": "Forbidden UI/state dependency.",
+                  "./provider-request": "Forbidden UI/state dependency.",
+                  "./provider-runtime": "Forbidden UI/state dependency.",
+                  "./provider-turns": "Forbidden UI/state dependency.",
+                  "../provider": "Forbidden UI/state dependency.",
+                  "../provider-generation": "Forbidden UI/state dependency.",
+                  "../provider-request": "Forbidden UI/state dependency.",
+                  "../provider-runtime": "Forbidden UI/state dependency.",
+                  "../provider-turns": "Forbidden UI/state dependency.",
+                  "../../provider": "Forbidden UI/state dependency.",
+                  "../../provider-generation": "Forbidden UI/state dependency.",
+                  "../../provider-request": "Forbidden UI/state dependency.",
+                  "../../provider-runtime": "Forbidden UI/state dependency.",
+                  "../../provider-turns": "Forbidden UI/state dependency.",
+                  "./classifier": "Forbidden UI/state dependency.",
+                  "../classifier": "Forbidden UI/state dependency.",
+                  "../../classifier": "Forbidden UI/state dependency."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "extensions/ui/controls.ts",
+        "extensions/ui/presentation.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "./provider": "Forbidden pure-UI host dependency.",
+                  "./provider-generation": "Forbidden pure-UI host dependency.",
+                  "./provider-request": "Forbidden pure-UI host dependency.",
+                  "./provider-runtime": "Forbidden pure-UI host dependency.",
+                  "./provider-turns": "Forbidden pure-UI host dependency.",
+                  "../provider": "Forbidden pure-UI host dependency.",
+                  "../provider-generation": "Forbidden pure-UI host dependency.",
+                  "../provider-request": "Forbidden pure-UI host dependency.",
+                  "../provider-runtime": "Forbidden pure-UI host dependency.",
+                  "../provider-turns": "Forbidden pure-UI host dependency.",
+                  "../../provider": "Forbidden pure-UI host dependency.",
+                  "../../provider-generation": "Forbidden pure-UI host dependency.",
+                  "../../provider-request": "Forbidden pure-UI host dependency.",
+                  "../../provider-runtime": "Forbidden pure-UI host dependency.",
+                  "../../provider-turns": "Forbidden pure-UI host dependency.",
+                  "./classifier": "Forbidden pure-UI host dependency.",
+                  "../classifier": "Forbidden pure-UI host dependency.",
+                  "../../classifier": "Forbidden pure-UI host dependency.",
+                  "./inspector": "Forbidden pure-UI host dependency.",
+                  "../inspector": "Forbidden pure-UI host dependency.",
+                  "../../inspector": "Forbidden pure-UI host dependency.",
+                  "../ui": "Forbidden pure-UI host dependency.",
+                  "../../ui": "Forbidden pure-UI host dependency.",
+                  "@earendil-works/pi-agent-core": "Forbidden pure-UI host dependency.",
+                  "@earendil-works/pi-ai": "Forbidden pure-UI host dependency.",
+                  "@earendil-works/pi-coding-agent": "Forbidden pure-UI host dependency.",
+                  "@earendil-works/pi-tui": "Forbidden pure-UI host dependency."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["extensions/domain.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "./config": "Domain guards must not depend on configuration I/O.",
+                  "node:fs": "Domain guards must not depend on configuration I/O.",
+                  "node:path": "Domain guards must not depend on configuration I/O."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "assist": {
     "actions": {
       "source": {

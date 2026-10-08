@@ -4,12 +4,11 @@ import {
   getSupportedThinkingLevels,
   type Model,
 } from '@earendil-works/pi-ai';
-import { parseCanonicalModelRef, THINKING_LEVELS } from './config';
 import { CONTEXT_FILL } from './constants';
+import { parseCanonicalModelRef, THINKING_LEVELS } from './domain';
 import type {
   ModelDefinition,
   RoutePair,
-  RouterPhase,
   RouterProfile,
   RouterThinkingByTier,
   RouterTier,
@@ -25,12 +24,6 @@ export const BASELINE_TIER_ORDER: readonly RouterTier[] = [
   'low',
   'micro',
 ] as const;
-
-export const phaseForTier = (tier: RouterTier): RouterPhase => {
-  if (tier === 'high') return 'planning';
-  if (tier === 'medium') return 'implementation';
-  return 'lightweight';
-};
 
 export const resolveRoutePair = (
   profile: RouterProfile,
@@ -326,7 +319,6 @@ export const decisionForPair = (
   return {
     profile,
     tier: pair.tier,
-    phase: phaseForTier(pair.tier),
     targetProvider: provider,
     targetModelId: modelId,
     targetLabel: pair.model,

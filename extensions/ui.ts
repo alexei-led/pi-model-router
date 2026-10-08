@@ -389,7 +389,7 @@ export const updateRouterUIStrip = (
     render: (width: number): string[] => {
       const w = Math.max(1, width);
       const next = pending
-        ? `Next user turn: ${pending.pin !== snapshot.controls.pin ? 'pin ' + pending.pin : 'settings changed'} (pending) · ${reason}`
+        ? `Next user turn: ${pending.pin !== snapshot.controls.pin ? `pin ${pending.pin}` : 'settings changed'} (pending) · ${reason}`
         : `${reason} · ${snapshot.profile}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
       return [
         theme.fg(tone, truncateToWidth(identity(w), w)),

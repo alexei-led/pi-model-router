@@ -4,7 +4,7 @@ import {
   isRouterTier,
   isThinkingLevel,
   parseCanonicalModelRef,
-} from './config';
+} from './domain';
 import type {
   AdvisorConfig,
   CapabilityCriterion,
@@ -162,11 +162,11 @@ const isProbability = (value: unknown): value is number =>
 
 /** Ascending capability order for cumulative selection. */
 const TIERS_ASCENDING = [...ROUTER_TIERS].reverse();
-/** Half a unit of the two-decimal probabilities System One returns, per option. */
+/** Half of one probability rounding unit per option. */
 const ROUNDING_PER_OPTION = 0.005;
 const EPSILON = 1e-9;
 
-interface JevSelection {
+interface RouteSelection {
   candidate: RouteCandidate;
   basis: ClassifierSelectionBasis;
   routeProbability: number;
@@ -212,7 +212,7 @@ export const selectRoute = (
   candidates: readonly RouteCandidate[],
   baselineTier: RouterTier,
   config: Pick<AdvisorConfig, 'confidenceThreshold' | 'probabilityThreshold'>,
-): JevSelection | undefined => {
+): RouteSelection | undefined => {
   if (!parsed.candidate) return undefined;
   if (parsed.confidence >= config.confidenceThreshold)
     return {
@@ -277,7 +277,7 @@ export const parseAdvice = (
     )
   )
     return 'distribution-keys';
-  // System One reports two-decimal probabilities; an omitted option means zero mass.
+  // Probabilities may be rounded to two decimal places; omitted options have zero mass.
   const reported = new Map(entries as [string, number][]);
   const probabilities: Record<string, number> = {};
   for (const id of allowed) probabilities[id] = reported.get(id) ?? 0;

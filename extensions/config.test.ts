@@ -1,14 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  isObjectRecord,
-  isRouterTier,
-  isThinkingLevel,
   loadRouterConfig,
   mergeConfig,
   normalizeConfig,
   normalizeModelsMap,
   normalizeTierConfig,
-  parseCanonicalModelRef,
   parseConfigFile,
   profileNames,
   resolveContextWindow,
@@ -17,6 +13,7 @@ import {
   resolveProfileName,
   stripProjectAdvisorConfig,
 } from './config';
+import { isRouterTier } from './domain';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
 
 describe('status line configuration', () => {
@@ -187,33 +184,6 @@ describe('config.ts', () => {
     expect(config.profiles.valid?.medium?.resolvedMaxTokens).toBe(16384);
     expect(warnings.length).toBeGreaterThan(0);
   });
-  describe('type guards', () => {
-    it('isObjectRecord should validate objects', () => {
-      expect(isObjectRecord({})).toBe(true);
-      expect(isObjectRecord({ a: 1 })).toBe(true);
-      expect(isObjectRecord(null)).toBe(false);
-      expect(isObjectRecord('string')).toBe(false);
-      expect(isObjectRecord([])).toBe(false);
-    });
-
-    it('isThinkingLevel should validate thinking levels', () => {
-      expect(isThinkingLevel('off')).toBe(true);
-      expect(isThinkingLevel('high')).toBe(true);
-      expect(isThinkingLevel('xhigh')).toBe(true);
-      expect(isThinkingLevel('max')).toBe(true);
-      expect(isThinkingLevel('invalid')).toBe(false);
-      expect(isThinkingLevel(123)).toBe(false);
-    });
-
-    it('isRouterTier should validate tiers', () => {
-      expect(isRouterTier('high')).toBe(true);
-      expect(isRouterTier('medium')).toBe(true);
-      expect(isRouterTier('low')).toBe(true);
-      expect(isRouterTier('auto')).toBe(false);
-      expect(isRouterTier('invalid')).toBe(false);
-    });
-  });
-
   describe('parseConfigFile', () => {
     it('return empty config and no warnings for non-existent file', () => {
       const result = parseConfigFile('/path/does-not-exist');
@@ -300,29 +270,32 @@ describe('config.ts', () => {
       expect(merged.models?.claude?.model).toBe('anthropic/claude-3.5-sonnet');
     });
 
-    it('keeps the base profile and warns when an override profile value is invalid', () => {
-      const base: RouterConfig = {
-        profiles: {
-          balanced: {
-            high: { model: 'openai/gpt-4o' },
-            medium: { model: 'openai/gpt-4o-mini' },
+    it.each([null, [], 'not-an-object'])(
+      'keeps the base profile and warns when an override profile is invalid: %j',
+      (value) => {
+        const base: RouterConfig = {
+          profiles: {
+            balanced: {
+              high: { model: 'openai/gpt-4o' },
+              medium: { model: 'openai/gpt-4o-mini' },
+            },
           },
-        },
-      };
-      const override = {
-        profiles: { balanced: 'not-an-object' },
-      } as unknown as Partial<RouterConfig>;
+        };
+        const override = {
+          profiles: { balanced: value },
+        } as unknown as Partial<RouterConfig>;
 
-      const warnings: string[] = [];
-      const merged = mergeConfig(base, override, warnings);
+        const warnings: string[] = [];
+        const merged = mergeConfig(base, override, warnings);
 
-      expect(
-        (merged.profiles as Record<string, unknown> | undefined)?.balanced,
-      ).toEqual(base.profiles.balanced);
-      expect(warnings).toEqual([
-        'Ignored invalid override for profile "balanced": expected an object. Keeping base profile.',
-      ]);
-    });
+        expect(
+          (merged.profiles as Record<string, unknown> | undefined)?.balanced,
+        ).toEqual(base.profiles.balanced);
+        expect(warnings).toEqual([
+          'Ignored invalid override for profile "balanced": expected an object. Keeping base profile.',
+        ]);
+      },
+    );
 
     it('drops an invalid override profile with no base to keep, using neutral wording', () => {
       const warnings: string[] = [];
@@ -337,31 +310,6 @@ describe('config.ts', () => {
       expect(warnings).toEqual([
         'Ignored invalid override for profile "x": expected an object.',
       ]);
-    });
-  });
-
-  describe('parseCanonicalModelRef', () => {
-    it('parse correct references', () => {
-      const parsed = parseCanonicalModelRef('openai/gpt-4o');
-      expect(parsed).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
-    });
-
-    it('throw on missing slash', () => {
-      expect(() => parseCanonicalModelRef('gpt-4o')).toThrow(
-        'Invalid model reference',
-      );
-    });
-
-    it('throw on empty provider or modelId', () => {
-      expect(() => parseCanonicalModelRef('/gpt-4o')).toThrow(
-        'Invalid model reference',
-      );
-      expect(() => parseCanonicalModelRef('openai/')).toThrow(
-        'Invalid model reference',
-      );
-      expect(() => parseCanonicalModelRef('   /gpt-4o')).toThrow(
-        'Invalid model reference',
-      );
     });
   });
 
@@ -800,21 +748,24 @@ describe('classifier advisor config', () => {
   });
   it('rejects malformed references and bounds retries without echoing values', () => {
     for (const raw of ['router/private', 'missing-slash', 'secret\nvalue']) {
-      const warnings: string[] = [];
-      expect(
-        normalizeConfig({
-          advisor: { model: raw },
-          profiles: { p: { high: { model: 'test/high' } } },
-        }).config.advisor,
-      ).toBeUndefined();
-      expect(JSON.stringify(warnings)).not.toContain(raw);
-    }
-    expect(
-      normalizeConfig({
-        advisor: { model: 'provider/model', maxRetries: 5 },
+      const result = normalizeConfig({
+        advisor: { model: raw },
         profiles: { p: { high: { model: 'test/high' } } },
-      }).config.advisor,
-    ).toBeUndefined();
+      });
+      expect(result.config.advisor).toBeUndefined();
+      expect(result.warnings).toEqual([
+        'Ignored invalid advisor configuration. Configure a Pi classifier reference; credentials and endpoints belong to Pi.',
+      ]);
+      expect(JSON.stringify(result.warnings)).not.toContain(raw);
+    }
+    const result = normalizeConfig({
+      advisor: { model: 'provider/model', maxRetries: 5 },
+      profiles: { p: { high: { model: 'test/high' } } },
+    });
+    expect(result.config.advisor).toBeUndefined();
+    expect(result.warnings).toEqual([
+      'Ignored invalid advisor configuration. Configure a Pi classifier reference; credentials and endpoints belong to Pi.',
+    ]);
   });
   it('never accepts project model selection, tuning or privacy approvals', () => {
     const base = {
