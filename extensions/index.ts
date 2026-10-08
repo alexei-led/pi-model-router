@@ -5,12 +5,7 @@ import type {
   SessionStartEvent,
 } from '@earendil-works/pi-coding-agent';
 import { registerCommands } from './commands';
-import {
-  loadRouterConfig,
-  profileNames,
-  ROUTER_TIERS,
-  resolveProfileName,
-} from './config';
+import { loadRouterConfig, profileNames, resolveProfileName } from './config';
 import { MAX_DEBUG_HISTORY } from './constants';
 import { registerRouterProvider } from './provider';
 import { effortAdjustments, preservesRouteCoverage } from './routing';
@@ -27,6 +22,7 @@ import type {
   RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
+import { ROUTER_TIERS } from './types';
 import { openRouterInspector, updateRouterUIStrip } from './ui';
 import { createRouterUIRuntime } from './ui/runtime';
 
@@ -219,6 +215,11 @@ const routerExtension = (pi: ExtensionAPI) => {
 
   const actions = {
     persistState,
+    clearDebugHistory: (ctx: ExtensionContext) => {
+      debugHistory = [];
+      persistState();
+      actions.updateStatus(ctx);
+    },
     syncPiThinkingLevel: setThinkingLevelInternally,
     updateStatus: (ctx: ExtensionContext) => {
       updateRouterUIStrip(ctx, routerUI.adapters.getSnapshot(), {
@@ -229,7 +230,7 @@ const routerExtension = (pi: ExtensionAPI) => {
     },
     reloadConfig: (
       ctx?: ExtensionContext,
-      options?: { preserveDebug?: boolean },
+      options?: { preserveDebug?: boolean; deferStatus?: boolean },
     ) => {
       routerUI.reset();
       const loaded = loadRouterConfig(currentCwd);
@@ -241,7 +242,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       selectedProfile = resolveProfileName(currentConfig, selectedProfile);
       actions.registerRouterProvider();
       if (ctx) {
-        actions.updateStatus(ctx);
+        if (!options?.deferStatus) actions.updateStatus(ctx);
         if (lastConfigWarnings.length > 0) {
           ctx.ui.notify(
             `Router Configuration Warnings:\n${lastConfigWarnings.join('\n')}`,
@@ -260,7 +261,6 @@ const routerExtension = (pi: ExtensionAPI) => {
         return;
       }
 
-      // The active router model's profile no longer exists in config
       ctx.ui.notify(
         `Router profile "${ctx.model.id}" is no longer configured.`,
         'warning',

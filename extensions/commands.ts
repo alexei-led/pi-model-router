@@ -4,16 +4,15 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import type { AutocompleteItem } from '@earendil-works/pi-tui';
+import { profileNames } from './config';
+import { ROUTER_COMMANDS as VERBS } from './constants';
 import {
   isRouterPinValue,
   isThinkingLevel,
   parseCanonicalModelRef,
-  profileNames,
   ROUTER_PIN_VALUES,
-  ROUTER_TIERS,
   THINKING_LEVELS,
-} from './config';
-import { ROUTER_COMMANDS as VERBS } from './constants';
+} from './domain';
 import { effortAdjustments, preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
@@ -22,6 +21,7 @@ import type {
   RouterUIView,
   RoutingDecision,
 } from './types';
+import { ROUTER_TIERS } from './types';
 import {
   formatClassifierStats,
   formatDecision,
@@ -75,9 +75,10 @@ export const registerCommands = (
   actions: {
     persistState: () => void;
     updateStatus: (ctx: ExtensionContext) => void;
+    clearDebugHistory: (ctx: ExtensionContext) => void;
     reloadConfig: (
       ctx?: ExtensionContext,
-      options?: { preserveDebug?: boolean },
+      options?: { preserveDebug?: boolean; deferStatus?: boolean },
     ) => void;
     ensureValidActiveRouterProfile: (ctx: ExtensionContext) => Promise<void>;
     switchToRouterProfile: (
@@ -275,8 +276,7 @@ export const registerCommands = (
       return;
     }
     if (action === 'clear') {
-      state.debugHistory.length = 0;
-      actions.persistState();
+      actions.clearDebugHistory(ctx);
       ctx.ui.notify('Router log cleared', 'info');
       return;
     }
@@ -310,8 +310,10 @@ export const registerCommands = (
   };
 
   const handleReload = async (ctx: ExtensionContext) => {
-    actions.reloadConfig(ctx, { preserveDebug: true });
+    actions.reloadConfig(ctx, { preserveDebug: true, deferStatus: true });
     await actions.ensureValidActiveRouterProfile(ctx);
+    actions.persistState();
+    actions.updateStatus(ctx);
     ctx.ui.notify(
       `Router config reloaded. Profiles: ${profileNames(state.currentConfig).join(', ')}`,
       'info',

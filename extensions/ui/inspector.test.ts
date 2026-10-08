@@ -14,7 +14,6 @@ import {
   openRouterInspector,
   RouterUIDraft,
   RouterUIInspector,
-  validateRouterUIControls,
 } from './inspector';
 
 const controls: RouterUIControls = {
@@ -225,31 +224,6 @@ describe('ui/inspector.ts', () => {
     expect(f.draft.draft.pin).toBe('high');
     expect(f.adapters.applyControls).not.toHaveBeenCalled();
     f.panel.dispose();
-  });
-  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
-    'rejects invalid budget %s',
-    (budget) => {
-      expect(validateRouterUIControls({ ...controls, budget })).toContain(
-        'Budget',
-      );
-    },
-  );
-  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 2147483648])(
-    'rejects invalid timeout %s',
-    (timeout) => {
-      expect(validateRouterUIControls({ ...controls, timeout })).toContain(
-        'Timeout',
-      );
-    },
-  );
-  it('allows uncapped positive finite budgets and Node timer maximum', () => {
-    expect(
-      validateRouterUIControls({
-        ...controls,
-        budget: 1e100,
-        timeout: 2147483647,
-      }),
-    ).toBeUndefined();
   });
   it('apply queues next controls, not actual; discard resets and undo preserves outside changes', async () => {
     const f = fixture();

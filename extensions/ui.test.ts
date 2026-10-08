@@ -18,7 +18,6 @@ import {
 const decision: RoutingDecision = {
   profile: 'p',
   tier: 'medium',
-  phase: 'implementation',
   targetProvider: 'test',
   targetModelId: 'model',
   targetLabel: 'test/model',

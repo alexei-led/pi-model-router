@@ -12,6 +12,12 @@ import {
   MAX_CLASSIFIER_RETRIES,
   MAX_CLASSIFIER_STATE_TOKENS,
 } from './constants';
+import {
+  isObjectRecord,
+  isRouterTier,
+  isThinkingLevel,
+  parseCanonicalModelRef,
+} from './domain';
 import type {
   AdvisorConfig,
   ClassifierContextConfig,
@@ -24,38 +30,6 @@ import type {
   RouterProfile,
   RouterTier,
 } from './types';
-
-import { ROUTER_TIERS } from './types';
-
-export { ROUTER_TIERS } from './types';
-
-// Pi accepts this model capability at runtime, but older peer type releases omit it.
-export const MAX_THINKING_LEVEL: ThinkingLevel = 'max';
-
-export const THINKING_LEVELS: readonly ThinkingLevel[] = [
-  'off',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  MAX_THINKING_LEVEL,
-];
-export const ROUTER_PIN_VALUES = ['auto', ...ROUTER_TIERS] as const;
-export type RouterPinValue = (typeof ROUTER_PIN_VALUES)[number];
-export const isRouterPinValue = (value: unknown): value is RouterPinValue =>
-  ROUTER_PIN_VALUES.some((candidate) => candidate === value);
-
-export const isObjectRecord = (
-  value: unknown,
-): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-export const isThinkingLevel = (value: unknown): value is ThinkingLevel =>
-  typeof value === 'string' && THINKING_LEVELS.some((level) => level === value);
-
-export const isRouterTier = (value: unknown): value is RouterTier =>
-  ROUTER_TIERS.some((tier) => tier === value);
 
 export const parseConfigFile = (path: string): ParsedConfigFile => {
   if (!existsSync(path)) {
@@ -168,21 +142,6 @@ export const mergeConfig = (
   };
 };
 
-export const parseCanonicalModelRef = (
-  value: string,
-): { provider: string; modelId: string } => {
-  const slashIndex = value.indexOf('/');
-  if (slashIndex === -1) {
-    throw new Error('Invalid model reference. Expected "provider/model".');
-  }
-  const provider = value.slice(0, slashIndex).trim();
-  const modelId = value.slice(slashIndex + 1).trim();
-  if (!provider || !modelId) {
-    throw new Error('Invalid model reference. Expected "provider/model".');
-  }
-  return { provider, modelId };
-};
-
 /**
  * Validate and normalize the models map from config.
  */
@@ -287,7 +246,6 @@ export const normalizeTierConfig = (
     return undefined;
   }
 
-  // Try to resolve as an alias first
   const resolved = resolveModelRef(rawModel, models);
   const aliasDefinition = resolved.definition;
   let parsedModel: string;
@@ -321,7 +279,6 @@ export const normalizeTierConfig = (
     fallbacks = [];
     for (const f of value.fallbacks) {
       if (typeof f === 'string') {
-        // Resolve aliases in fallbacks too
         const resolvedFallback = resolveModelRef(f, models);
         try {
           const { provider, modelId } = parseCanonicalModelRef(
@@ -377,8 +334,7 @@ export const normalizeTierConfig = (
   const resolvedMaxTokens =
     tierMaxTokens ?? aliasDefinition?.maxTokens ?? DEFAULT_MAX_TOKENS;
 
-  // Declared thinkingLevels: tier config > alias
-  // Validate tier-level thinkingLevels array
+  // Tier declarations take precedence after invalid levels are removed.
   let tierThinkingLevels: ThinkingLevel[] | undefined;
   if (Array.isArray(value.thinkingLevels)) {
     tierThinkingLevels = value.thinkingLevels.filter((l): l is ThinkingLevel =>
@@ -420,7 +376,7 @@ export const normalizeClassifierRef = (value: unknown): string | undefined => {
   try {
     const { provider, modelId } = parseCanonicalModelRef(value.trim());
     if (provider === 'router') return undefined;
-    return provider + '/' + modelId;
+    return `${provider}/${modelId}`;
   } catch {
     return undefined;
   }
@@ -743,23 +699,21 @@ export const resolveProfileName = (
 export const resolveContextWindow = (
   tier: RouterTier,
   profile: RouterProfile,
-  modelRegistry: ExtensionContext['modelRegistry'] | undefined,
+  modelRegistry: Pick<ExtensionContext['modelRegistry'], 'find'> | undefined,
 ): number => {
   const tierConfig = profile[tier];
   if (!tierConfig) return DEFAULT_CONTEXT_WINDOW;
 
-  // 1. API value (highest priority)
   if (modelRegistry) {
     try {
       const { provider, modelId } = parseCanonicalModelRef(tierConfig.model);
       const registryModel = modelRegistry.find(provider, modelId);
       if (registryModel?.contextWindow) return registryModel.contextWindow;
     } catch {
-      /* ignore */
+      // Invalid refs cannot resolve live capabilities; retain normalized metadata.
     }
   }
 
-  // 2-4. Pre-resolved during config normalization (tier > alias > hardcoded)
   return tierConfig.resolvedContextWindow ?? DEFAULT_CONTEXT_WINDOW;
 };
 
@@ -772,22 +726,20 @@ export const resolveContextWindow = (
 export const resolveMaxTokens = (
   tier: RouterTier,
   profile: RouterProfile,
-  modelRegistry: ExtensionContext['modelRegistry'] | undefined,
+  modelRegistry: Pick<ExtensionContext['modelRegistry'], 'find'> | undefined,
 ): number => {
   const tierConfig = profile[tier];
   if (!tierConfig) return DEFAULT_MAX_TOKENS;
 
-  // 1. API value (highest priority)
   if (modelRegistry) {
     try {
       const { provider, modelId } = parseCanonicalModelRef(tierConfig.model);
       const registryModel = modelRegistry.find(provider, modelId);
       if (registryModel?.maxTokens) return registryModel.maxTokens;
     } catch {
-      /* ignore */
+      // Invalid refs cannot resolve live capabilities; retain normalized metadata.
     }
   }
 
-  // 2-4. Pre-resolved during config normalization (tier > alias > hardcoded)
   return tierConfig.resolvedMaxTokens ?? DEFAULT_MAX_TOKENS;
 };

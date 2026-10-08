@@ -18,6 +18,7 @@ import * as ui from './ui';
 
 const stateMocks = vi.hoisted(() => ({
   advisors: {} as Pick<RawRouterConfig, 'advisor'>,
+  removeBalancedProfile: false,
   loadLastRouterProfile: vi.fn(),
   saveLastRouterProfile: vi.fn(),
 }));
@@ -36,12 +37,16 @@ vi.mock('./config', async (importOriginal) => {
       return configModule.normalizeConfig({
         ...stateMocks.advisors,
         profiles: {
-          balanced: {
-            advisor: { models: ['typesafe/jev-latest'] },
-            high: { model: 'openai/gpt-4o' },
-            medium: { model: 'openai/gpt-4o-mini' },
-            micro: { model: 'openai/tiny', thinking: 'off' },
-          },
+          ...(stateMocks.removeBalancedProfile
+            ? {}
+            : {
+                balanced: {
+                  advisor: { models: ['typesafe/jev-latest'] },
+                  high: { model: 'openai/gpt-4o' },
+                  medium: { model: 'openai/gpt-4o-mini' },
+                  micro: { model: 'openai/tiny', thinking: 'off' },
+                },
+              }),
           alternate: {
             high: { model: 'anthropic/claude-opus-4' },
             medium: { model: 'anthropic/claude-sonnet-4' },
@@ -84,6 +89,7 @@ describe('index.ts (orchestrator)', () => {
   beforeEach(() => {
     eventListeners = {};
     stateMocks.advisors = {};
+    stateMocks.removeBalancedProfile = false;
     stateMocks.loadLastRouterProfile.mockReset();
     stateMocks.loadLastRouterProfile.mockReturnValue(undefined);
     stateMocks.saveLastRouterProfile.mockReset();
@@ -177,9 +183,7 @@ describe('index.ts (orchestrator)', () => {
         }),
       );
       if (!stream) throw new Error('Missing router stream');
-      for await (const _event of stream) {
-        /* Drain generation. */
-      }
+      for await (const event of stream) expect(event).toBeDefined();
       expect((await stream.result()).stopReason).toBe('stop');
     };
     await send(1);
@@ -196,15 +200,68 @@ describe('index.ts (orchestrator)', () => {
     expect(mockPi.appendEntry.mock.calls.at(-1)?.[1].debugHistory).toEqual(
       before.debugHistory,
     );
-    await command.handler(
-      'log clear',
-      ctx as unknown as ExtensionCommandContext,
-    );
+    const status = vi.spyOn(ui, 'updateRouterUIStrip');
+    try {
+      await command.handler(
+        'log clear',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(status).toHaveBeenCalledOnce();
+      expect(status.mock.calls.at(-1)?.[1].history).toEqual([]);
+    } finally {
+      status.mockRestore();
+    }
     expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
       debugEnabled: false,
       debugHistory: [],
       lastDecision: expect.any(Object),
     });
+    ctx.mode = 'rpc';
+    await command.handler('usage', ctx as unknown as ExtensionCommandContext);
+    expect(ctx.ui.notify.mock.calls.at(-1)?.[0]).toContain(
+      'Retained active-branch history: 0 decisions',
+    );
+    expect(ctx.ui.notify.mock.calls.at(-1)?.[0]).toContain(
+      'No retained decisions. /router log on',
+    );
+    expect(ctx.ui.notify.mock.calls.at(-1)?.[0]).not.toContain(
+      'Known generation cost: $0.5000',
+    );
+  });
+
+  it('persists and publishes the final off state when reload removes the active profile', async () => {
+    const status = vi.spyOn(ui, 'updateRouterUIStrip');
+    try {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'new' }, ctx);
+      const command = mockPi.registerCommand.mock.calls.find(
+        ([name]) => name === 'router',
+      )?.[1];
+      if (!command) throw new Error('Missing router command');
+      stateMocks.removeBalancedProfile = true;
+      status.mockClear();
+      mockPi.appendEntry.mockClear();
+      await command.handler(
+        'reload',
+        ctx as unknown as ExtensionCommandContext,
+      );
+      expect(mockPi.appendEntry).toHaveBeenLastCalledWith(
+        'router-state',
+        expect.objectContaining({ enabled: false, selectedProfile: '' }),
+      );
+      expect(status).toHaveBeenCalledTimes(1);
+      expect(status.mock.calls.at(-1)?.[1]).toMatchObject({
+        profile: 'none',
+        lifecycle: 'off',
+      });
+      expect(mockPi.appendEntry.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        status.mock.invocationCallOrder.at(-1) ?? 0,
+      );
+    } finally {
+      status.mockRestore();
+    }
   });
 
   it('persists and restores the newest identical zero-cost decisions after history fills', async () => {
@@ -254,9 +311,7 @@ describe('index.ts (orchestrator)', () => {
           }),
         );
         if (!stream) throw new Error('Missing router stream');
-        for await (const _event of stream) {
-          /* Drain generation. */
-        }
+        for await (const event of stream) expect(event).toBeDefined();
         expect((await stream.result()).stopReason).toBe('stop');
       }
       const snapshot = mockPi.appendEntry.mock.calls.at(-1)?.[1];
@@ -691,9 +746,12 @@ describe('index.ts (orchestrator)', () => {
               }),
             );
             if (!stream) throw new Error('Missing router stream');
-            for await (const _event of stream) {
-              /* Drain the provider. */
-            }
+            for await (const event of stream) expect(event).toBeDefined();
+            expect(await stream.result()).toMatchObject({ stopReason: 'stop' });
+            const persistedDecisions = mockPi.appendEntry.mock.calls.map(
+              ([, state]) => state.lastDecision?.tier,
+            );
+            expect(persistedDecisions.at(-1)).toBe(tier);
             for (const event of pending.splice(0))
               for (const handler of handlersFor('thinking_level_select'))
                 await handler(event, ctx);
@@ -725,12 +783,10 @@ describe('index.ts (orchestrator)', () => {
       },
     );
     it.each(['max', 'minimal'])(
-      'rejects an %s override atomically when the profile has no eligible route, restoring Pi display',
+      'rejects an %s override when the router exists but all backing models are unavailable',
       async (level) => {
         routerExtension(mockPi);
         const ctx = buildMockCtx();
-        // Router pseudo-model resolves (session_start needs it to stay enabled);
-        // every backing model is missing, so no tier has a live route at all.
         ctx.modelRegistry.find.mockImplementation((provider, id) =>
           provider === 'router' ? model(id, { provider }) : undefined,
         );
@@ -786,7 +842,7 @@ describe('index.ts (orchestrator)', () => {
     );
 
     it.each(['thinking', 'image'] as const)(
-      'preserves configured %s coverage by clamping an unsupported thinking override',
+      'preserves configured %s coverage when the override clamps to a supported level',
       async (capability) => {
         routerExtension(mockPi);
         const ctx = buildMockCtx();
@@ -805,9 +861,6 @@ describe('index.ts (orchestrator)', () => {
         mockPi.appendEntry.mockClear();
         for (const handler of handlersFor('thinking_level_select'))
           handler({ level: 'low', previousLevel: 'medium' }, ctx);
-        // 'low' is unsupported everywhere but clamps up to 'medium', so every
-        // tier (and both text/image inputs) keeps a route instead of being
-        // dropped: the override is accepted, not rejected.
         expect(mockPi.appendEntry).toHaveBeenCalledWith(
           'router-state',
           expect.objectContaining({

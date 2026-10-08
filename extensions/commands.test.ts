@@ -1,6 +1,7 @@
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
+  ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { registerCommands } from './commands';
@@ -62,7 +63,6 @@ const buildMockCtx = () => ({
 const decision: RoutingDecision = {
   profile: 'balanced',
   tier: 'medium',
-  phase: 'implementation',
   targetProvider: 'openai',
   targetModelId: 'gpt-4o-mini',
   targetLabel: 'openai/gpt-4o-mini',
@@ -102,6 +102,11 @@ const setup = (mutate?: (state: MutableCommandState) => void) => {
   const actions = {
     persistState: vi.fn(),
     updateStatus: vi.fn(),
+    clearDebugHistory: vi.fn((ctx: ExtensionContext) => {
+      state.debugHistory = [];
+      actions.persistState();
+      actions.updateStatus(ctx);
+    }),
     reloadConfig: vi.fn(),
     ensureValidActiveRouterProfile: vi.fn(),
     switchToRouterProfile: vi.fn().mockResolvedValue(true),
@@ -148,7 +153,7 @@ describe('unified Router commands', () => {
         }).config;
       });
       expect(s.state.currentConfig.profiles[name]).toBeDefined();
-      await s.run('profile ' + name);
+      await s.run(`profile ${name}`);
       expect(s.actions.switchToRouterProfile).toHaveBeenCalledWith(name, s.ctx);
     },
   );
@@ -424,9 +429,6 @@ describe('/router thinking', () => {
       const { run, state, actions, ctx, lastNotice } = setup((s) => {
         s.thinkingByProfile.balanced = { high: 'high' };
       });
-      // No model resolves at all, so every tier is ineligible regardless of
-      // the requested level (clamping only saves a route that has a live
-      // model to clamp against).
       ctx.modelRegistry.find.mockReturnValue(undefined);
       await run(`thinking ${level}`);
       expect(state.thinkingByProfile.balanced).toEqual({ high: 'high' });
@@ -518,6 +520,8 @@ describe('/router log', () => {
     await run('log off');
     expect(state.debugEnabled).toBe(false);
     expect(actions.persistState).toHaveBeenCalledTimes(3);
+    expect(actions.clearDebugHistory).toHaveBeenCalledWith(expect.any(Object));
+    expect(actions.updateStatus).toHaveBeenCalledOnce();
   });
 
   it.each(['log show', 'log stats', 'log toggle', 'log on off'])(
@@ -550,8 +554,11 @@ describe('/router widget and reload', () => {
     await run('reload');
     expect(actions.reloadConfig).toHaveBeenCalledWith(ctx, {
       preserveDebug: true,
+      deferStatus: true,
     });
     expect(actions.ensureValidActiveRouterProfile).toHaveBeenCalledWith(ctx);
+    expect(actions.persistState).toHaveBeenCalledOnce();
+    expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     expect(lastNotice()[0]).toContain('Profiles: balanced, cheap');
   });
 });

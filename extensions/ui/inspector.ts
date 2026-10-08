@@ -16,6 +16,7 @@ import type {
   RouterUIView,
 } from '../types';
 import { ROUTER_TIERS } from '../types';
+import { validateRouterUIControls } from './controls';
 import {
   advisorName,
   budgetLines,
@@ -67,23 +68,6 @@ const changes = (
         }) as RouterUIControlChange,
     );
 
-export const validateRouterUIControls = (
-  controls: Readonly<RouterUIControls>,
-): string | undefined => {
-  if (
-    controls.budget !== undefined &&
-    (!Number.isFinite(controls.budget) || controls.budget <= 0)
-  )
-    return 'Budget must be positive and finite.';
-  if (
-    !Number.isFinite(controls.timeout) ||
-    controls.timeout <= 0 ||
-    controls.timeout > 2147483647
-  )
-    return 'Timeout must be positive, finite and at most 2147483647 ms.';
-  return undefined;
-};
-
 export const formatRouterUIUsage = (
   history: readonly RouterUIHistoryEntry[],
 ): string[] => {
@@ -128,7 +112,7 @@ export const formatRouterUIUsage = (
     '',
     `Unique advice requests: ${samples.length}`,
     `HTTP attempts: ${attempts.length ? attempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${attempts.length}/${samples.length}`,
-    `Advice accepted: ${samples.length ? samples.filter((entry) => entry.outcome === 'selected').length + '/' + samples.length : 'unknown'}`,
+    `Advice accepted: ${samples.length ? `${samples.filter((entry) => entry.outcome === 'selected').length}/${samples.length}` : 'unknown'}`,
     `Timeouts: ${samples.filter((entry) => entry.outcome === 'deadline').length} · abstained: ${samples.filter((entry) => entry.outcome === 'uncertain').length}`,
     `Median advisory latency: ${median === undefined ? 'unknown' : `${Math.round(median)} ms`} · samples ${latencies.length}/${samples.length}`,
     `Route reuses: ${retained.filter((entry) => entry.reuse !== undefined).length} (not new requests)`,
@@ -166,7 +150,7 @@ export const formatRouterUISnapshot = (
             ),
             'Classifier models: ' +
               snapshot.classifiers.map((model) => model.model).join(', '),
-            'Advisor enabled: ' + snapshot.privacy.advisorEnabled,
+            `Advisor enabled: ${snapshot.privacy.advisorEnabled}`,
             'Approved models: ' +
               (snapshot.privacy.approvedModels.join(', ') || 'none'),
             'Credentials and consent are read-only. Selecting an advisor does not grant approval.',
@@ -540,7 +524,7 @@ export class RouterUIInspector implements Component {
             ),
             '',
             heading('Advisor authorization · read-only'),
-            'Advisor enabled: ' + s.privacy.advisorEnabled,
+            `Advisor enabled: ${s.privacy.advisorEnabled}`,
             'Selected model approved: ' +
               Boolean(
                 this.editor.draft.advisor &&

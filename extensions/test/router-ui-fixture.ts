@@ -10,7 +10,6 @@ import {
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 
-/** Deterministic local provider for actual-host acceptance; excluded from npm package. */
 export default (pi: ExtensionAPI) => {
   let scenario = 'baseline';
   pi.registerCommand('router-demo', {

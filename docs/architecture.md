@@ -66,9 +66,8 @@ flowchart TD
     class Baseline local
 ```
 
-A valid continuation reuses its actual route. An invalid continuation selects a compatible local route without advice:
-the model that issued the tool calls, in its recorded tier, when that route is still eligible; otherwise the baseline.
-A pin or budget decision still takes priority. A mid-loop switch would reread the whole context uncached.
+A valid continuation reuses its route. For an invalid continuation, the router chooses a local route without advice. It first tries the model that issued the tool calls in its recorded tier. It uses the baseline if that route is no longer eligible.
+A pin or budget decision still takes priority. A mid-loop switch rereads the full context without the turn cache.
 Pins, budget policy, and only one eligible candidate also bypass advisors.
 The budget is a soft generation-cost policy, not a billing cap.
 
@@ -173,34 +172,42 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 
 | Module | Responsibility |
 | --- | --- |
-| `index.ts` | Wire Pi lifecycle events and runtime state. |
+| `index.ts` | Wire Pi lifecycle hooks, extension state, branch restoration, commands, provider, and UI. |
 | `config.ts` | Load, merge, validate, and normalize configuration. |
-| `provider.ts` | Own route flow, advisor deadlines, continuation reuse, and delegation. |
-| `routing.ts` | Apply baseline, pin, budget, input, and effort policy. |
-| `context.ts` | Select bounded advisor text and extract generation input. |
-| `classifier.ts` | Build bounded typed requests, call Pi’s classifier registry, enforce deadlines and validate advice. |
-| `choice.ts` | Provider-neutral rubric, candidate identity and strict response validation. |
+| `domain.ts` | Parse canonical model references and validate pure tier, effort, and pin values; no config I/O. |
+| `routing.ts` | Apply eligible baseline, pin, budget, input, context-fit, and effort policy. |
+| `provider.ts` | Register logical profile models from live capabilities, create the provider-scoped turn cache, and adapt Pi's stream API. |
+| `provider-request.ts` | Build turn identity, validate continuation reuse, select an eligible route, and coordinate classifier advice. |
+| `provider-turns.ts` | Keep bounded continuation/advice caches and reference-count shared classifier flights for one provider registration. |
+| `provider-generation.ts` | Revalidate physical targets, run configured generation fallbacks before visible content, account for attempts, and forward events. |
+| `provider-runtime.ts` | Wait for the model registry and bridge request preparation/generation to Pi streams, persistence, and status updates. |
+| `context.ts` | Select bounded classifier text and extract generation input. |
+| `classifier.ts` | Build typed bounded requests, call Pi's classifier registry, enforce deadlines, and validate advice. |
+| `choice.ts` | Define the provider-neutral rubric, candidate identity, and strict response validation. |
 | `economics.ts` | Produce generation metrics and hypothetical cost comparisons. |
-| `state.ts` | Validate and copy branch-safe snapshots. |
-| `commands.ts`, `ui.ts`, private `ui/` | Operator controls, sanitized presentation runtime and native inspector; no advisor calls or credential IO. |
+| `state.ts` | Validate, copy, and persist allowlisted branch-safe snapshots. |
+| `commands.ts` | Register router commands and completions. |
+| `ui.ts` | Format and publish the route strip and expose the native inspector entrypoint. |
+| `ui/runtime.ts` | Own transient snapshots, queued control transactions, observations, and capability revalidation. |
+| `ui/controls.ts` | Validate control edits without terminal dependencies. |
+| `ui/presentation.ts` | Format sanitized snapshots and fixed local reasons without host or terminal dependencies. |
+| `ui/inspector.ts` | Render and operate the native Pi terminal inspector. |
 | `types.ts` | Define shared contracts. |
 
-`provider.ts` calls policy and advisor modules. Advisors do not own provider state or UI behavior.
-State and UI do not call advisors. Generation and all structured classification use Pi's registry rather than a parallel authentication layer.
+Request preparation applies routing policy and uses provider-scoped coordination for classifier advice. Generation validates and delegates each physical target through Pi. State and UI do not import provider or classifier transport. `ui/controls.ts` and `ui/presentation.ts` do not import the terminal inspector, TUI, or Pi transport APIs. `domain.ts` has no configuration I/O. Structured classification and generation both use Pi's registry, not a parallel authentication layer.
 
 The Signal Panel reads a sanitized presentation snapshot through one `/router`
-command family. `ui/presentation.ts` formats fixed local reasons and bounded bars;
-it makes no advisor calls. The widget and fallback footer status are mutually
-exclusive; the host footer stays intact. Now, Usage and Settings share one draft.
+command family. `ui/presentation.ts` formats fixed local reasons and bounded bars.
+It makes no advisor calls. The widget and fallback footer status are mutually
+exclusive. The host footer stays intact. Now, Usage and Settings share one draft.
 Recorded session cost is projected separately from retained-window history.
 Provider observations distinguish
 selected advice from attempted/actual generation and cannot affect routing or retries.
 A request epoch rejects stale UI observations after a newer request or session reset.
 Pending session controls use field-level compare-and-set, activate before the next user run,
 and are revalidated against current capabilities. They never enable privacy settings.
-The inspector's transient state is cleared on reload/session replacement/shutdown;
-activated pins and effort retain the existing branch persistence.
+The inspector's transient state is cleared on reload, session replacement, and shutdown.
+Activated pins and effort retain the existing branch persistence.
 Usage is a projection of the profile's retained debug history, not a new accounting ledger.
 
-Strict TypeScript, Biome import-cycle checks, and behavior tests protect these boundaries.
-Integration tests use Pi 1.1.0 types, real host startup and in-memory providers. Classifier transport tests use synthetic fixtures, not live credentials.
+Strict TypeScript, Biome cycle and directional-import rules, a production-only complexity ratchet, and per-module V8 coverage gates protect these boundaries. Behavior tests use Pi 1.1.0 types, real host startup, and in-memory providers. Classifier transport tests use synthetic fixtures. They do not use live credentials.

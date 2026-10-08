@@ -9,9 +9,7 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 // Descending routing complexity; all tier iteration and ranking derives here.
 export const ROUTER_TIERS = ['high', 'medium', 'low', 'micro'] as const;
 export type RouterTier = (typeof ROUTER_TIERS)[number];
-export type ClassifierTier = RouterTier;
 export type RouterPin = RouterTier | 'auto';
-export type RouterPhase = 'planning' | 'implementation' | 'lightweight';
 export type RouterPinByProfile = Partial<Record<string, RouterTier>>;
 export type RouterThinkingByTier = Partial<Record<RouterTier, ThinkingLevel>>;
 export type RouterThinkingByProfile = Record<string, RouterThinkingByTier>;
@@ -206,21 +204,6 @@ export interface ClassifierResult {
   diagnostics: ClassifierDiagnostics;
 }
 
-/** Runtime-only shared request; never persisted. */
-export interface ClassifierFlight {
-  config: AdvisorConfig;
-  promise: Promise<ClassifierResult>;
-  controller: AbortController;
-  waiters: number;
-}
-
-/** Runtime-only validated decision cache. */
-export interface AdvisedTurnRecord {
-  policy: string;
-  config: RouterConfig;
-  decision: RoutingDecision;
-}
-
 /** Only allowlisted local identity and numeric diagnostics cross the adapter boundary. */
 export interface ClassifierAdvice {
   candidateId: string;
@@ -296,7 +279,6 @@ export interface GenerationDiagnostics {
 export interface RoutingDecision {
   profile: string;
   tier: RouterTier;
-  phase: RouterPhase;
   targetProvider: string;
   targetModelId: string;
   targetLabel: string;
@@ -344,7 +326,6 @@ export interface RouterPersistedState {
   debugEnabled?: boolean | undefined;
   widgetEnabled?: boolean | undefined;
   debugHistory?: RoutingDecision[] | undefined;
-  lastPhase?: RouterPhase | undefined;
   lastDecision?: RoutingDecision | undefined;
   lastNonRouterModel?: string | undefined;
   accumulatedCost?: number | undefined;

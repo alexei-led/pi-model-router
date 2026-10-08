@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.1] - 2026-10-08
+
+### Fixed
+
+- Refresh retained UI history after `/router log clear`, and publish the final off state after a reload removes the active profile.
+- Revalidate classifier advice against the current context-window fit. Report terminal generation errors after visible output as failures without retrying or replacing the error.
+
+### Changed
+
+- Split provider request, turn-cache, generation, and runtime responsibilities while preserving Pi-owned authentication and transport, routing policy, cancellation, continuations, and fallback behavior.
+- Add regression coverage and CI gates for V8 coverage, unused production code, import boundaries, and complexity.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.12.0...v0.12.1)
+
 ## [0.12.0] - 2026-10-08
 
 Require Pi 1.1.0 and route through any Pi-registered classifier.
