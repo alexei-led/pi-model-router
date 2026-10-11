@@ -1,4 +1,5 @@
 .pi/
+.ralphex/
 .antigravitycli/
 node_modules
 /coverage/
