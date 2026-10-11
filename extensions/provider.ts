@@ -32,8 +32,12 @@ const supportsReasoning = (
 ): boolean => {
   if (!modelRegistry) return false;
 
-  for (const tier of ROUTER_TIERS) {
-    const tierConfig = profile[tier];
+  for (const tierConfig of [
+    profile,
+    ...Object.values(profile.activities ?? {}),
+  ].flatMap((cell) =>
+    ROUTER_TIERS.flatMap((tier) => (cell[tier] ? [cell[tier]] : [])),
+  )) {
     if (!tierConfig) continue;
     try {
       const { provider, modelId } = parseCanonicalModelRef(tierConfig.model);
@@ -49,6 +53,8 @@ export const registerRouterProvider = (
   pi: ExtensionAPI,
   state: {
     lastRegisteredModels: string;
+    readonly requestEpoch?: number;
+    readonly ownerSignal?: AbortSignal;
     readonly currentConfig: RouterConfig;
     readonly currentModelRegistry:
       | ExtensionContext['modelRegistry']
@@ -79,32 +85,43 @@ export const registerRouterProvider = (
 
     let maxContextWindow = 0;
     let maxOutputTokens = 0;
-    for (const tier of ROUTER_TIERS) {
-      if (!profile[tier]) continue;
-      const contextWindow = resolveContextWindow(
-        tier,
-        profile,
-        state.currentModelRegistry,
-      );
-      const maxTokens = resolveMaxTokens(
-        tier,
-        profile,
-        state.currentModelRegistry,
-      );
-      if (contextWindow > maxContextWindow) maxContextWindow = contextWindow;
-      if (maxTokens > maxOutputTokens) maxOutputTokens = maxTokens;
-    }
+    const cells = [
+      profile,
+      ...(state.currentConfig.activityRouting !== 'off'
+        ? Object.values(profile.activities ?? {})
+        : []),
+    ];
+    for (const cell of cells)
+      for (const tier of ROUTER_TIERS) {
+        if (!cell[tier]) continue;
+        const contextWindow = resolveContextWindow(
+          tier,
+          cell,
+          state.currentModelRegistry,
+        );
+        const maxTokens = resolveMaxTokens(
+          tier,
+          cell,
+          state.currentModelRegistry,
+        );
+        if (contextWindow > maxContextWindow) maxContextWindow = contextWindow;
+        if (maxTokens > maxOutputTokens) maxOutputTokens = maxTokens;
+      }
 
-    const hasReasoning = supportsReasoning(profile, state.currentModelRegistry);
+    const hasReasoning = cells.some((cell) =>
+      supportsReasoning(cell, state.currentModelRegistry),
+    );
     const registry = state.currentModelRegistry;
     const runsLevel = (level: ThinkingLevel): boolean =>
-      [false, true].some((imageAttached) =>
-        availableRoutePairs(
-          profile,
-          (provider, id) => registry?.find(provider, id),
-          imageAttached,
-          Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
-        ).some((pair) => pair.thinking === level),
+      cells.some((cell) =>
+        [false, true].some((imageAttached) =>
+          availableRoutePairs(
+            cell,
+            (provider, id) => registry?.find(provider, id),
+            imageAttached,
+            Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
+          ).some((pair) => pair.thinking === level),
+        ),
       );
     let thinkingLevelMap: Record<string, string> | undefined;
     if (hasReasoning) {
@@ -128,10 +145,12 @@ export const registerRouterProvider = (
     ];
   });
 
-  const modelsKey = JSON.stringify(modelDefinitions);
+  const modelsKey = JSON.stringify([state.requestEpoch, modelDefinitions]);
   if (state.lastRegisteredModels === modelsKey) return;
 
   const turnCache = createProviderTurnCache();
+  const registrationSignal = state.ownerSignal;
+  const registrationEpoch = state.requestEpoch;
   pi.registerProvider('router', {
     baseUrl: 'router://local',
     apiKey: 'pi-model-router',
@@ -144,9 +163,19 @@ export const registerRouterProvider = (
     ): AssistantMessageEventStream {
       const stream = createAssistantMessageEventStream();
       startRouterProviderStream({
+        ...(registrationEpoch !== undefined ? { registrationEpoch } : {}),
         model,
         context,
-        ...(options ? { options } : {}),
+        options: {
+          ...options,
+          ...(registrationSignal
+            ? {
+                signal: options?.signal
+                  ? AbortSignal.any([registrationSignal, options.signal])
+                  : registrationSignal,
+              }
+            : {}),
+        },
         stream,
         state,
         cache: turnCache,

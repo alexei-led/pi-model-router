@@ -171,7 +171,7 @@ describe('Pi classifier registry routing', () => {
 
   it('drops provider error text but keeps safe numeric usage', async () => {
     const current = registry();
-    current.classify = vi.fn(async () => ({
+    current.classify = vi.fn<ClassifierRegistry['classify']>(async () => ({
       ...classifierResult(),
       stopReason: 'error' as const,
       errorMessage: 'private-provider-detail',
@@ -186,10 +186,12 @@ describe('Pi classifier registry routing', () => {
   it('excludes system prompts, thinking, tool arguments and images from the bounded state', async () => {
     const current = registry();
     let observed: ClassifierContext | undefined;
-    current.classify = vi.fn(async (_model, context) => {
-      observed = context;
-      return classifierResult();
-    });
+    current.classify = vi.fn<ClassifierRegistry['classify']>(
+      async (_model, context) => {
+        observed = context;
+        return classifierResult();
+      },
+    );
     await runClassifierDetailed(
       config,
       request({
@@ -244,5 +246,136 @@ describe('Pi classifier registry routing', () => {
     expect(JSON.stringify(observed)).not.toMatch(
       /system-secret|image-secret|thinking-secret|argument-secret/,
     );
+  });
+});
+
+describe('independent tier/activity classifier answers', () => {
+  const activityCandidates: NonNullable<
+    ClassifierRequest['activityCandidates']
+  > = [
+    {
+      activity: 'code',
+      candidate: createCandidate({
+        tier: 'medium',
+        model: 'generation/code',
+        thinking: 'off',
+      }),
+    },
+  ];
+
+  it('validates activity independently, never multiplies distributions or changes tier thresholds', async () => {
+    const current = registry();
+    current.classify = vi.fn<ClassifierRegistry['classify']>(async () => ({
+      ...classifierResult(),
+      answers: {
+        ...classifierResult().answers,
+        activity: {
+          type: 'choice',
+          choice: 'code',
+          confidence: 0.7,
+          probabilities: { code: 0.4, docs: 0.3, uncertain: 0.3 },
+        },
+      },
+    }));
+    const result = await runClassifierDetailed(
+      config,
+      request({ activityCandidates }),
+      current,
+    );
+    expect(result.advice).toMatchObject({
+      candidateId: candidates[1]?.id,
+      activity: 'code',
+      confidence: 0.9,
+    });
+    expect(result.diagnostics).toMatchObject({
+      activity: 'code',
+      activityConfidence: 0.7,
+      activityOutcome: 'selected',
+      selectedTier: 'high',
+    });
+    expect(current.classify).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'unknown',
+    'bad-confidence',
+    'bad-type',
+    'missing-distribution',
+    'bad-argmax',
+    'bad-sum',
+    'uncertain',
+    'low-confidence',
+  ])('does not discard valid tier advice for %s activity', async (mode) => {
+    const current = registry();
+    const activity = {
+      type: mode === 'bad-type' ? 'bool' : 'choice',
+      choice:
+        mode === 'unknown'
+          ? 'private-model-reference'
+          : mode === 'uncertain'
+            ? 'uncertain'
+            : 'code',
+      confidence:
+        mode === 'bad-confidence' ? 2 : mode === 'low-confidence' ? 0.1 : 0.9,
+      probabilities:
+        mode === 'missing-distribution'
+          ? undefined
+          : mode === 'bad-argmax'
+            ? { code: 0.1, docs: 0.9 }
+            : mode === 'bad-sum'
+              ? { code: 0.2 }
+              : { [mode === 'uncertain' ? 'uncertain' : 'code']: 1 },
+      explanation: 'private-provider-explanation',
+    };
+    current.classify = vi.fn<ClassifierRegistry['classify']>(async () =>
+      JSON.parse(
+        JSON.stringify({
+          ...classifierResult(),
+          answers: { ...classifierResult().answers, activity },
+        }),
+      ),
+    );
+    const result = await runClassifierDetailed(
+      config,
+      request({ activityCandidates }),
+      current,
+    );
+    expect(result.advice?.candidateId).toBe(candidates[1]?.id);
+    expect(result.advice?.activity).toBeUndefined();
+    expect(JSON.stringify(result)).not.toMatch(
+      /private-model-reference|private-provider-explanation/,
+    );
+  });
+
+  it('an invalid tier cannot be rescued by valid activity, and malformed local activity requests do not classify', async () => {
+    const current = registry();
+    current.classify = vi.fn<ClassifierRegistry['classify']>(async () => ({
+      ...classifierResult(),
+      answers: {
+        activity: {
+          type: 'choice',
+          choice: 'code',
+          confidence: 1,
+          probabilities: { code: 1 },
+        },
+      },
+    }));
+    const result = await runClassifierDetailed(
+      config,
+      request({ activityCandidates }),
+      current,
+    );
+    expect(result.advice).toBeUndefined();
+    expect(result.diagnostics.outcome).toBe('invalid-response');
+    for (const overrides of [
+      { activityCandidates: [] },
+      { askRoute: false },
+      { askRoute: false, activityCandidates },
+    ])
+      expect(
+        (await runClassifierDetailed(config, request(overrides), current))
+          .diagnostics.outcome,
+      ).toBe('unavailable');
+    expect(current.classify).toHaveBeenCalledOnce();
   });
 });

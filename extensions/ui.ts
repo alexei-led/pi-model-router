@@ -1,6 +1,7 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import type {
+  ClassifierDiagnostics,
   RouterPinByProfile,
   RouterThinkingByProfile,
   RouterUIPreferences,
@@ -20,6 +21,9 @@ export { openRouterInspector } from './ui/inspector';
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
+  if (decision.activity) flags.push(`activity=${decision.activity}`);
+  else if (decision.routeCell)
+    flags.push(`availability-cell=${decision.routeCell}`);
   if (decision.isFallback) flags.push('fallback');
   if (decision.isBudgetForced) flags.push('budget-limit');
   if (decision.isGenerationFailed) flags.push('failed');
@@ -78,6 +82,11 @@ const formatRunTime = (startedAt: number | undefined): string | undefined =>
     ? new Date(startedAt).toLocaleTimeString('en-GB', { hour12: false })
     : undefined;
 
+const activityDiagnostics = (metrics: ClassifierDiagnostics): string[] =>
+  metrics.activityOutcome
+    ? [`activity=${metrics.activity ?? 'unknown'} (${metrics.activityOutcome})`]
+    : [];
+
 export const formatAdvisorDetail = (
   decision: RoutingDecision,
 ): string | undefined => {
@@ -96,6 +105,7 @@ export const formatAdvisorDetail = (
         ? `No tier chosen: ${service} could not judge the required capability from the supplied context; baseline used.`
         : metrics.outcome,
     );
+    parts.push(...activityDiagnostics(metrics));
     if (metrics.choice && metrics.choice !== 'uncertain')
       parts.push(`choice=${metrics.choice}`);
     if (metrics.selectedTier && metrics.selectedTier !== metrics.choice)

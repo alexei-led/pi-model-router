@@ -1,7 +1,7 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { normalizeConfig } from '../config';
-import { model } from '../test/fixtures';
+import { model, required } from '../test/fixtures';
 import { createRouterUIRuntime } from './runtime';
 
 const setup = () => {
@@ -21,7 +21,11 @@ const setup = () => {
     lastDecision: undefined,
     debugHistory: [],
     currentModelRegistry: {
-      find: (provider: string, id: string) => model(id, { provider }),
+      find: (
+        provider: string,
+        id: string,
+      ): ReturnType<ExtensionContext['modelRegistry']['find']> =>
+        model(id, { provider }),
       getModelsOfType: (() => [
         {
           type: 'classifier',
@@ -242,6 +246,215 @@ describe('router UI runtime boundary', () => {
         profile: 'auto',
         action: 'apply',
         changes: [{ key: 'timeout', before: 1500, after: 2147483648 }],
+      }),
+    ).toBe('conflict');
+  });
+});
+
+describe('configured activity-cell presentation boundary', () => {
+  it('projects normalized sparse overrides in fixed order, including inherited/replaced fallbacks and mapped effort', () => {
+    const { state, runtime } = setup();
+    state.currentConfig = normalizeConfig({
+      models: { fast: { model: 'openai/fast' } },
+      profiles: {
+        auto: {
+          medium: {
+            model: 'openai/base',
+            thinking: 'medium',
+            fallbacks: ['openai/backup', 'openai/third'],
+          },
+          activities: {
+            docs: {
+              medium: { model: 'fast', thinking: 'high', fallbacks: [] },
+            },
+            debug: { low: { model: 'missing/no-text' } },
+            code: {
+              medium: { thinking: 'high' },
+              high: { model: 'openai/code-high', thinking: 'low' },
+            },
+          },
+        },
+      },
+    }).config;
+    state.currentModelRegistry.find = (provider, id) =>
+      provider === 'missing' || id === 'base'
+        ? undefined
+        : model(id, { provider, reasoning: id !== 'fast' });
+    const snapshot = runtime.adapters.getSnapshot();
+    expect(snapshot.activityRouting).toBe('on');
+    expect(
+      snapshot.activityCells.map((cell) => [
+        cell.activity,
+        cell.configured.tier,
+      ]),
+    ).toEqual([
+      ['code', 'high'],
+      ['code', 'medium'],
+      ['debug', 'low'],
+      ['docs', 'medium'],
+    ]);
+    expect(snapshot.activityCells[1]).toEqual({
+      activity: 'code',
+      configured: { tier: 'medium', model: 'openai/base', thinking: 'high' },
+      fallbacks: ['openai/backup', 'openai/third'],
+      availability: 'eligible',
+      eligible: {
+        tier: 'medium',
+        provider: 'openai',
+        model: 'backup',
+        thinking: 'high',
+      },
+    });
+    expect(snapshot.activityCells[2]).toMatchObject({
+      availability: 'unavailable',
+      configured: { model: 'missing/no-text' },
+    });
+    expect(snapshot.activityCells[3]).toEqual({
+      activity: 'docs',
+      configured: { tier: 'medium', model: 'openai/fast', thinking: 'high' },
+      fallbacks: [],
+      availability: 'eligible',
+      eligible: {
+        tier: 'medium',
+        provider: 'openai',
+        model: 'fast',
+        thinking: 'off',
+      },
+    });
+    expect(snapshot.actual).toBeUndefined();
+    expect(snapshot.advised).toBeUndefined();
+    expect(snapshot.eligible.medium?.model).toBe('backup');
+  });
+
+  it('retains disabled declarations without checking activity targets or offering them as generic routes', () => {
+    const { state, runtime } = setup();
+    state.currentConfig = normalizeConfig({
+      activityRouting: 'off',
+      profiles: {
+        auto: { activities: { code: { medium: { model: 'openai/code' } } } },
+      },
+    }).config;
+    const find = vi.spyOn(state.currentModelRegistry, 'find');
+    expect(runtime.adapters.getSnapshot()).toMatchObject({
+      activityRouting: 'off',
+      eligible: {},
+      activityCells: [
+        {
+          activity: 'code',
+          configured: { model: 'openai/code' },
+          availability: 'disabled',
+        },
+      ],
+    });
+    expect(find).not.toHaveBeenCalled();
+    state.currentConfig.activityRouting = 'on';
+    expect(runtime.adapters.getSnapshot()).toMatchObject({
+      eligible: {},
+      activityCells: [
+        { availability: 'eligible', eligible: { model: 'code' } },
+      ],
+    });
+  });
+
+  it('labels missing registry as unknown and image-only targets as text-unavailable', () => {
+    const { state, runtime } = setup();
+    state.currentConfig = normalizeConfig({
+      profiles: {
+        auto: { activities: { docs: { micro: { model: 'openai/images' } } } },
+      },
+    }).config;
+    state.currentModelRegistry.find = (provider, id) =>
+      model(id, { provider, input: ['image'] });
+    expect(runtime.adapters.getSnapshot().activityCells[0]?.availability).toBe(
+      'unavailable',
+    );
+    const withoutRegistry = createRouterUIRuntime(
+      { ...state, currentModelRegistry: undefined },
+      () => undefined,
+    );
+    expect(
+      withoutRegistry.adapters.getSnapshot().activityCells[0],
+    ).toMatchObject({
+      availability: 'unknown',
+      configured: { model: 'openai/images' },
+    });
+  });
+
+  it('uses active session effort only and does not leak mutable config/fallback metadata into presentation', async () => {
+    const { state, runtime } = setup();
+    state.currentConfig = normalizeConfig({
+      profiles: {
+        auto: {
+          medium: { model: 'openai/base', fallbacks: ['openai/backup'] },
+          activities: { code: { medium: { thinking: 'low' } } },
+        },
+      },
+    }).config;
+    const snapshot = runtime.adapters.getSnapshot();
+    await runtime.adapters.applyControls({
+      profile: 'auto',
+      action: 'apply',
+      changes: [{ key: 'thinkingMedium', before: undefined, after: 'high' }],
+    });
+    expect(
+      runtime.adapters.getSnapshot().activityCells[0]?.configured.thinking,
+    ).toBe('low');
+    expect(runtime.activatePending()).toBe(true);
+    expect(runtime.adapters.getSnapshot().activityCells[0]).toMatchObject({
+      configured: { thinking: 'high' },
+      eligible: { thinking: 'high' },
+    });
+    Object.assign(required(snapshot.activityCells[0]).configured, {
+      model: 'changed',
+    });
+    required(
+      state.currentConfig.profiles.auto?.activities?.code?.medium?.fallbacks,
+    ).push('openai/new');
+    expect(required(snapshot.activityCells[0]).fallbacks).toEqual([
+      'openai/backup',
+    ]);
+    expect(
+      runtime.adapters.getSnapshot().activityCells[0]?.configured.model,
+    ).toBe('openai/base');
+    expect(JSON.stringify(snapshot.activityCells)).not.toMatch(
+      /baseUrl|resolvedFallbacks|contextWindow|apiKey/,
+    );
+  });
+});
+
+describe('activity-aware UI capability validation', () => {
+  it('accepts effort/baseline edits for activity-only routes but never pins them as generic tiers', async () => {
+    const { state, runtime } = setup();
+    state.currentConfig = normalizeConfig({
+      profiles: {
+        auto: {
+          activities: { code: { medium: { model: 'openai/medium' } } },
+          baselineTier: 'medium',
+        },
+      },
+    }).config;
+    expect(
+      await runtime.adapters.applyControls({
+        profile: 'auto',
+        action: 'apply',
+        changes: [{ key: 'thinkingMedium', before: undefined, after: 'high' }],
+      }),
+    ).toBe('applied');
+    expect(runtime.activatePending()).toBe(true);
+    expect(state.thinkingByProfile).toEqual({ auto: { medium: 'high' } });
+    expect(
+      await runtime.adapters.applyControls({
+        profile: 'auto',
+        action: 'apply',
+        changes: [{ key: 'pin', before: 'auto', after: 'medium' }],
+      }),
+    ).toBe('conflict');
+    state.currentConfig.activityRouting = 'off';
+    expect(
+      await runtime.adapters.applyControls({
+        profile: 'auto',
+        action: 'apply',
+        changes: [{ key: 'thinkingMedium', before: 'high', after: 'off' }],
       }),
     ).toBe('conflict');
   });

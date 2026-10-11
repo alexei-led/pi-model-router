@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { RouterUISnapshot } from '../types';
 import {
+  activityRouteLines,
+  activityRoutingSummary,
   advisorName,
   budgetLines,
+  formatRoute,
   routeMix,
   routeReason,
   routerTone,
@@ -25,6 +28,8 @@ const snapshot: RouterUISnapshot = {
     thinkingMicro: undefined,
   },
   eligible: {},
+  activityRouting: 'on',
+  activityCells: [],
   history: [],
   classifiers: [],
   privacy: { advisorEnabled: false, approvedModels: [], auth: 'unknown' },
@@ -104,4 +109,89 @@ describe('Signal Panel presentation', () => {
     expect(lines).toContain('Unknown routes: 1');
     expect(routeMix([]).join('\n')).toContain('No retained decisions');
   });
+});
+
+it('distinguishes classified activity from local availability-cell provenance', () => {
+  const route = {
+    tier: 'medium' as const,
+    provider: 'test',
+    model: 'code',
+    thinking: 'off' as const,
+  };
+  expect(
+    formatRoute({ ...route, activity: 'code', routeCell: 'code' }),
+  ).toContain('activity code');
+  expect(formatRoute({ ...route, routeCell: 'code' })).toContain(
+    'availability cell code',
+  );
+});
+
+describe('activity override presentation', () => {
+  it('shows mode, generic inheritance and an explicit empty state', () => {
+    expect(activityRoutingSummary(snapshot)).toBe(
+      'Activity routing: on · 0 override cells · read-only',
+    );
+    expect(activityRouteLines(snapshot)).toEqual([
+      'Unlisted cells use generic tiers, if configured.',
+      'No configured activity overrides.',
+    ]);
+    expect(
+      activityRoutingSummary({ ...snapshot, activityRouting: 'off' }),
+    ).toContain('Activity routing: off');
+  });
+
+  it('keeps configured primary/fallback order distinct from the first text-eligible attempt and mapped effort', () => {
+    const lines = activityRouteLines({
+      ...snapshot,
+      activityCells: [
+        {
+          activity: 'code',
+          configured: {
+            tier: 'medium',
+            model: 'test/missing',
+            thinking: 'high',
+          },
+          fallbacks: ['test/backup', 'test/last'],
+          availability: 'eligible',
+          eligible: {
+            tier: 'medium',
+            provider: 'test',
+            model: 'backup',
+            thinking: 'off',
+          },
+        },
+      ],
+    });
+    expect(lines[1]).toBe(
+      'code/medium: configured test/missing · requested effort high',
+    );
+    expect(lines[2]).toBe(
+      '  Text eligible: test/backup · effort off · configured fallbacks: test/backup → test/last',
+    );
+    expect(lines.join('\n')).not.toMatch(/Actual|Advised|activity code/);
+  });
+
+  it.each([
+    ['disabled', 'Excluded (activity routing off)'],
+    ['unknown', 'Text eligibility unknown (no registry)'],
+    ['unavailable', 'No text-eligible attempt'],
+  ] as const)(
+    'labels %s without claiming an observed route',
+    (availability, label) => {
+      const text = activityRouteLines({
+        ...snapshot,
+        activityCells: [
+          {
+            activity: 'docs',
+            configured: { tier: 'micro', model: 'test/docs', thinking: 'off' },
+            fallbacks: [],
+            availability,
+          },
+        ],
+      }).join('\n');
+      expect(text).toContain(label);
+      expect(text).toContain('configured fallbacks: none');
+      expect(text).not.toContain('undefined');
+    },
+  );
 });

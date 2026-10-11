@@ -9,6 +9,17 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 // Descending routing complexity; all tier iteration and ranking derives here.
 export const ROUTER_TIERS = ['high', 'medium', 'low', 'micro'] as const;
 export type RouterTier = (typeof ROUTER_TIERS)[number];
+export const ROUTER_ACTIVITIES = [
+  'code',
+  'debug',
+  'explore',
+  'plan',
+  'review',
+  'ops',
+  'docs',
+] as const;
+export type RouterActivity = (typeof ROUTER_ACTIVITIES)[number];
+export type ActivityRouting = 'on' | 'off';
 export type RouterPin = RouterTier | 'auto';
 export type RouterPinByProfile = Partial<Record<string, RouterTier>>;
 export type RouterThinkingByTier = Partial<Record<RouterTier, ThinkingLevel>>;
@@ -95,6 +106,12 @@ export interface AdvisorProfileConfig {
 }
 
 export interface RouterProfile {
+  /** Effective, re-normalized sparse overrides; omitted tiers use the generic cell. */
+  activities?:
+    | Partial<
+        Record<RouterActivity, Partial<Record<RouterTier, RoutedTierConfig>>>
+      >
+    | undefined;
   baselineTier?: RouterTier | undefined;
   advisor?: AdvisorProfileConfig | undefined;
   high?: RoutedTierConfig | undefined;
@@ -106,6 +123,7 @@ export interface RouterProfile {
 export type StatusLineMode = 'compact' | 'detailed';
 
 export interface RouterConfig {
+  activityRouting?: ActivityRouting | undefined;
   ui?: { statusLine: StatusLineMode } | undefined;
   advisor?: AdvisorConfig | undefined;
   debug?: boolean | undefined;
@@ -124,6 +142,20 @@ export interface RouteCandidate extends RoutePair {
   id: string;
 }
 
+/** A local matrix cell and its ordered, prevalidated physical attempts. Runtime only. */
+export interface RoutePlan {
+  readonly id: string;
+  readonly tier: RouterTier;
+  readonly cell: RouterActivity | undefined;
+  readonly config: Readonly<RoutedTierConfig>;
+  readonly attempts: readonly [Readonly<RoutePair>, ...Readonly<RoutePair>[]];
+  readonly thinkingOverrides: Readonly<RouterThinkingByTier> | undefined;
+}
+export interface ActivityCandidate {
+  activity: RouterActivity;
+  candidate: RouteCandidate;
+}
+
 export interface ClassifierDependencies {
   fetch?: typeof fetch;
   now?: () => number;
@@ -132,6 +164,10 @@ export interface ClassifierDependencies {
 export interface ClassifierRequest {
   context: Context;
   candidates: readonly RouteCandidate[];
+  /** Present only when eligible activity cells change the physical attempt plan. */
+  activityCandidates?: readonly ActivityCandidate[] | undefined;
+  /** A single tier with several activity plans needs only the activity answer. */
+  askRoute?: boolean | undefined;
   profile: AdvisorProfileConfig | undefined;
   /** Local fallback tier; abstention mass is assigned to it, never inferred remotely. */
   baselineTier: RouterTier;
@@ -171,6 +207,10 @@ export const CLASSIFIER_OUTCOMES = [
 ] as const;
 export type ClassifierOutcome = (typeof CLASSIFIER_OUTCOMES)[number];
 export interface ClassifierDiagnostics {
+  activity?: RouterActivity | 'uncertain' | undefined;
+  activityConfidence?: number | undefined;
+  activityOutcome?: 'selected' | 'uncertain' | 'invalid-response' | undefined;
+  activityResponseIssue?: ClassifierResponseIssue | undefined;
   context?: ClassifierContextMetrics | undefined;
   /** Locally generated per classify call, shared by reusers; never supplied remotely. */
   requestId?: string | undefined;
@@ -206,6 +246,7 @@ export interface ClassifierResult {
 
 /** Only allowlisted local identity and numeric diagnostics cross the adapter boundary. */
 export interface ClassifierAdvice {
+  activity?: RouterActivity | undefined;
   candidateId: string;
   confidence: number;
   latencyMs: number;
@@ -277,6 +318,10 @@ export interface GenerationDiagnostics {
 }
 
 export interface RoutingDecision {
+  /** Validated semantic answer, independent of the local cell used for availability. */
+  activity?: RouterActivity | undefined;
+  /** Local cell provenance, not an inferred activity. Omitted means generic. */
+  routeCell?: RouterActivity | undefined;
   profile: string;
   tier: RouterTier;
   targetProvider: string;
@@ -318,6 +363,7 @@ export interface PersistedStateInput {
 }
 
 export interface RouterPersistedState {
+  ownerSessionId?: string | undefined;
   enabled: boolean;
   selectedProfile: string;
   pinTier?: RouterTier | undefined;
@@ -333,6 +379,7 @@ export interface RouterPersistedState {
 }
 
 export interface RawRouterConfig {
+  activityRouting?: unknown;
   ui?: unknown;
   advisor?: unknown;
   debug?: unknown;
@@ -392,11 +439,29 @@ export interface RouterUIControlTransaction {
   changes: readonly RouterUIControlChange[];
 }
 export interface RouterUIRoute {
+  activity?: RouterActivity | undefined;
+  routeCell?: RouterActivity | undefined;
   tier: RouterTier;
   provider: string;
   model: string;
   thinking: ThinkingLevel;
 }
+/** Effective configured override, not advice or an observed generation. */
+export type RouterUIActivityCell = {
+  activity: RouterActivity;
+  configured: Readonly<RoutePair>;
+  fallbacks: readonly string[];
+} & (
+  | {
+      availability: 'eligible';
+      /** First currently text-capable attempt; request input/context/auth are not checked here. */
+      eligible: RouterUIRoute;
+    }
+  | {
+      availability: 'unavailable' | 'unknown' | 'disabled';
+      eligible?: undefined;
+    }
+);
 export interface RouterUIAdviceObservation {
   advisor: RouterUIAdvisorId;
   requestId?: string | undefined;
@@ -430,6 +495,8 @@ export interface RouterUISnapshot {
   controls: Readonly<RouterUIControls>;
   pendingControls?: Readonly<RouterUIControls> | undefined;
   eligible: Readonly<Partial<Record<RouterTier, RouterUIRoute>>>;
+  activityRouting: ActivityRouting;
+  activityCells: readonly RouterUIActivityCell[];
   privacy: {
     advisorEnabled: boolean;
     approvedModels: readonly string[];

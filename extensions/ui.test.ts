@@ -347,6 +347,8 @@ describe('ui.ts lifecycle strip', () => {
       thinkingMicro: undefined,
     },
     eligible: {},
+    activityRouting: 'on',
+    activityCells: [],
     history: [],
     classifiers: [],
     privacy: {
@@ -398,4 +400,25 @@ describe('ui.ts lifecycle strip', () => {
     updateRouterUIStrip(rpc, snapshot, { widgetEnabled: true });
     expect(rpc.ui.setWidget).not.toHaveBeenCalled();
   });
+});
+
+it('logs sanitized activity diagnostics and keeps availability distinct from inference', () => {
+  expect(
+    formatDecision({ ...decision, activity: 'docs', routeCell: 'docs' }),
+  ).toContain('activity=docs');
+  expect(formatDecision({ ...decision, routeCell: 'code' })).toContain(
+    'availability-cell=code',
+  );
+  expect(
+    formatAdvisorDetail({
+      ...decision,
+      advisor: 'classifier',
+      classification: {
+        outcome: 'selected',
+        latencyMs: 1,
+        activity: 'docs',
+        activityOutcome: 'selected',
+      },
+    }),
+  ).toContain('activity=docs (selected)');
 });

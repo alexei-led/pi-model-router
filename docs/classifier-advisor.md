@@ -47,9 +47,33 @@ Pi resolves credentials and executes the classifier API. This supports Pi classi
 
 The default deadline is 10 seconds and covers local context preparation plus classification. Caller cancellation aborts the operation and does not start generation. Pi retries according to `advisor.maxRetries` (default 1 retry), within the same total router deadline.
 
-The classifier receives one typed `choice` question. Its options are the current eligible routing candidates, plus an abstention option. The router validates the returned candidate IDs and probability distribution, applies `confidenceThreshold` and `probabilityThreshold`, then revalidates the selected generation route. Invalid advice or transport failure goes straight to the eligible baseline.
+The router makes one approved `modelRegistry.classify()` operation. Normally it
+asks the existing typed `route` choice among eligible tier representatives and
+`uncertain`. With activity routing on and meaningful eligible specialization
+plans, it also asks a separate typed `activity` choice. These are independent
+answers in the same operation, not a multiplied joint distribution or a second
+advisor call. Pi may implement the operation using several bounded HTTP requests.
 
-A profile pin, the soft-budget policy, one eligible candidate, and tool continuations bypass advice. The advisor cannot introduce a route or change generation permissions.
+Tier selection keeps the existing rule: accept the top candidate at or above
+`confidenceThreshold`; otherwise choose the lowest tier whose cumulative
+probability reaches `probabilityThreshold`, counting abstention mass at the local
+baseline tier. Activity needs a valid choice/distribution and confidence at or
+above `confidenceThreshold`; it never uses the cumulative tier rule.
+
+A valid activity resolves the chosen tier's current prevalidated cell, or its
+generic plan if there is no eligible specialization. Missing, malformed,
+low-confidence or `uncertain` activity keeps valid tier advice but uses that tier's
+generic plan; if it is unavailable, use the deterministic eligible baseline.
+Invalid tier advice or a whole classifier error goes directly to baseline, never
+to another advisor. Representative IDs cannot themselves authorize a physical
+target. Generation revalidates each attempt in the selected cell's immutable plan.
+
+One tier with distinct activity plans asks only `activity`. One effective plan
+bypasses advice. Off/no meaningful overrides preserve the old route-only request
+and selection behavior. An effort override that erases activity differences also
+removes the activity question.
+
+A profile pin, the soft-budget policy, one effective plan, and tool continuations bypass advice. The advisor cannot introduce a route or change generation permissions.
 
 ## Privacy
 

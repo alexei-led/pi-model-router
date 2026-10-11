@@ -1361,3 +1361,455 @@ describe('Pi classifier provider integration', () => {
     expect(s.registry.classify).not.toHaveBeenCalled();
   });
 });
+
+describe('activity matrix provider routing', () => {
+  const activitySetup = () => {
+    const s = setup();
+    s.models.push(model('code'), model('code-backup'), model('docs'));
+    s.state.pinnedTierByProfile = {};
+    s.state.currentConfig = normalizeConfig({
+      advisor: { enabled: true, model: 'typesafe/jev-latest' },
+      profiles: {
+        balanced: {
+          advisor: { models: ['typesafe/jev-latest'] },
+          high: { model: 'test/primary', thinking: 'high' },
+          medium: {
+            model: 'test/primary',
+            thinking: 'medium',
+            fallbacks: ['test/fallback'],
+          },
+          low: { model: 'test/small', thinking: 'off' },
+          activities: {
+            code: {
+              medium: { model: 'test/code', fallbacks: ['test/code-backup'] },
+            },
+            docs: {
+              medium: { model: 'test/docs', thinking: 'off', fallbacks: [] },
+            },
+          },
+        },
+      },
+    }).config;
+    const answer = {
+      tier: 'medium',
+      activity: 'code',
+      confidence: 0.95,
+      invalidActivity: false,
+      fail: false,
+    };
+    const classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
+      async (classifier, context) => {
+        if (answer.fail) throw new Error('private-response');
+        const routeQuestion = context.questions.route;
+        const routeId =
+          routeQuestion?.type === 'choice'
+            ? (Object.keys(routeQuestion.criteria).find((id) =>
+                id.startsWith(`${answer.tier}|`),
+              ) ?? 'uncertain')
+            : undefined;
+        const answers = {
+          ...(routeId
+            ? {
+                route: {
+                  type: 'choice' as const,
+                  choice: routeId,
+                  confidence: 0.95,
+                  probabilities: { [routeId]: 1 },
+                },
+              }
+            : {}),
+          ...(context.questions.activity && !answer.invalidActivity
+            ? {
+                activity: {
+                  type: 'choice' as const,
+                  choice: answer.activity,
+                  confidence: answer.confidence,
+                  probabilities: { [answer.activity]: 1 },
+                },
+              }
+            : {}),
+        };
+        return {
+          api: classifier.api,
+          provider: classifier.provider,
+          model: classifier.id,
+          timestamp: 1,
+          stopReason: 'stop',
+          answers,
+        };
+      },
+    );
+    s.registry.classify = classify;
+    return {
+      ...s,
+      answer,
+      classify,
+      profile: required(s.state.currentConfig.profiles.balanced),
+    };
+  };
+
+  it('asks separate route/activity questions in one classify operation and uses only the selected cell fallbacks', async () => {
+    const s = activitySetup();
+    s.delegate.mockImplementation((target) =>
+      target.id === 'code' ? failure() : done(),
+    );
+    await consume(s.stream());
+    expect(s.classify).toHaveBeenCalledOnce();
+    expect(
+      Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
+    ).toEqual(['route', 'activity']);
+    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+      'code',
+      'code-backup',
+    ]);
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      activity: 'code',
+      routeCell: 'code',
+      targetModelId: 'code-backup',
+      isFallback: true,
+    });
+    await consume(s.stream());
+    expect(s.classify).toHaveBeenCalledOnce();
+    expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('code-backup');
+    expect(s.state.lastDecision?.reuse).toBe('same-turn');
+  });
+
+  it('reuses the actual cell on tool continuations and reconsiders each user-role steering message', async () => {
+    const s = activitySetup();
+    s.delegate.mockImplementation((target) =>
+      target.id === 'code'
+        ? failure()
+        : events({
+            type: 'done',
+            reason: 'toolUse',
+            message: message({
+              model: target.id,
+              stopReason: 'toolUse',
+              content: [
+                {
+                  type: 'toolCall',
+                  name: 'read',
+                  id: 'cell-tool',
+                  arguments: {},
+                },
+              ],
+            }),
+          }),
+    );
+    const user = { role: 'user' as const, content: 'implement', timestamp: 1 };
+    await consume(s.stream({ messages: [user] }));
+    const assistant = message({
+      model: 'code-backup',
+      stopReason: 'toolUse',
+      content: [
+        { type: 'toolCall', name: 'read', id: 'cell-tool', arguments: {} },
+      ],
+    });
+    const continued: Context = {
+      messages: [
+        user,
+        assistant,
+        {
+          role: 'toolResult',
+          toolCallId: 'cell-tool',
+          toolName: 'read',
+          content: [{ type: 'text', text: 'evidence' }],
+          isError: false,
+          timestamp: 2,
+        },
+      ],
+    };
+    s.answer.activity = 'docs';
+    await consume(s.stream(continued));
+    expect(s.classify).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision).toMatchObject({
+      reuse: 'continuation',
+      routeCell: 'code',
+      targetModelId: 'code-backup',
+    });
+    await consume(
+      s.stream({
+        messages: [
+          ...continued.messages,
+          { role: 'user', content: 'write the guide instead', timestamp: 3 },
+        ],
+      }),
+    );
+    expect(s.classify).toHaveBeenCalledTimes(2);
+    expect(s.state.lastDecision).toMatchObject({
+      activity: 'docs',
+      routeCell: 'docs',
+      targetModelId: 'docs',
+    });
+  });
+
+  it.each(['off', 'identical', 'ineligible', 'overridden-effort'] as const)(
+    'preserves the old route-only question for %s activity behavior',
+    async (mode) => {
+      const s = activitySetup();
+      if (mode === 'off') s.state.currentConfig.activityRouting = 'off';
+      else if (mode === 'identical')
+        s.profile.activities = { code: { medium: required(s.profile.medium) } };
+      else if (mode === 'ineligible')
+        s.profile.activities = { code: { medium: { model: 'missing/model' } } };
+      else {
+        s.profile.activities = {
+          code: {
+            medium: {
+              ...s.profile.medium,
+              model: 'test/primary',
+              thinking: 'high',
+            },
+          },
+        };
+        s.state.thinkingByProfile.balanced = { medium: 'off' };
+      }
+      await consume(s.stream());
+      expect(
+        Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
+      ).toEqual(['route']);
+      expect(s.state.lastDecision?.targetModelId).toBe('primary');
+      expect(s.state.lastDecision?.activity).toBeUndefined();
+    },
+  );
+
+  it.each(['invalid', 'uncertain', 'low-confidence'] as const)(
+    'keeps valid tier advice but uses generic for %s activity',
+    async (mode) => {
+      const s = activitySetup();
+      s.answer.tier = 'high';
+      if (mode === 'invalid') s.answer.invalidActivity = true;
+      if (mode === 'uncertain') s.answer.activity = 'uncertain';
+      if (mode === 'low-confidence') s.answer.confidence = 0.1;
+      await consume(s.stream());
+      expect(s.state.lastDecision).toMatchObject({
+        tier: 'high',
+        targetModelId: 'primary',
+        advisor: 'classifier',
+      });
+      expect(s.state.lastDecision?.activity).toBeUndefined();
+      expect(s.state.lastDecision?.routeCell).toBeUndefined();
+    },
+  );
+
+  it('uses a generic-first baseline without consent and never treats availability provenance as classification', async () => {
+    const s = activitySetup();
+    s.profile.advisor = { models: [] };
+    await consume(s.stream());
+    expect(s.classify).not.toHaveBeenCalled();
+    expect(s.state.lastDecision?.targetModelId).toBe('primary');
+    s.models.splice(
+      s.models.findIndex((m) => m.id === 'primary'),
+      1,
+    );
+    s.models.splice(
+      s.models.findIndex((m) => m.id === 'fallback'),
+      1,
+    );
+    s.profile.low = undefined;
+    await consume(
+      s.stream({
+        messages: [{ role: 'user', content: 'another', timestamp: 2 }],
+      }),
+    );
+    expect(s.state.lastDecision).toMatchObject({
+      targetModelId: 'code',
+      routeCell: 'code',
+      reasonCode: 'baseline',
+    });
+    expect(s.state.lastDecision?.activity).toBeUndefined();
+  });
+
+  it('offers activity-only tiers but invalid activity falls back to the generic baseline', async () => {
+    const s = activitySetup();
+    s.profile.medium = { model: 'missing/generic' };
+    await consume(s.stream());
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      routeCell: 'code',
+      targetModelId: 'code',
+    });
+    s.answer.invalidActivity = true;
+    await consume(
+      s.stream({
+        messages: [{ role: 'user', content: 'next task', timestamp: 2 }],
+      }),
+    );
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      targetModelId: 'primary',
+      advisor: 'classifier-fallback',
+    });
+    expect(s.state.lastDecision?.activity).toBeUndefined();
+  });
+
+  it('above budget prefers a lower activity-only plan over a high generic and bypasses advice', async () => {
+    const s = activitySetup();
+    s.profile.medium = { model: 'missing/generic' };
+    s.profile.low = undefined;
+    s.state.currentConfig.maxSessionBudget = 1;
+    s.state.accumulatedCost = 1;
+    await consume(s.stream());
+    expect(s.classify).not.toHaveBeenCalled();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      routeCell: 'code',
+      targetModelId: 'code',
+      reasonCode: 'budget',
+      isBudgetForced: true,
+    });
+    expect(s.state.lastDecision?.activity).toBeUndefined();
+  });
+
+  it('pins generic only and rejects an ineligible generic pin despite eligible activity plans', async () => {
+    const s = activitySetup();
+    s.state.pinnedTierByProfile.balanced = 'medium';
+    await consume(s.stream());
+    expect(s.state.lastDecision).toMatchObject({
+      targetModelId: 'primary',
+      reasonCode: 'pinned',
+    });
+    s.profile.medium = { model: 'missing/generic' };
+    expect((await consume(s.stream())).result.stopReason).toBe('error');
+    expect(s.classify).not.toHaveBeenCalled();
+  });
+
+  it('asks activity only for one tier with distinct cells, but one effective plan bypasses advice', async () => {
+    const s = activitySetup();
+    s.profile.high = undefined;
+    s.profile.low = undefined;
+    await consume(s.stream());
+    expect(
+      Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
+    ).toEqual(['activity']);
+    expect(s.state.lastDecision).toMatchObject({
+      activity: 'code',
+      targetModelId: 'code',
+    });
+    s.profile.activities = undefined;
+    await consume(
+      s.stream({ messages: [{ role: 'user', content: 'next', timestamp: 2 }] }),
+    );
+    expect(s.classify).toHaveBeenCalledOnce();
+    expect(s.state.lastDecision?.bypassReason).toBe('single-candidate');
+  });
+
+  it('whole classifier failure goes directly to baseline and off never uses activity-only cells', async () => {
+    const s = activitySetup();
+    s.answer.fail = true;
+    await consume(s.stream());
+    expect(s.state.lastDecision).toMatchObject({
+      advisor: 'classifier-fallback',
+      targetModelId: 'primary',
+    });
+    expect(s.classify).toHaveBeenCalledOnce();
+    s.state.currentConfig.activityRouting = 'off';
+    s.profile.high = undefined;
+    s.profile.low = undefined;
+    s.profile.medium = { model: 'missing/generic' };
+    expect(
+      (
+        await consume(
+          s.stream({
+            messages: [{ role: 'user', content: 'next', timestamp: 2 }],
+          }),
+        )
+      ).result.stopReason,
+    ).toBe('error');
+    expect(s.classify).toHaveBeenCalledOnce();
+  });
+
+  it('a selected plan is immutable and live revalidation cannot add a newly configured fallback', async () => {
+    const s = activitySetup();
+    s.delegate.mockImplementation((target) => {
+      if (target.id === 'code') {
+        required(s.profile.activities?.code?.medium).fallbacks = ['test/docs'];
+        s.models.splice(
+          s.models.findIndex((m) => m.id === 'code-backup'),
+          1,
+        );
+        return failure();
+      }
+      return done();
+    });
+    expect((await consume(s.stream())).result.stopReason).toBe('error');
+    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+      'code',
+    ]);
+  });
+
+  it('caller cancellation during activity advice never starts generation', async () => {
+    const s = activitySetup();
+    const controller = new AbortController();
+    s.classify.mockImplementation(
+      async (_model, _context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener(
+            'abort',
+            () =>
+              resolve({
+                api: 'test',
+                provider: 'typesafe',
+                model: 'jev-latest',
+                stopReason: 'aborted',
+                answers: {},
+                timestamp: 1,
+              }),
+            { once: true },
+          );
+        }),
+    );
+    const completion = consume(s.stream(undefined, controller.signal));
+    await vi.waitFor(() => expect(s.classify).toHaveBeenCalledOnce());
+    controller.abort();
+    expect((await completion).result.stopReason).toBe('aborted');
+    expect(s.delegate).not.toHaveBeenCalled();
+  });
+  it('one physical attempt plan bypasses even when only specialization cells are available', async () => {
+    const s = activitySetup();
+    s.profile.high = undefined;
+    s.profile.medium = undefined;
+    s.profile.low = undefined;
+    s.profile.activities = {
+      docs: { medium: { model: 'test/code', thinking: 'off' } },
+      code: { medium: { model: 'test/code', thinking: 'off' } },
+    };
+    await consume(s.stream());
+    expect(s.classify).not.toHaveBeenCalled();
+    expect(s.state.lastDecision).toMatchObject({
+      routeCell: 'code',
+      targetModelId: 'code',
+      bypassReason: 'single-candidate',
+    });
+    expect(s.state.lastDecision?.activity).toBeUndefined();
+  });
+  it('does not retry a specialization after visible content or caller cancellation', async () => {
+    const visible = activitySetup();
+    visible.delegate.mockImplementation(() => {
+      const partial = message({ model: 'code' });
+      return events(
+        { type: 'text_delta', contentIndex: 0, delta: 'visible', partial },
+        {
+          type: 'error',
+          reason: 'error',
+          error: { ...partial, stopReason: 'error' },
+        },
+      );
+    });
+    expect((await consume(visible.stream())).result.stopReason).toBe('error');
+    expect(visible.delegate).toHaveBeenCalledOnce();
+    const cancelled = activitySetup();
+    const controller = new AbortController();
+    cancelled.delegate.mockImplementation(() => {
+      controller.abort();
+      return done();
+    });
+    expect(
+      (await consume(cancelled.stream(undefined, controller.signal))).result
+        .stopReason,
+    ).toBe('aborted');
+    expect(cancelled.delegate).toHaveBeenCalledOnce();
+    expect(cancelled.state.accumulatedCost).toBe(0.01);
+  });
+});

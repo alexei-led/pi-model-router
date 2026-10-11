@@ -11,8 +11,29 @@ export const advisorName = (
 
 export const formatRoute = (route: RouterUIRoute | undefined): string =>
   route
-    ? `${route.tier} → ${route.provider}/${route.model} · effort ${route.thinking}`
+    ? `${route.tier} → ${route.provider}/${route.model} · effort ${route.thinking}${route.activity ? ` · activity ${route.activity}` : route.routeCell ? ` · availability cell ${route.routeCell}` : ''}`
     : 'unknown / no observed generation';
+
+export const activityRoutingSummary = (snapshot: RouterUISnapshot): string =>
+  `Activity routing: ${snapshot.activityRouting} · ${snapshot.activityCells.length} override cells · read-only`;
+
+export const activityRouteLines = (snapshot: RouterUISnapshot): string[] => [
+  'Unlisted cells use generic tiers, if configured.',
+  ...(snapshot.activityCells.length
+    ? snapshot.activityCells.flatMap((cell) => [
+        `${cell.activity}/${cell.configured.tier}: configured ${cell.configured.model} · requested effort ${cell.configured.thinking}`,
+        `  ${
+          cell.availability === 'eligible'
+            ? `Text eligible: ${cell.eligible.provider}/${cell.eligible.model} · effort ${cell.eligible.thinking}`
+            : cell.availability === 'disabled'
+              ? 'Excluded (activity routing off)'
+              : cell.availability === 'unknown'
+                ? 'Text eligibility unknown (no registry)'
+                : 'No text-eligible attempt'
+        } · configured fallbacks: ${cell.fallbacks.join(' → ') || 'none'}`,
+      ])
+    : ['No configured activity overrides.']),
+];
 
 export const routerTone = (
   snapshot: RouterUISnapshot,

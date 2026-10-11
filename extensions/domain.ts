@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type { RouterTier } from './types';
-import { ROUTER_TIERS } from './types';
+import type { RouterActivity, RouterTier } from './types';
+import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
 
 export const MAX_THINKING_LEVEL: ThinkingLevel = 'max';
 
@@ -45,3 +45,6 @@ export const parseCanonicalModelRef = (
   }
   return { provider, modelId };
 };
+
+export const isRouterActivity = (value: unknown): value is RouterActivity =>
+  ROUTER_ACTIVITIES.some((activity) => activity === value);

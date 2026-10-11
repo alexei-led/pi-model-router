@@ -18,6 +18,8 @@ import type {
 import { ROUTER_TIERS } from '../types';
 import { validateRouterUIControls } from './controls';
 import {
+  activityRouteLines,
+  activityRoutingSummary,
   advisorName,
   budgetLines,
   formatRoute as route,
@@ -144,6 +146,10 @@ export const formatRouterUISnapshot = (
         ]
       : tab === 'settings'
         ? [
+            activityRoutingSummary(snapshot),
+            'Configured activity overrides · not actual',
+            ...activityRouteLines(snapshot),
+            'Text eligibility only; generation rechecks input, context and authentication.',
             ...keys.map(
               (key) =>
                 `${fieldNames[key]}: ${display((snapshot.pendingControls ?? snapshot.controls)[key])}`,
@@ -511,13 +517,18 @@ export class RouterUIInspector implements Component {
         ...this.usage,
       ];
     return [
+      muted(activityRoutingSummary(s)),
       muted('Pin / effort / baseline: this profile.'),
       muted('Advisor / deadline / budget: session-wide.'),
       muted('Apply queues the next user turn; not tool turns.'),
       ...(this.advanced
         ? [
             '',
-            heading('Text-capable routes (generation rechecks fit)'),
+            heading('Configured activity overrides · not actual'),
+            ...activityRouteLines(s),
+            '',
+            heading('Generic text-capable routes · not actual'),
+            muted('Generation rechecks input, context and authentication.'),
             ...(['micro', 'low', 'medium', 'high'] as const).map(
               (tier) =>
                 `${tier}: ${s.eligible[tier] ? route(s.eligible[tier]) : 'not eligible / unknown'}`,

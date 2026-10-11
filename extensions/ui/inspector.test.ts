@@ -39,6 +39,8 @@ const fixture = () => {
       thinking: 'high',
     },
     eligible: {},
+    activityRouting: 'on',
+    activityCells: [],
     history: [],
     classifiers: [],
     privacy: {
@@ -454,5 +456,158 @@ describe('ui/inspector.ts', () => {
       'host stopped',
     );
     expect(f.unsubscribe).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('read-only activity routes in Settings', () => {
+  const cells: RouterUISnapshot['activityCells'] = [
+    {
+      activity: 'code',
+      configured: { tier: 'medium', model: 'test/code', thinking: 'high' },
+      fallbacks: ['test/code-backup'],
+      availability: 'eligible',
+      eligible: {
+        tier: 'medium',
+        provider: 'test',
+        model: 'code',
+        thinking: 'medium',
+      },
+    },
+    {
+      activity: 'docs',
+      configured: { tier: 'micro', model: 'test/docs', thinking: 'off' },
+      fallbacks: [],
+      availability: 'unavailable',
+    },
+  ];
+  const openAdvanced = (panel: RouterUIInspector) => {
+    panel.selectTab('settings');
+    panel.handleInput('\t'); // pin
+    panel.handleInput('\t'); // Advanced action
+    panel.handleInput('\r');
+    panel.handleInput('\x1b[Z'); // pin
+    panel.handleInput('\x1b[Z'); // tab row: browse read-only content
+  };
+  const readPages = (panel: RouterUIInspector, width: number): string => {
+    const pages: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      const text = panel.render(width).join('\n');
+      if (text === pages.at(-1)) break;
+      pages.push(text);
+      panel.handleInput('\x1b[6~');
+    }
+    return pages.join('\n');
+  };
+
+  it('shows mode/count in normal Settings and keeps the override list behind Advanced', () => {
+    const f = fixture();
+    f.update({ activityCells: cells });
+    f.panel.selectTab('settings');
+    const normal = f.panel.render(80).join('\n');
+    expect(normal).toContain(
+      'Activity routing: on · 2 override cells · read-only',
+    );
+    expect(normal).not.toContain('code/medium');
+    expect(normal).not.toContain(' | Apply');
+    openAdvanced(f.panel);
+    const advanced = readPages(f.panel, 80);
+    expect(advanced).toContain('Configured activity overrides · not actual');
+    expect(advanced).toContain('code/medium: configured test/code');
+    expect(advanced).toContain('requested effort high');
+    expect(advanced).toContain('Text eligible: test/code · effort medium');
+    expect(advanced).toContain('configured fallbacks:');
+    expect(advanced).toContain('test/code-backup');
+    expect(advanced).toContain('No text-eligible attempt');
+    expect(advanced).toContain(
+      'Unlisted cells use generic tiers, if configured.',
+    );
+    expect(advanced).toContain('Generic text-capable routes · not actual');
+    expect(advanced).toContain(
+      'Generation rechecks input, context and authentication.',
+    );
+    expect(f.draft.dirty()).toEqual([]);
+    expect(f.adapters.applyControls).not.toHaveBeenCalled();
+    expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
+    f.panel.dispose();
+  });
+
+  it.each([40, 60, 80, 120])(
+    'wraps/scrolls the read-only list at %i columns without adding controls',
+    (columns) => {
+      const f = fixture();
+      f.panel.dispose();
+      Object.assign(f.tui.terminal, { columns, rows: 24 });
+      f.update({ activityCells: cells });
+      const wide = columns >= 100;
+      const width = wide ? 56 : columns;
+      const panel = new RouterUIInspector(
+        f.tui,
+        f.theme,
+        f.adapters,
+        f.draft,
+        f.done,
+        wide,
+      );
+      openAdvanced(panel);
+      const before = panel.render(width).join('\n');
+      const text = readPages(panel, width);
+      expect(text).toContain('code/medium: configured test/code');
+      expect(text).toContain('docs/micro: configured test/docs');
+      expect(text).toContain('No text-eligible attempt');
+      expect(text).not.toBe(before);
+      for (const line of text.split('\n'))
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      expect(panel.render(width).length).toBeLessThanOrEqual(
+        24 - (wide ? 2 : 8),
+      );
+      panel.handleInput('\t'); // pin remains the first field, and brings focus back into view
+      expect(panel.render(width).join('\n')).toContain('›Pin tier');
+      panel.handleInput('\x1b[Z'); // tab row
+      panel.handleInput('\x1b[Z'); // Done: no activity-route focus targets
+      expect(panel.render(width).join('\n')).toContain('›Done');
+      expect(f.adapters.applyControls).not.toHaveBeenCalled();
+      expect(f.draft.dirty()).toEqual([]);
+      panel.handleInput('\x1b');
+      expect(f.done).toHaveBeenCalledWith('close');
+    },
+  );
+
+  it('refreshes disabled mode and preserves declarations while leaving actual generation untouched', () => {
+    const f = fixture();
+    f.update({ activityCells: cells });
+    openAdvanced(f.panel);
+    readPages(f.panel, 80);
+    f.update({
+      activityRouting: 'off',
+      activityCells: cells.map((cell) => ({
+        activity: cell.activity,
+        configured: cell.configured,
+        fallbacks: cell.fallbacks,
+        availability: 'disabled',
+      })),
+    });
+    f.panel.selectTab('settings'); // reset scroll/focus; expanded state stays open
+    const text = readPages(f.panel, 80);
+    expect(text).toContain('Activity routing: off');
+    expect(text).toContain('Excluded (activity routing off)');
+    expect(text).toContain('configured test/code');
+    expect(text).not.toContain('Text eligible:');
+    expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
+    expect(f.adapters.applyControls).not.toHaveBeenCalled();
+    f.panel.dispose();
+  });
+
+  it('includes the same read-only details in non-TUI settings without invoking a terminal', async () => {
+    const f = fixture();
+    f.update({ activityCells: cells });
+    const custom = vi.fn();
+    const ctx = { mode: 'rpc', ui: { custom } } as unknown as ExtensionContext;
+    const text = await openRouterInspector(ctx, f.adapters, 'settings');
+    expect(text).toContain('Activity routing: on');
+    expect(text).toContain('Configured activity overrides · not actual');
+    expect(text).toContain('code/medium: configured test/code');
+    expect(custom).not.toHaveBeenCalled();
+    expect(f.adapters.applyControls).not.toHaveBeenCalled();
+    f.panel.dispose();
   });
 });

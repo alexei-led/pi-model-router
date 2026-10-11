@@ -15,7 +15,7 @@ import { parseCanonicalModelRef } from './domain';
 import { observeGeneration } from './economics';
 import type { PreparedRouterRequest } from './provider-request';
 import type { ProviderTurnCache } from './provider-turns';
-import { availableRoutePairs } from './routing';
+import { currentPlanPairs } from './routing';
 import type { RouterRequestObservation } from './types';
 
 type GenerationRegistry = Pick<
@@ -159,7 +159,7 @@ const updateDecisionForTarget = (
   target: DelegateAttemptInput['target'],
   modelRef: string,
   index: number,
-  profile: PreparedRouterRequest['profile'],
+  primaryModel: string,
   routedTargetLabel: string,
   thinking: ThinkingLevel,
 ): void => {
@@ -167,7 +167,7 @@ const updateDecisionForTarget = (
   decision.targetModelId = target.modelId;
   decision.targetLabel = modelRef;
   decision.thinking = thinking;
-  decision.isFallback = index > 0 || modelRef !== profile[decision.tier]?.model;
+  decision.isFallback = index > 0 || modelRef !== primaryModel;
   if (modelRef !== routedTargetLabel && decision.reasonCode !== 'continuation')
     decision.reasonCode = 'fallback';
 };
@@ -195,7 +195,7 @@ const processAttemptEvent = (
       target,
       attempt.modelRef,
       attempt.index,
-      request.profile,
+      request.plan.config.model,
       attempt.routedTargetLabel,
       attempt.thinking,
     );
@@ -219,6 +219,14 @@ const processAttemptEvent = (
       decision.generation.shadow = undefined;
   }
 
+  if (input.options?.signal?.aborted) {
+    state.generationAborted = true;
+    return {
+      terminal: false,
+      error: new DOMException('Generation aborted', 'AbortError'),
+    };
+  }
+
   if (
     event.type === 'error' &&
     event.reason !== 'aborted' &&
@@ -238,7 +246,7 @@ const processAttemptEvent = (
       target,
       attempt.modelRef,
       attempt.index,
-      request.profile,
+      request.plan.config.model,
       attempt.routedTargetLabel,
       attempt.thinking,
     );
@@ -252,7 +260,7 @@ const processAttemptEvent = (
       target,
       attempt.modelRef,
       attempt.index,
-      request.profile,
+      request.plan.config.model,
       attempt.routedTargetLabel,
       attempt.thinking,
     );
@@ -293,8 +301,10 @@ const rememberCompletedTurn = (
       input.request.decision,
       input.request.policy,
       input.request.config,
+      input.request.plan,
     );
   input.cache.rememberContinuation({
+    plan: input.request.plan,
     turn,
     policy: input.request.policy,
     branch: input.request.branch,
@@ -372,7 +382,9 @@ export const runGenerationAttempts = async (
     const routedTargetLabel = decision.targetLabel;
     const modelsToTry = [
       decision.targetLabel,
-      ...(profile[decision.tier]?.fallbacks ?? []),
+      ...request.plan.attempts
+        .filter((pair) => request.plan.config.fallbacks?.includes(pair.model))
+        .map((pair) => pair.model),
     ].filter((ref, index, refs) => refs.indexOf(ref) === index);
     let lastError: unknown;
     let success = false;
@@ -403,12 +415,11 @@ export const runGenerationAttempts = async (
         )
           effectiveContext = truncateContext(input.context, targetLimit);
 
-        const pair = availableRoutePairs(
-          profile,
+        const pair = currentPlanPairs(
+          request.plan,
           (targetProvider, targetId) =>
             input.registry.find(targetProvider, targetId),
           request.imageAttached,
-          request.thinkingOverrides,
         ).find(
           (candidate) =>
             candidate.tier === decision.tier && candidate.model === modelRef,
@@ -449,7 +460,7 @@ export const runGenerationAttempts = async (
             targetModelId: modelId,
             targetLabel: modelRef,
             thinking: pair.thinking,
-            isFallback: index > 0 || modelRef !== profile[decision.tier]?.model,
+            isFallback: index > 0 || modelRef !== request.plan.config.model,
           },
         });
         const attempt = await runDelegateAttempt({

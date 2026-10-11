@@ -1,8 +1,12 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import { normalizeContext } from '@earendil-works/pi-ai';
+import {
+  createAssistantMessageEventStream,
+  normalizeContext,
+} from '@earendil-works/pi-ai';
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
+  ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import routerExtension from './index';
@@ -1373,6 +1377,222 @@ describe('index.ts (orchestrator)', () => {
       if (!turnStartHandler) throw new Error('Missing turn_start handler');
       await turnStartHandler({}, mockCtx2);
       expect(mockCtx2.ui.setStatus).not.toHaveBeenCalled();
+    });
+  });
+  describe('native session ownership fencing', () => {
+    const ownedContext = (id: string) => {
+      const ctx = buildMockCtx();
+      Object.assign(ctx.sessionManager, { getSessionId: () => id });
+      const registry = Object.assign(ctx.modelRegistry, {
+        streamSimple: vi.fn<ExtensionContext['modelRegistry']['streamSimple']>(
+          () => done(),
+        ),
+      });
+      return { ...ctx, modelRegistry: registry };
+    };
+    const start = async (id: string, reason = 'new') => {
+      const ctx = ownedContext(id);
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason }, ctx);
+      return ctx;
+    };
+    const invokeProvider = (
+      provider: NonNullable<Parameters<ExtensionAPI['registerProvider']>[1]>,
+      transport = 'explicit-transport',
+    ) => {
+      if (!provider.streamSimple) throw new Error('Missing stream');
+      return provider
+        .streamSimple(
+          model('balanced', { provider: 'router' }),
+          normalizeContext({
+            messages: [{ role: 'user', content: 'implement', timestamp: 1 }],
+          }),
+          { sessionId: transport },
+        )
+        .result();
+    };
+
+    it.each(['new', 'resume', 'reload'])(
+      'resets owner/cache on %s while preserving explicit transport session IDs',
+      async (reason) => {
+        routerExtension(mockPi);
+        const old = await start('parent');
+        const previousProvider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+        const next = await start(
+          reason === 'reload' ? 'parent' : 'child',
+          reason,
+        );
+        const count = mockPi.appendEntry.mock.calls.length;
+        expect((await invokeProvider(previousProvider)).stopReason).toBe(
+          'aborted',
+        );
+        expect(mockPi.appendEntry.mock.calls.length).toBe(count);
+        const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+        expect((await invokeProvider(provider)).stopReason).toBe('stop');
+        expect(
+          vi.mocked(next.modelRegistry.streamSimple).mock.calls[0]?.[2]
+            ?.sessionId,
+        ).toBe('explicit-transport');
+        expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+          ownerSessionId: reason === 'reload' ? 'parent' : 'child',
+        });
+        if (old !== next)
+          expect(
+            vi.mocked(old.modelRegistry.streamSimple),
+          ).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not restore foreign or legacy unowned state on a new child fork', async () => {
+      routerExtension(mockPi);
+      const ctx = ownedContext('child');
+      ctx.sessionManager.getBranch = () => [
+        {
+          type: 'custom',
+          customType: 'router-state',
+          data: {
+            ownerSessionId: 'parent',
+            enabled: true,
+            selectedProfile: 'balanced',
+            pinByProfile: { balanced: 'high' },
+            accumulatedCost: 9,
+            timestamp: 1,
+          },
+        },
+      ];
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'fork' }, ctx);
+      expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+        ownerSessionId: 'child',
+        pinByProfile: {},
+        accumulatedCost: 0,
+      });
+      ctx.sessionManager.getBranch = () => [
+        {
+          type: 'custom',
+          customType: 'router-state',
+          data: {
+            enabled: true,
+            selectedProfile: 'balanced',
+            pinByProfile: { balanced: 'high' },
+            accumulatedCost: 9,
+            timestamp: 1,
+          },
+        },
+      ];
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'fork' }, ctx);
+      expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+        pinByProfile: {},
+        accumulatedCost: 0,
+      });
+    });
+
+    it('rejects foreign lifecycle events without changing parent UI, controls or persistence', async () => {
+      routerExtension(mockPi);
+      const parent = await start('parent');
+      const child = ownedContext('child');
+      const state = structuredClone(mockPi.appendEntry.mock.calls);
+      const models = mockPi.setModel.mock.calls.length;
+      for (const event of [
+        'turn_start',
+        'turn_end',
+        'before_agent_start',
+        'model_select',
+        'thinking_level_select',
+        'session_shutdown',
+      ]) {
+        for (const handler of handlersFor(event)) await handler({}, child);
+      }
+      expect(mockPi.appendEntry.mock.calls).toEqual(state);
+      expect(mockPi.setModel.mock.calls.length).toBe(models);
+      expect(child.ui.setStatus).not.toHaveBeenCalled();
+      expect(
+        (await invokeProvider(mockPi.registerProvider.mock.calls.at(-1)?.[1]))
+          .stopReason,
+      ).toBe('stop');
+      expect(
+        vi.mocked(parent.modelRegistry.streamSimple),
+      ).toHaveBeenCalledOnce();
+    });
+
+    it('late advice completion after replacement cannot generate a baseline or mutate the new owner', async () => {
+      stateMocks.advisors = {
+        advisor: { enabled: true, model: 'typesafe/jev-latest' },
+      };
+      routerExtension(mockPi);
+      const old = await start('parent');
+      let finish: (() => void) | undefined;
+      const classify = vi.fn<typeof old.modelRegistry.classify>(
+        async (classifier, context) =>
+          new Promise((resolve) => {
+            finish = () => {
+              const question = context.questions.route;
+              const route =
+                question?.type === 'choice'
+                  ? (Object.keys(question.criteria).find((id) =>
+                      id.startsWith('high|'),
+                    ) ?? '')
+                  : '';
+              resolve({
+                api: classifier.api,
+                provider: classifier.provider,
+                model: classifier.id,
+                timestamp: 1,
+                stopReason: 'stop',
+                answers: {
+                  route: {
+                    type: 'choice',
+                    choice: route,
+                    confidence: 1,
+                    probabilities: { [route]: 1 },
+                  },
+                },
+              });
+            };
+          }),
+      );
+      old.modelRegistry.classify = classify;
+      const pending = invokeProvider(
+        mockPi.registerProvider.mock.calls.at(-1)?.[1],
+      );
+      await vi.waitFor(() => expect(classify).toHaveBeenCalledOnce());
+      await start('child');
+      expect((await pending).stopReason).toBe('aborted');
+      const state = structuredClone(mockPi.appendEntry.mock.calls);
+      finish?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockPi.appendEntry.mock.calls).toEqual(state);
+      expect(vi.mocked(old.modelRegistry.streamSimple)).not.toHaveBeenCalled();
+    });
+
+    it('late charged generation completion after replacement cannot persist cost or start a fallback', async () => {
+      routerExtension(mockPi);
+      const old = await start('parent');
+      // Use an open in-memory Pi stream that deliberately ignores cancellation.
+      const stream = createAssistantMessageEventStream();
+      const generate = vi.fn<ExtensionContext['modelRegistry']['streamSimple']>(
+        () => stream,
+      );
+      Object.assign(old.modelRegistry, { streamSimple: generate });
+      const pending = invokeProvider(
+        mockPi.registerProvider.mock.calls.at(-1)?.[1],
+      );
+      await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+      await start('child');
+      const state = structuredClone(mockPi.appendEntry.mock.calls);
+      stream.push({
+        type: 'error',
+        reason: 'error',
+        error: message({ stopReason: 'error' }),
+      });
+      stream.end();
+      expect((await pending).stopReason).toBe('aborted');
+      expect(mockPi.appendEntry.mock.calls).toEqual(state);
+      expect(generate).toHaveBeenCalledOnce();
+      expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+        accumulatedCost: 0,
+      });
     });
   });
 });

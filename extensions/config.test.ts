@@ -807,3 +807,127 @@ describe('classifier advisor config', () => {
     expect(config.profiles.work?.advisor).toBeUndefined();
   });
 });
+
+describe('activity configuration', () => {
+  it('defaults on and accepts only on/off, never shadow', () => {
+    expect(normalizeConfig({}).config.activityRouting).toBe('on');
+    expect(
+      normalizeConfig({ activityRouting: 'off' }).config.activityRouting,
+    ).toBe('off');
+    for (const invalid of ['shadow', true, 1, null]) {
+      const loaded = normalizeConfig({ activityRouting: invalid });
+      expect(loaded.config.activityRouting).toBe('on');
+      expect(loaded.warnings).toContain('Invalid activityRouting; using on.');
+    }
+  });
+
+  it('inherits raw tier fields, replaces fallbacks and re-resolves model-specific aliases', () => {
+    const loaded = normalizeConfig({
+      models: {
+        generic: {
+          model: 'test/base',
+          reasoning: false,
+          thinkingLevels: ['off'],
+          contextWindow: 2000,
+        },
+        code: {
+          model: 'test/code',
+          reasoning: true,
+          thinkingLevels: ['high'],
+          contextWindow: 9000,
+        },
+        backup: { model: 'test/backup', reasoning: false },
+      },
+      profiles: {
+        auto: {
+          medium: { model: 'generic', fallbacks: ['generic'] },
+          activities: {
+            code: { medium: { model: 'code', fallbacks: ['backup'] } },
+            docs: { medium: { thinking: 'off' } },
+          },
+        },
+      },
+    });
+    const profile = loaded.config.profiles.auto;
+    expect(profile?.activities?.code?.medium).toMatchObject({
+      model: 'test/code',
+      reasoning: true,
+      thinkingLevels: ['high'],
+      resolvedContextWindow: 9000,
+      thinking: 'medium',
+      thinkingExplicit: false,
+      fallbacks: ['test/backup'],
+      resolvedFallbacks: [{ model: 'test/backup', reasoning: false }],
+    });
+    expect(profile?.activities?.docs?.medium).toMatchObject({
+      model: 'test/base',
+      thinking: 'off',
+      fallbacks: ['test/base'],
+    });
+    expect(loaded.warnings).toEqual([]);
+  });
+
+  it('merges activities by activity/tier without concatenating fallback lists', () => {
+    const merged = mergeConfig(
+      {
+        profiles: {
+          auto: {
+            medium: { model: 'test/base' },
+            activities: {
+              code: { medium: { thinking: 'high', fallbacks: ['test/a'] } },
+              docs: { medium: { thinking: 'off' } },
+            },
+          },
+        },
+      },
+      {
+        activityRouting: 'off',
+        profiles: {
+          auto: {
+            activities: {
+              code: { medium: { fallbacks: [] }, low: { model: 'test/low' } },
+            },
+          },
+        },
+      },
+    );
+    const config = normalizeConfig(merged).config;
+    expect(config.activityRouting).toBe('off');
+    expect(config.profiles.auto?.activities?.code?.medium).toMatchObject({
+      thinking: 'high',
+      fallbacks: [],
+    });
+    expect(config.profiles.auto?.activities?.code?.low?.model).toBe('test/low');
+    expect(config.profiles.auto?.activities?.docs?.medium?.thinking).toBe(
+      'off',
+    );
+  });
+
+  it('ignores invalid activity declarations with value-free warnings', () => {
+    const loaded = normalizeConfig({
+      profiles: {
+        auto: {
+          medium: { model: 'test/base' },
+          activities: {
+            uncertain: { high: { model: 'secret-invalid-model' } },
+            code: { medium: false, private: {} },
+            debug: false,
+            explore: { high: {} },
+            docs: { low: { model: 'invalid-private-ref' } },
+          },
+        },
+        broken: { activities: false },
+        only: {
+          activities: { ops: { low: { model: 'test/ops' } } },
+          baselineTier: 'low',
+        },
+      },
+    });
+    expect(loaded.config.profiles.auto?.activities).toBeUndefined();
+    expect(loaded.config.profiles.only?.baselineTier).toBe('low');
+    expect(loaded.warnings.length).toBeGreaterThan(0);
+    expect(JSON.stringify(loaded.warnings)).not.toMatch(
+      /secret-invalid-model|invalid-private-ref/,
+    );
+  });
+});
