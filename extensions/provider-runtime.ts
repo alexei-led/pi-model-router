@@ -337,7 +337,12 @@ export const startRouterProviderStream = (input: RouterStreamInput): void => {
       if (isCurrent()) input.actions.updateStatus();
     },
     syncPiThinkingLevel: (level) => {
-      if (isCurrent()) input.actions.syncPiThinkingLevel(level);
+      if (
+        isCurrent() &&
+        input.state.routerEnabled &&
+        input.state.selectedProfile === input.model.id
+      )
+        input.actions.syncPiThinkingLevel(level);
     },
     beginRequest: (profile) => {
       const observe = isCurrent()

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { normalizeAdvisorConfig } from '../config';
 import { isThinkingLevel, parseCanonicalModelRef } from '../domain';
@@ -118,6 +119,7 @@ const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
       decision.advisor === 'classifier' ||
       decision.advisor === 'classifier-fallback'
         ? {
+            source: decision.adviceSource,
             advisor: metrics?.model ?? 'Classifier',
             requestId: metrics?.requestId,
             outcome:
@@ -617,7 +619,7 @@ export const createRouterUIRuntime = (
       route: RouterUIRouteCellState,
       tier: RouterTier,
       effort: RouterUIControls['thinkingHigh'],
-      declaredLevels?: readonly import('@earendil-works/pi-agent-core').ThinkingLevel[],
+      declaredLevels?: readonly ThinkingLevel[],
     ) => {
       if (!route.model) return undefined;
       return routeThinking(
@@ -718,6 +720,7 @@ export const createRouterUIRuntime = (
       advice: last ? historyOf(last).advice : undefined,
       controls: controls(profile),
       pendingControls: pendingValue(profile),
+      pendingRoutes: routeCells.some((cell) => cell.pending !== undefined),
       eligible,
       activityRouting,
       activityCells,

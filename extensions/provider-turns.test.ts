@@ -60,6 +60,29 @@ describe('background review lifetime', () => {
     await Promise.resolve();
     expect(cache.takeReview('turn', stamp(3))).toBeUndefined();
   });
+  it('rejects a completed result after its originating caller was cancelled', async () => {
+    const cache = createProviderTurnCache();
+    const caller = new AbortController();
+    cache.startReview(
+      'turn',
+      { ...stamp(2), signal: caller.signal },
+      async () => result,
+    );
+    await Promise.resolve();
+    caller.abort();
+    expect(cache.takeReview('turn', stamp(3))).toBeUndefined();
+  });
+  it('aborts an unready review when its only consumption window arrives', () => {
+    const cache = createProviderTurnCache();
+    let signal: AbortSignal | undefined;
+    cache.startReview('turn', stamp(2), async (value) => {
+      signal = value;
+      return new Promise<ClassifierResult>(() => {});
+    });
+    expect(cache.takeReview('turn', stamp(3))).toBeUndefined();
+    expect(signal?.aborted).toBe(true);
+  });
+
   it('replaces an unready prior snapshot when a new review is due', async () => {
     const cache = createProviderTurnCache();
     let oldSignal: AbortSignal | undefined;

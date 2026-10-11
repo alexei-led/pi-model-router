@@ -22,6 +22,7 @@ import type {
   SwitchCostDiagnostic,
 } from './types';
 import {
+  ADVICE_SOURCES,
   CLASSIFIER_OUTCOMES,
   CLASSIFIER_RESPONSE_ISSUES,
   CLASSIFIER_SELECTION_BASES,
@@ -29,6 +30,7 @@ import {
   isAdvisorOutcome,
   isBypassReason,
   isRoutingReasonCode,
+  SWITCH_COST_REASONS,
 } from './types';
 
 const LAST_PROFILE_STATE_FILE = 'model-router-state.json';
@@ -58,15 +60,6 @@ const isPersistedReasonCode = (value: unknown): boolean =>
   isRoutingReasonCode(value) ||
   (typeof value === 'string' && OBSOLETE_REASON_CODES.has(value));
 
-const SWITCH_COST_REASONS = [
-  'same-route',
-  'effort-cache-shared',
-  'effort-cache-unknown',
-  'within-policy',
-  'strong-advice',
-  'cost-held',
-  'cost-unknown',
-] as const;
 const isRouteRecommendation = (value: unknown): value is RouteRecommendation =>
   isObjectRecord(value) &&
   isRouterTier(value.tier) &&
@@ -104,6 +97,8 @@ const isDecision = (value: unknown): value is RoutingDecision =>
     ? typeof value.reasoning === 'string'
     : isPersistedReasonCode(value.reasonCode)) &&
   (value.advisor === undefined || isAdvisorOutcome(value.advisor)) &&
+  (value.adviceSource === undefined ||
+    ADVICE_SOURCES.some((source) => source === value.adviceSource)) &&
   (value.proposedRoute === undefined ||
     isRouteRecommendation(value.proposedRoute)) &&
   (value.switchCost === undefined || isSwitchCost(value.switchCost)) &&
@@ -399,6 +394,9 @@ export const snapshotDecision = (
   decision: RoutingDecision,
 ): RoutingDecision => ({
   reviewOnly: decision.reviewOnly === true ? true : undefined,
+  adviceSource: ADVICE_SOURCES.find(
+    (source) => source === decision.adviceSource,
+  ),
   activity: isRouterActivity(decision.activity) ? decision.activity : undefined,
   routeCell: isRouterActivity(decision.routeCell)
     ? decision.routeCell

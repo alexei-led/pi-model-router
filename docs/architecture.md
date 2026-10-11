@@ -54,18 +54,19 @@ flowchart TD
     Policy -->|"Local rule selects a route"| Generate["Revalidate and generate through Pi"]
     Policy -->|"Advice needed"| Advisor["Configured Pi classifier"]
     Advisor -->|"Valid choice"| Switch["Initial selection or in-loop cost policy"]
-    Switch -->|"Accepted"| Generate
+    Switch -->|"Accepted"| Accepted["Selected route"]
+    Accepted --> Generate
     Switch -->|"Held"| Incumbent["Eligible incumbent"]
     Incumbent --> Generate
-    Advisor -->|"Initial advice unavailable"| Baseline
-    Advisor -->|"Review unavailable"| Incumbent["Eligible baseline"]
+    Advisor -->|"Initial advice unavailable"| Baseline["Eligible baseline"]
+    Advisor -->|"Review unavailable"| Incumbent
     Policy -->|"No active advisor"| Baseline
     Baseline --> Generate
     classDef policy fill:#dbeafe,stroke:#2563eb,color:#0f172a
     classDef advisor fill:#fef3c7,stroke:#b45309,color:#451a03
     classDef generation fill:#dcfce7,stroke:#15803d,color:#14532d
     classDef local fill:#f1f5f9,stroke:#64748b,color:#0f172a
-    class Start,Policy,Switch policy
+    class Start,Policy,Switch,Accepted policy
     class Incumbent local
     class Advisor advisor
     class Generate generation

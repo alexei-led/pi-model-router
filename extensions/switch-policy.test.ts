@@ -191,6 +191,30 @@ describe('adaptive switch economics', () => {
     expect(promoted.diagnostic.confidenceOverride).toBe(true);
   });
 
+  it('prices freshly written cache as part of the next reusable-prefix scenario', () => {
+    const next = evaluateSwitch({
+      current: pair('test/current', 'low'),
+      proposed: pair('test/cheap', 'high'),
+      currentModel: current,
+      proposedModel: cheap,
+      config: normalizeConfig({ switchPolicy: { horizonRequests: 5 } }).config,
+      contextTokens: 100000,
+      outputTokens: 2000,
+      adviceConfidence: 0.8,
+      previousGeneration: {
+        transition: 'initial',
+        contextTruncated: false,
+        attempts: 1,
+        inputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 100000,
+        outputTokens: 2000,
+      },
+    });
+    expect(next.diagnostic.stayUsd).toBeCloseTo(0.7, 10);
+    expect(next.diagnostic.rebuildUsd).toBeGreaterThan(0);
+  });
+
   it('does not forbid a cross-model switch when catalog cost is unavailable', () => {
     const unpriced = model('unknown', {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

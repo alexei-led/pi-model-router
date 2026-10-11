@@ -1748,6 +1748,90 @@ describe('activity matrix provider routing', () => {
     expect(s.state.lastDecision?.switchCost).toBeUndefined();
   });
 
+  it('does not let activity abstention override a cost-sensitive hold in an activity-only review', async () => {
+    const s = activitySetup();
+    delete s.profile.high;
+    delete s.profile.low;
+    s.profile.activities = {
+      docs: { medium: { model: 'test/docs', thinking: 'off', fallbacks: [] } },
+    };
+    s.state.currentConfig.advisor = {
+      ...required(s.state.currentConfig.advisor),
+      reviewEveryRequests: 2,
+    };
+    s.state.currentConfig.switchPolicy = {
+      horizonRequests: 1,
+      costSensitivity: 1,
+      strongAdviceConfidence: 0.9,
+    };
+    s.models[s.models.findIndex((m) => m.id === 'docs')] = model('docs', {
+      cost: { input: 0.1, output: 0.1, cacheRead: 0.01, cacheWrite: 0.1 },
+    });
+    s.models[s.models.findIndex((m) => m.id === 'primary')] = model('primary', {
+      cost: { input: 100, output: 100, cacheRead: 10, cacheWrite: 125 },
+    });
+    const messages: Context['messages'] = [
+      {
+        role: 'user',
+        content: 'Complete the current task.',
+        timestamp: 60,
+      },
+    ];
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            {
+              type: 'toolCall',
+              name: 'read',
+              id: `abstention-${messages.length}`,
+              arguments: {},
+            },
+          ],
+        }),
+      }),
+    );
+    const advance = async () => {
+      const response = await consume(s.stream({ messages }));
+      messages.push(response.result);
+      const call = response.result.content.find((p) => p.type === 'toolCall');
+      if (call?.type !== 'toolCall')
+        throw new Error('Expected fixture tool call');
+      messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: 'text', text: 'Current evidence' }],
+        isError: false,
+        timestamp: messages.length + 60,
+      });
+      return response.result;
+    };
+    s.answer.activity = 'docs';
+    await advance();
+    s.answer.activity = 'uncertain';
+    s.answer.confidence = 0.99;
+    await advance();
+    await vi.waitFor(() =>
+      expect(
+        s.actions.recordDebugDecision.mock.calls.some(
+          ([decision]) =>
+            decision.reviewOnly &&
+            decision.classification?.activityOutcome === 'uncertain',
+        ),
+      ).toBe(true),
+    );
+    expect((await advance()).model).toBe('docs');
+    expect(s.state.lastDecision).toMatchObject({
+      targetModelId: 'docs',
+      switchCost: { reason: 'cost-held', confidenceOverride: false },
+    });
+  });
+
   it('can disable in-loop classifier reviews independently of initial-turn advice', async () => {
     const s = activitySetup();
     s.state.currentConfig.advisor = {

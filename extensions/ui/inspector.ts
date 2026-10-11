@@ -844,7 +844,7 @@ export class RouterUIInspector implements Component {
       if (this.routeModal) this.closeRouteModal();
       else {
         this.routesOpen = false;
-        this.routeFocus =
+        this.focus =
           this.actions().indexOf('Routes') + this.fields().length + 1;
       }
       this.tui.requestRender();
@@ -1168,6 +1168,14 @@ export class RouterUIInspector implements Component {
         this.theme.fg(routerTone(s), routeReason(s)),
         ...(differs
           ? [this.theme.fg('warning', `Proposed · ${route(s.advised)}`)]
+          : []),
+        ...(s.pendingRoutes
+          ? [
+              this.theme.fg(
+                'warning',
+                'Next user turn: route edits queued (pending; actual unchanged)',
+              ),
+            ]
           : []),
         ...(s.pendingControls
           ? [

@@ -21,6 +21,7 @@ export { openRouterInspector } from './ui/inspector';
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
+  if (decision.reviewOnly) flags.push('review-only');
   if (decision.activity) flags.push(`activity=${decision.activity}`);
   else if (decision.routeCell)
     flags.push(`availability-cell=${decision.routeCell}`);
@@ -358,6 +359,7 @@ export const updateRouterUIStrip = (
   if (ctx.mode !== 'tui') return;
   const tone = routerTone(snapshot);
   const pending = snapshot.pendingControls;
+  const hasPending = pending !== undefined || snapshot.pendingRoutes === true;
   const reason = routeReason(snapshot);
   const state = snapshot.lifecycle === 'idle' ? 'last' : snapshot.lifecycle;
   const identity = (width: number): string => {
@@ -385,7 +387,7 @@ export const updateRouterUIStrip = (
   }
   if (!preferences.widgetEnabled) {
     ctx.ui.setWidget('router', undefined);
-    const suffix = pending
+    const suffix = hasPending
       ? ' · pending'
       : snapshot.switchCost?.reason === 'cost-held'
         ? ' · held'
@@ -400,8 +402,7 @@ export const updateRouterUIStrip = (
       ctx.ui.theme.fg(
         tone,
         truncateToWidth(
-          identity(Math.max(1, width - (pending ? visibleWidth(suffix) : 0))) +
-            suffix,
+          identity(Math.max(1, width - visibleWidth(suffix))) + suffix,
           width,
         ),
       ),
@@ -415,10 +416,12 @@ export const updateRouterUIStrip = (
       const w = Math.max(1, width);
       const next = pending
         ? `Next user turn: ${pending.pin !== snapshot.controls.pin ? `pin ${pending.pin}` : 'settings changed'} (pending) · ${reason}`
-        : `${reason} · ${snapshot.profile}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
+        : snapshot.pendingRoutes
+          ? `Next user turn: route edits queued (pending) · ${reason}`
+          : `${reason} · ${snapshot.profile}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
       return [
         theme.fg(tone, truncateToWidth(identity(w), w)),
-        theme.fg(pending ? 'warning' : 'muted', truncateToWidth(next, w)),
+        theme.fg(hasPending ? 'warning' : 'muted', truncateToWidth(next, w)),
       ];
     },
   }));

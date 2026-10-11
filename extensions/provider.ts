@@ -32,11 +32,8 @@ const supportsReasoning = (
 ): boolean => {
   if (!modelRegistry) return false;
 
-  for (const tierConfig of [
-    profile,
-    ...Object.values(profile.activities ?? {}),
-  ].flatMap((cell) =>
-    ROUTER_TIERS.flatMap((tier) => (cell[tier] ? [cell[tier]] : [])),
+  for (const tierConfig of ROUTER_TIERS.flatMap((tier) =>
+    profile[tier] ? [profile[tier]] : [],
   )) {
     if (!tierConfig) continue;
     try {
@@ -54,6 +51,7 @@ export const registerRouterProvider = (
   state: {
     lastRegisteredModels: string;
     disposeProvider?: (() => void) | undefined;
+    clearProviderReviews?: (() => void) | undefined;
     readonly requestEpoch?: number;
     readonly ownerSignal?: AbortSignal;
     readonly currentConfig: RouterConfig;
@@ -158,6 +156,7 @@ export const registerRouterProvider = (
   registrationSignal.addEventListener('abort', turnCache.dispose, {
     once: true,
   });
+  state.clearProviderReviews = () => turnCache.clearReviewsExcept(undefined);
   state.disposeProvider = () => {
     registrationController.abort();
     registrationSignal.removeEventListener('abort', turnCache.dispose);

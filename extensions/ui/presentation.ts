@@ -56,6 +56,7 @@ export const routeReason = (snapshot: RouterUISnapshot): string => {
     return 'Over soft budget → eligible baseline';
   if (
     snapshot.reuse === 'continuation' &&
+    snapshot.advice?.source === 'review' &&
     snapshot.advice?.outcome !== 'selected' &&
     snapshot.advice?.outcome !== undefined
   )

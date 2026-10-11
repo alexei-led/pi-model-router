@@ -38,6 +38,7 @@ interface BackgroundReview {
   branch: readonly string[];
   startedAtRequest: number;
   controller: AbortController;
+  signal: AbortSignal;
   result?: ClassifierResult;
 }
 
@@ -239,7 +240,7 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
       if (
         review.identity !== stamp.identity ||
         stamp.requestCount - review.startedAtRequest !== 1 ||
-        review.controller.signal.aborted ||
+        review.signal.aborted ||
         stamp.signal?.aborted ||
         !review.branch.length ||
         !review.branch.every((id, index) => stamp.branch[index] === id)
@@ -248,7 +249,11 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
         reviews.delete(turn);
         return undefined;
       }
-      if (!review.result) return undefined;
+      if (!review.result) {
+        review.controller.abort();
+        reviews.delete(turn);
+        return undefined;
+      }
       reviews.delete(turn);
       return review.result;
     },
@@ -268,11 +273,16 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
       )
         return;
       existing?.controller.abort();
+      const controller = new AbortController();
+      const signal = stamp.signal
+        ? AbortSignal.any([controller.signal, stamp.signal])
+        : controller.signal;
       const review: BackgroundReview = {
         identity: stamp.identity,
         branch: [...stamp.branch],
         startedAtRequest: stamp.requestCount,
-        controller: new AbortController(),
+        controller,
+        signal,
       };
       reviews.delete(turn);
       reviews.set(turn, review);
@@ -282,9 +292,6 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
         reviews.get(oldest)?.controller.abort();
         reviews.delete(oldest);
       }
-      const signal = stamp.signal
-        ? AbortSignal.any([review.controller.signal, stamp.signal])
-        : review.controller.signal;
       void run(signal).then(
         (result) => {
           if (reviews.get(turn) === review && !signal.aborted)

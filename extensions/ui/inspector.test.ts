@@ -139,6 +139,16 @@ describe('Signal Panel', () => {
     },
   );
 
+  it('shows queued route changes in Now without changing the actual model', () => {
+    const f = fixture();
+    f.update({ pendingRoutes: true });
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('route edits queued');
+    expect(text).toContain('actual unchanged');
+    expect(text).toContain('漢字');
+    f.panel.dispose();
+  });
+
   it('uses three sections with no edit actions while browsing', () => {
     const f = fixture();
     const text = f.panel.render(80).join('\n');

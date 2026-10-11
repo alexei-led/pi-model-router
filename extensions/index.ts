@@ -46,6 +46,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   let widgetEnabled = true;
   let lastRegisteredModels = '';
   let disposeProvider: (() => void) | undefined;
+  let clearProviderReviews: (() => void) | undefined;
   const pinnedTierByProfile: RouterPinByProfile = {};
   const thinkingByProfile: RouterThinkingByProfile = {};
   let debugHistory: RoutingDecision[] = [];
@@ -74,6 +75,12 @@ const routerExtension = (pi: ExtensionAPI) => {
     },
     get ownerSignal() {
       return ownerController.signal;
+    },
+    get clearProviderReviews() {
+      return clearProviderReviews;
+    },
+    set clearProviderReviews(value: (() => void) | undefined) {
+      clearProviderReviews = value;
     },
     get disposeProvider() {
       return disposeProvider;
@@ -109,11 +116,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       return routerEnabled;
     },
     set routerEnabled(value: boolean) {
-      if (routerEnabled && !value) {
-        disposeProvider?.();
-        disposeProvider = undefined;
-        lastRegisteredModels = '';
-      }
+      if (routerEnabled && !value) clearProviderReviews?.();
       routerEnabled = value;
     },
     get lastDecision() {

@@ -323,6 +323,47 @@ describe('ui.ts lifecycle strip', () => {
     expect(widget(ctx)[0]).toContain('actual-medium');
     expect(widget(ctx)[1]).toContain('Next user turn: pin high');
   });
+  it('preserves held and pending route indicators in a detailed narrow footer', () => {
+    const ctx = context();
+    Object.assign(ctx, { mode: 'tui' });
+    const prior = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+    Object.defineProperty(process.stdout, 'columns', {
+      configurable: true,
+      value: 80,
+    });
+    try {
+      for (const pendingRoutes of [false, true]) {
+        updateRouterUIStrip(
+          ctx,
+          {
+            ...snapshot,
+            lifecycle: 'generating',
+            pendingRoutes,
+            actual: {
+              tier: 'high',
+              activity: 'code',
+              provider: 'anthropic',
+              model: 'claude-sonnet-4-5-20250929',
+              thinking: 'high',
+            },
+            switchCost: {
+              reason: 'cost-held',
+              horizonRequests: 5,
+              confidenceOverride: false,
+            },
+          },
+          { widgetEnabled: false, statusLine: 'detailed' },
+        );
+        const value = vi.mocked(ctx.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
+        expect(value).toContain(pendingRoutes ? 'pending' : 'held');
+        expect(visibleWidth(value)).toBeLessThanOrEqual(80);
+      }
+    } finally {
+      if (prior) Object.defineProperty(process.stdout, 'columns', prior);
+      else Reflect.deleteProperty(process.stdout, 'columns');
+    }
+  });
+
   it('falls back to one footer status when the widget is hidden', () => {
     const ctx = context();
     Object.assign(ctx, { mode: 'tui' });

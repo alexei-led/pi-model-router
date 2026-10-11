@@ -52,6 +52,23 @@ describe('Signal Panel presentation', () => {
     expect(routerTone({ ...snapshot, lifecycle: 'failed' })).toBe('error');
     expect(routerTone({ ...snapshot, lifecycle: 'timeout' })).toBe('warning');
   });
+  it('distinguishes a consumed review failure from reused initial diagnostics', () => {
+    const state = {
+      ...snapshot,
+      lifecycle: 'continuation' as const,
+      reuse: 'continuation' as const,
+      advice: {
+        advisor: 'fixture',
+        outcome: 'deadline' as const,
+        source: 'initial' as const,
+      },
+    };
+    expect(routeReason(state)).toBe('Tool route reused · no new advice');
+    expect(
+      routeReason({ ...state, advice: { ...state.advice, source: 'review' } }),
+    ).toContain('Background review deadline · current route retained');
+  });
+
   it('marks reused advice without presenting its old latency as a new request', () => {
     expect(
       routeReason({

@@ -11,6 +11,7 @@ import type {
   AdvisorConfig,
   CapabilityCriterion,
   ClassifierContextState,
+  ClassifierDiagnostics,
   ClassifierResponseIssue,
   ClassifierSelectionBasis,
   RouteCandidate,
@@ -260,6 +261,38 @@ interface ParsedChoice {
   probability: number;
   probabilities: Readonly<Record<string, number>>;
 }
+
+export const selectedAdviceConfidence = (
+  diagnostics: ClassifierDiagnostics,
+  changes: { tier: boolean; activity: boolean },
+): number | undefined => {
+  const tier =
+    diagnostics.selectionBasis === 'choice' &&
+    diagnostics.choice === diagnostics.selectedTier &&
+    isRouterTier(diagnostics.choice)
+      ? diagnostics.confidence
+      : undefined;
+  const activity =
+    diagnostics.activityOutcome === 'selected' &&
+    isRouterActivity(diagnostics.activity)
+      ? diagnostics.activityConfidence
+      : undefined;
+  if (
+    (changes.tier && tier === undefined) ||
+    (changes.activity && activity === undefined)
+  )
+    return undefined;
+  if (
+    changes.tier &&
+    changes.activity &&
+    tier !== undefined &&
+    activity !== undefined
+  )
+    return Math.min(tier, activity);
+  if (changes.tier) return tier;
+  if (changes.activity) return activity;
+  return tier ?? activity;
+};
 
 /** Both answers are validated independently; distributions are never multiplied. */
 const parseChoice = (

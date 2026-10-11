@@ -5,7 +5,7 @@ import {
   type ExtensionContext,
   estimateTokens as estimateMessageTokens,
 } from '@earendil-works/pi-coding-agent';
-import { createCandidate } from './choice';
+import { createCandidate, selectedAdviceConfidence } from './choice';
 import { runClassifierDetailed } from './classifier';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
 import { hasImageAttachment } from './context';
@@ -209,6 +209,7 @@ const canReuseContinuation = (
       errorClass: undefined,
       proposedRoute: undefined,
       switchCost: undefined,
+      adviceSource: undefined,
       timestamp: Date.now(),
     },
   };
@@ -371,6 +372,7 @@ const scheduleBackgroundReview = (
       input.onReview?.({
         ...record,
         reviewOnly: true,
+        adviceSource: 'review',
         advisor: result.advice ? 'classifier' : 'classifier-fallback',
         classification: result.diagnostics,
         timestamp: Date.now(),
@@ -497,6 +499,7 @@ const chooseAdvisorRoute = async (
       ...selected.decision,
       reasonCode: 'continuation',
       advisor: 'classifier-fallback',
+      adviceSource: 'review',
       bypassReason: undefined,
       reuse: 'continuation',
       classification: result.diagnostics,
@@ -532,6 +535,7 @@ const chooseAdvisorRoute = async (
       },
     };
   }
+  selected.decision.adviceSource = reviewResult ? 'review' : 'initial';
   selected.decision.classification =
     !validated && result.diagnostics.outcome === 'selected'
       ? {
@@ -616,19 +620,13 @@ const applySwitchPolicy = (
           cacheWriteTokens: usage.cacheWrite,
         }
       : undefined);
-  const requiredConfidence: number[] = [];
-  if (actualPair.tier !== proposedPair.tier)
-    if (proposed.decision.classification.confidence !== undefined)
-      requiredConfidence.push(proposed.decision.classification.confidence);
-  if (incumbent.decision.activity !== proposed.decision.activity)
-    if (proposed.decision.classification.activityConfidence !== undefined)
-      requiredConfidence.push(
-        proposed.decision.classification.activityConfidence,
-      );
-  const adviceConfidence = requiredConfidence.length
-    ? Math.min(...requiredConfidence)
-    : (proposed.decision.classification.confidence ??
-      proposed.decision.classification.activityConfidence);
+  const adviceConfidence = selectedAdviceConfidence(
+    proposed.decision.classification,
+    {
+      tier: actualPair.tier !== proposedPair.tier,
+      activity: incumbent.decision.activity !== proposed.decision.activity,
+    },
+  );
   const decision = evaluateSwitch({
     current: actualPair,
     proposed: proposedPair,
@@ -652,6 +650,7 @@ const applySwitchPolicy = (
       reasonCode: 'classifier',
       advisor: 'classifier',
       isClassifier: true,
+      adviceSource: 'review',
       classification: proposed.decision.classification,
       proposedRoute: {
         activity: proposed.decision.activity,

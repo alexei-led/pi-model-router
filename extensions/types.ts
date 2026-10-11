@@ -333,15 +333,20 @@ export interface GenerationDiagnostics {
   shadow?: CacheCostShadow | undefined;
 }
 
+export const SWITCH_COST_REASONS = [
+  'same-route',
+  'effort-cache-shared',
+  'effort-cache-unknown',
+  'within-policy',
+  'strong-advice',
+  'cost-held',
+  'cost-unknown',
+] as const;
+export const ADVICE_SOURCES = ['initial', 'review'] as const;
+export type AdviceSource = (typeof ADVICE_SOURCES)[number];
+
 export interface SwitchCostDiagnostic {
-  reason:
-    | 'same-route'
-    | 'effort-cache-shared'
-    | 'effort-cache-unknown'
-    | 'within-policy'
-    | 'strong-advice'
-    | 'cost-held'
-    | 'cost-unknown';
+  reason: (typeof SWITCH_COST_REASONS)[number];
   horizonRequests: number;
   stayUsd?: number | undefined;
   switchUsd?: number | undefined;
@@ -355,6 +360,7 @@ export interface SwitchCostDiagnostic {
 export interface RoutingDecision {
   /** Classifier terminal observation only; never an observed generation. */
   reviewOnly?: boolean | undefined;
+  adviceSource?: AdviceSource | undefined;
   /** Validated semantic answer, independent of the local cell used for availability. */
   activity?: RouterActivity | undefined;
   /** Local cell provenance, not an inferred activity. Omitted means generic. */
@@ -556,6 +562,7 @@ export interface RouterUIRouteTransaction {
   changes: readonly RouterUIRouteCellChange[];
 }
 export interface RouterUIAdviceObservation {
+  source?: AdviceSource | undefined;
   advisor: RouterUIAdvisorId;
   requestId?: string | undefined;
   outcome: ClassifierOutcome;
@@ -597,6 +604,7 @@ export interface RouterUISnapshot {
   advice?: RouterUIAdviceObservation | undefined;
   controls: Readonly<RouterUIControls>;
   pendingControls?: Readonly<RouterUIControls> | undefined;
+  pendingRoutes?: boolean | undefined;
   eligible: Readonly<Partial<Record<RouterTier, RouterUIRoute>>>;
   activityRouting: ActivityRouting;
   activityCells: readonly RouterUIActivityCell[];

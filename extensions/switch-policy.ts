@@ -149,7 +149,11 @@ export const evaluateSwitch = (
     : 0;
   const warmShare =
     observed && observedInput > 0
-      ? Math.min(1, observed.cacheReadTokens / observedInput)
+      ? Math.min(
+          1,
+          (observed.cacheReadTokens + observed.cacheWriteTokens) /
+            observedInput,
+        )
       : 1;
   const warmTokens = Math.floor(inputTokens * warmShare);
   const newTokens = inputTokens - warmTokens;
