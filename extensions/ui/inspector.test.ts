@@ -139,6 +139,26 @@ describe('Signal Panel', () => {
     },
   );
 
+  it('keeps the framed route row and its padding on the panel background', () => {
+    const f = fixture();
+    Object.assign(f.theme, {
+      bg: (color: string, text: string) =>
+        `\x1b[${color === 'toolPendingBg' ? '47' : '42'}m${text}\x1b[49m`,
+    });
+    const row = f.panel.render(80).find((line) => line.includes('effort high'));
+    expect(row).toBeDefined();
+    let background = 'default';
+    const cells: string[] = [];
+    for (const chunk of (row ?? '').split('\x1b')) {
+      const sgr = /^\[(\d+)m/u.exec(chunk);
+      if (sgr) background = sgr[1] === '49' ? 'default' : (sgr[1] ?? 'default');
+      const text = sgr ? chunk.slice(sgr[0].length) : chunk;
+      cells.push(...Array.from(text, () => background));
+    }
+    expect(cells).toEqual(Array(cells.length).fill('47'));
+    f.panel.dispose();
+  });
+
   it('shows queued route changes in Now without changing the actual model', () => {
     const f = fixture();
     f.update({ pendingRoutes: true });

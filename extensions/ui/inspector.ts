@@ -1156,12 +1156,9 @@ export class RouterUIInspector implements Component {
         heading(actual ? actual.model : 'unknown / no observed generation'),
         ...(actual
           ? [
-              this.theme.bg(
-                'toolSuccessBg',
-                this.theme.fg(
-                  'success',
-                  `${actual.activity ?? 'generic'} · ${actual.tier} · effort ${actual.thinking}`,
-                ),
+              this.theme.fg(
+                'success',
+                `${actual.activity ?? 'generic'} · ${actual.tier} · effort ${actual.thinking}`,
               ),
             ]
           : []),
