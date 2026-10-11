@@ -56,7 +56,7 @@ The two-line strip is on in new sessions. `/router widget` switches to a quiet f
 ![Native Pi router inspector with an above-editor route strip](docs/assets/router-ui/signal-now-dark.png)
 
 Captured from the local dev extension in Pi inside agterm, using synthetic fixture data.
-[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md)
+[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md) · [Adaptive routing acceptance and limits](docs/testing/adaptive-router-acceptance.md)
 
 ## A turn in Pi
 
