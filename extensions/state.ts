@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
   isObjectRecord,
+  isRouterActivity,
   isRouterTier,
   isThinkingLevel,
   parseCanonicalModelRef,
@@ -59,6 +60,8 @@ const isDecision = (value: unknown): value is RoutingDecision =>
   isObjectRecord(value) &&
   isRouterTier(value.tier) &&
   isThinkingLevel(value.thinking) &&
+  (value.activity === undefined || isRouterActivity(value.activity)) &&
+  (value.routeCell === undefined || isRouterActivity(value.routeCell)) &&
   isFiniteNumber(value.timestamp) &&
   ['profile', 'targetProvider', 'targetModelId', 'targetLabel'].every(
     (key) => typeof value[key] === 'string',
@@ -122,6 +125,9 @@ export const isRouterPersistedState = (
 ): value is RouterPersistedState => {
   if (!isObjectRecord(value)) return false;
   return (
+    (value.ownerSessionId === undefined ||
+      (typeof value.ownerSessionId === 'string' &&
+        value.ownerSessionId.length > 0)) &&
     typeof value.enabled === 'boolean' &&
     typeof value.selectedProfile === 'string' &&
     isFiniteNumber(value.timestamp) &&
@@ -210,6 +216,24 @@ const snapshotClassification = (
     if (isFiniteNumber(number) && number >= 0 && number <= 1)
       result[key] = number;
   }
+  if (isRouterActivity(value.activity) || value.activity === 'uncertain')
+    result.activity = value.activity;
+  if (
+    isFiniteNumber(value.activityConfidence) &&
+    value.activityConfidence >= 0 &&
+    value.activityConfidence <= 1
+  )
+    result.activityConfidence = value.activityConfidence;
+  if (
+    value.activityOutcome === 'selected' ||
+    value.activityOutcome === 'uncertain' ||
+    value.activityOutcome === 'invalid-response'
+  )
+    result.activityOutcome = value.activityOutcome;
+  const activityIssue = CLASSIFIER_RESPONSE_ISSUES.find(
+    (entry) => entry === value.activityResponseIssue,
+  );
+  if (activityIssue) result.activityResponseIssue = activityIssue;
   const issue = CLASSIFIER_RESPONSE_ISSUES.find(
     (entry) => entry === value.responseIssue,
   );
@@ -297,6 +321,10 @@ const snapshotGeneration = (
 export const snapshotDecision = (
   decision: RoutingDecision,
 ): RoutingDecision => ({
+  activity: isRouterActivity(decision.activity) ? decision.activity : undefined,
+  routeCell: isRouterActivity(decision.routeCell)
+    ? decision.routeCell
+    : undefined,
   profile: decision.profile,
   tier: decision.tier,
   targetProvider: decision.targetProvider,

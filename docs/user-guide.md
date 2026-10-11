@@ -69,6 +69,12 @@ Run **`/router`**, **`/router usage`** or **`/router settings`**.
 - **Settings:** pin first. **Advanced** exposes baseline, budget, per-tier effort
   and registered Pi classifier selection with its deadline and read-only profile approvals.
   The separate Pi classifier path is shown when configured.
+  Settings also shows the read-only activity-routing mode and override count.
+  Advanced lists effective configured activity cells, their ordered fallback
+  declarations and first currently text-eligible attempt (or unavailable/unknown
+  state). Unlisted cells use generic tiers, if configured; mode off retains the
+  declarations but excludes them. These are not advised or actual routes, and
+  generation still rechecks request input, context fit and authentication.
 
 Use Left/Right on the tab row to change sections. Tab/Shift+Tab changes focus.
 On a selector, Left/Right or Enter changes the value. Numeric fields use normal
@@ -101,6 +107,8 @@ overrides reset on reload, session replacement or restart. Use configuration
 for durable settings.
 
 ![Queued controls in actual Pi](assets/router-ui/signal-settings-dark.png)
+
+![Advanced activity routes in actual Pi. Model names are local fixtures; configured routes are not actual generation.](assets/router-ui/activity-settings-dark.png)
 
 Classifier credentials and profile approvals are read-only. Selecting a different classifier does not add profile approval. Configure the selected model in Pi, then approve its exact provider/model reference for each profile. See the [classifier privacy guide](classifier-advisor.md).
 
@@ -188,7 +196,7 @@ explicit `profile <name>`, including profiles whose names match commands.
 
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
 
-A profile needs at least one tier. A partial profile is valid.
+A profile needs at least one generic or activity tier. A partial profile is valid.
 Profile names must be nonempty, contain no whitespace and not be `__proto__`.
 Command names such as `usage` are valid profiles: use `/router profile usage`.
 The router filters unavailable models and unsupported input before selection. An unsupported effort runs at the nearest supported level.
@@ -197,6 +205,7 @@ The [complete example](../model-router.example.json) shows aliases, all four tie
 
 | Field | Behavior |
 | --- | --- |
+| `activityRouting` | `"on"` by default; `"off"` excludes activity overrides entirely. These are the only modes; there is no shadow mode. |
 | `maxSessionBudget` | Soft threshold for reported generation cost. Unpinned requests skip advisors and prefer eligible medium-or-lower tiers after this threshold. |
 | `advisor` | User-only Pi classifier model, enablement, bounded context, deadline and probability settings. See [classifier setup](classifier-advisor.md). |
 | `models` | Aliases with a `model` reference and optional `contextWindow` and `maxTokens`. |
@@ -206,6 +215,60 @@ Budgets and model capacities must be positive, finite numbers. Invalid values ar
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
 Without an eligible lower tier, the budget policy keeps an eligible baseline.
 The classifier deadline defaults to 10 seconds. An unavailable model, rejected answer, timeout or provider error selects the local baseline. Profile approval is required for the exact configured classifier model.
+
+## Activity routes
+
+Use sparse `profiles.<name>.activities.<activity>.<tier>` overrides to specialize
+models, effort or fallback chains. The seven activities are `code`, `debug`,
+`explore`, `plan`, `review`, `ops` and `docs`. `uncertain` is an advisor answer,
+not a configurable activity. For example:
+
+```json
+{
+  "activityRouting": "on",
+  "profiles": {
+    "auto": {
+      "medium": {
+        "model": "openai/gpt-6-astra",
+        "thinking": "medium",
+        "fallbacks": ["openai/gpt-6-luna"]
+      },
+      "activities": {
+        "code": { "medium": { "thinking": "high" } },
+        "docs": {
+          "medium": {
+            "model": "openai/gpt-6-luna",
+            "thinking": "off",
+            "fallbacks": []
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Replace these illustrative references with registered models. Each sparse cell
+inherits generic tier declarations; an explicit fallback list **replaces** the
+inherited list, including `[]` to remove it. Model aliases and target capability
+metadata are resolved again for the resulting target, not copied from the old
+model's alias. Unspecified activities/tiers use the generic route.
+
+Activity routing does not enable an advisor or grant consent. Without authorized
+advice, routing remains deterministic: prefer eligible generic cells in baseline
+order, then activity cells only if no generic cell is eligible. The last-resort
+activity order is the list above, independent of JSON key order. Above budget,
+first exclude high when any eligible medium-or-lower cell exists. Pins always
+use the generic tier and bypass activity advice; an unavailable generic pin
+errors even if a specialization could run.
+
+Each new task or user-role steering message can receive fresh advice; tool
+continuations never request it. Only a meaningful eligible override adds an
+activity question. See [independent classifier answers](classifier-advisor.md#bounds-and-selection).
+The selected cell's ordered fallback chain stays with the actual route through
+same-turn reuse and tool continuations. Logs/inspector routes distinguish
+`activity` (validated advice) from `availability cell` (local provenance, not
+an inferred activity). `/router status` reports the configuration mode.
 
 ## Read costs and cache data
 
@@ -234,6 +297,14 @@ An explicit startup `--model` takes priority.
 Otherwise, a resumed branch uses its saved state.
 When Pi starts on the router provider, a new session uses the last profile.
 A restored router snapshot does not restore a server cache.
+New snapshots are bound to the native session ID. A fresh fork does not restore
+foreign-owner controls, costs or decisions. Replacement/reload aborts old routing
+requests and resets route caches; late completions cannot update the new session.
+
+Fresh SDK sessions must create their own router extension factory/runtime.
+Native pi-subagents auto-integration and inherited shared-provider runtimes are
+not supported; SDK isolation is not proof of inherited policy enforcement.
+See the [required upstream contract](architecture.md#native-child-integration-boundary).
 
 ## Migration
 

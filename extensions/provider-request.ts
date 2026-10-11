@@ -9,24 +9,22 @@ import { createCandidate } from './choice';
 import { runClassifierDetailed } from './classifier';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
 import { hasImageAttachment } from './context';
-import { parseCanonicalModelRef } from './domain';
 import {
   createClassifierFlightKey,
   type ProviderTurnCache,
   waitForAbortable,
 } from './provider-turns';
 import {
-  availableRoutePairs,
+  buildRouteMatrix,
   decisionForPair,
-  fitContextRoutes,
-  primaryRoutePairs,
-  selectBaselineRoute,
+  planBehaviorKey,
+  type RouteMatrix,
+  selectBaselinePlan,
 } from './routing';
 import type {
-  AdvisorConfig,
   ClassifierRegistry,
   ClassifierRequest,
-  RoutePair,
+  RoutePlan,
   RouterConfig,
   RouterProfile,
   RouterThinkingByTier,
@@ -45,6 +43,7 @@ export interface RouterRequestIdentity {
 }
 
 export interface PreparedRouterRequest {
+  plan: RoutePlan;
   decision: RoutingDecision;
   profile: RouterProfile;
   turn?: string;
@@ -131,177 +130,180 @@ export const requiresGoogleContinuation = (
       (entry.type === 'text' && !!entry.textSignature),
   );
 
-const selectedRoutes = (
-  profile: RouterProfile,
-  registry: Pick<RoutingRegistry, 'find'>,
-  context: Context,
-  thinkingOverrides: RouterThinkingByTier | undefined,
-  pinnedTier: RouterTier | undefined,
-): {
-  eligible: () => RoutePair[];
-  available: () => RoutePair[];
-  imageAttached: boolean;
-} => {
-  const imageAttached = hasImageAttachment(context);
-  const eligible = () =>
-    availableRoutePairs(
-      profile,
-      (provider, id) => registry.find(provider, id),
-      imageAttached,
-      thinkingOverrides,
-    );
-  const contextTokens = estimateRequestTokens(context);
-  const windowOf = (pair: RoutePair) => {
-    const { provider, modelId } = parseCanonicalModelRef(pair.model);
-    return registry.find(provider, modelId)?.contextWindow;
-  };
-  return {
-    eligible,
-    available: () =>
-      pinnedTier
-        ? eligible()
-        : fitContextRoutes(eligible(), windowOf, contextTokens),
-    imageAttached,
-  };
-};
+interface SelectedRoute {
+  decision: RoutingDecision;
+  plan: RoutePlan;
+}
+
+const decisionForPlan = (
+  input: RequestRouteInput,
+  plan: RoutePlan,
+  reason: RoutingDecision['reasonCode'],
+): RoutingDecision => ({
+  ...decisionForPair(input.profileName, plan.attempts[0], reason),
+  routeCell: plan.cell,
+});
 
 const canReuseContinuation = (
   input: RequestRouteInput,
-  decision: RoutingDecision | undefined,
-  toolContinuation: boolean,
-  latestAssistant: AssistantMessage | undefined,
-  latestResults: readonly Extract<
-    Context['messages'][number],
-    { role: 'toolResult' }
-  >[],
-  available: readonly RoutePair[],
-  currentPolicy: string,
-): boolean => {
-  const record = input.identity.turn
-    ? input.cache.continuationFor(input.identity.turn)
-    : undefined;
+  matrix: RouteMatrix,
+  policy: string,
+  assistant: AssistantMessage | undefined,
+): SelectedRoute | undefined => {
   const turn = input.identity.turn;
+  const record = turn ? input.cache.continuationFor(turn) : undefined;
   if (
-    !toolContinuation ||
     !record ||
-    !decision ||
-    !turn ||
-    record.turn !== turn ||
-    record.policy !== currentPolicy ||
+    !assistant ||
+    record.policy !== policy ||
     record.config !== input.config ||
-    decision.profile !== input.profileName ||
+    record.decision.profile !== input.profileName ||
     input.identity.branch.length === 0 ||
     !input.identity.branch.every(
       (id) => typeof id === 'string' && id.length > 0,
     ) ||
     record.branch.length === 0 ||
     !record.branch.every((id, index) => input.identity.branch[index] === id) ||
-    latestResults.length === 0 ||
-    !latestAssistant ||
-    latestAssistant.provider !== decision.targetProvider ||
-    latestAssistant.model !== decision.targetModelId ||
-    !latestResults.every((entry) =>
-      latestAssistant.content.some(
-        (part) => part.type === 'toolCall' && part.id === entry.toolCallId,
-      ),
-    ) ||
-    !latestResults.every((entry) => record.toolCalls.has(entry.toolCallId)) ||
-    !available.some(
-      (pair) =>
-        pair.tier === decision.tier &&
-        pair.model === decision.targetLabel &&
-        pair.thinking === decision.thinking,
+    assistant.provider !== record.decision.targetProvider ||
+    assistant.model !== record.decision.targetModelId ||
+    !matrix.plans.some(
+      (plan) =>
+        plan.id === record.plan.id &&
+        plan.attempts.some(
+          (pair) =>
+            pair.model === record.decision.targetLabel &&
+            pair.thinking === record.decision.thinking,
+        ),
     )
   )
-    return false;
-  return true;
+    return undefined;
+  const index = input.context.messages.lastIndexOf(assistant);
+  const results = input.context.messages
+    .slice(index + 1)
+    .filter((entry) => entry.role === 'toolResult');
+  if (
+    !results.length ||
+    !results.every(
+      (result) =>
+        record.toolCalls.has(result.toolCallId) &&
+        assistant.content.some(
+          (part) => part.type === 'toolCall' && part.id === result.toolCallId,
+        ),
+    )
+  )
+    return undefined;
+  return {
+    plan: record.plan,
+    decision: {
+      ...record.decision,
+      reasonCode: 'continuation',
+      reuse: 'continuation',
+      isClassifier: undefined,
+      routingLatencyMs: undefined,
+      errorClass: undefined,
+      timestamp: Date.now(),
+    },
+  };
 };
 
-const baselineDecision = (
+const baselineRoute = (
   input: RequestRouteInput,
-  pairs: readonly RoutePair[],
-  pinnedTier: RouterTier | undefined,
-  isBudgetExceeded: boolean,
-  advisorConfigured: boolean,
+  matrix: RouteMatrix,
   toolContinuation: boolean,
-  hasUserTurn: boolean,
-): RoutingDecision => {
-  const baseline = selectBaselineRoute(
+): SelectedRoute => {
+  const budget =
+    input.config.maxSessionBudget !== undefined &&
+    input.accumulatedCost >= input.config.maxSessionBudget;
+  const baseline = selectBaselinePlan(
     input.profileName,
     input.profile,
-    pairs,
-    pinnedTier,
-    isBudgetExceeded,
+    matrix,
+    input.pinnedTier,
+    budget,
   );
-  const decision = decisionForPair(
-    input.profileName,
-    baseline.pair,
-    baseline.reasonCode,
-  );
+  const decision = decisionForPlan(input, baseline.plan, baseline.reasonCode);
   decision.isBudgetForced = baseline.isBudgetForced;
-  decision.advisor = advisorConfigured ? 'bypassed' : 'none';
-  if (advisorConfigured)
-    decision.bypassReason = pinnedTier
+  decision.advisor = input.config.advisor?.enabled ? 'bypassed' : 'none';
+  if (input.config.advisor?.enabled)
+    decision.bypassReason = input.pinnedTier
       ? 'pinned'
-      : isBudgetExceeded
+      : budget
         ? 'budget'
         : toolContinuation
           ? 'tool-continuation'
-          : !hasUserTurn
+          : !input.identity.turn
             ? 'no-user-turn'
-            : input.identity.turn &&
-                input.cache.hasAdvisedDecision(input.identity.turn)
+            : input.cache.hasAdvisedDecision(input.identity.turn)
               ? 'turn-advised'
               : undefined;
-  return decision;
+  return { decision, plan: baseline.plan };
 };
 
 const chooseAdvisorRoute = async (
   input: RequestRouteInput,
-  pairs: RoutePair[],
-  available: () => RoutePair[],
-  advisor: AdvisorConfig | undefined,
-  authorization: string,
-  advisorConfigured: boolean,
-  toolContinuation: boolean,
-  hasUserTurn: boolean,
-  decision: RoutingDecision,
+  matrix: RouteMatrix,
+  refreshMatrix: () => RouteMatrix,
+  selected: SelectedRoute,
   policy: string,
-): Promise<RoutingDecision> => {
+  toolContinuation: boolean,
+): Promise<SelectedRoute> => {
   const turn = input.identity.turn;
+  const advisor = input.config.advisor;
+  const budget =
+    input.config.maxSessionBudget !== undefined &&
+    input.accumulatedCost >= input.config.maxSessionBudget;
   if (
     toolContinuation ||
     input.pinnedTier ||
-    (input.config.maxSessionBudget !== undefined &&
-      input.accumulatedCost >= input.config.maxSessionBudget) ||
-    !hasUserTurn ||
+    budget ||
     !turn ||
     input.cache.hasAdvisedDecision(turn) ||
-    !advisorConfigured
+    !advisor?.enabled
   )
-    return decision;
-
-  const started = performance.now();
-  const routingDeadline =
-    started + (advisor?.timeoutMs ?? DEFAULT_CLASSIFIER_TIMEOUT_MS);
-  const candidates = primaryRoutePairs(input.profile, pairs).map(
-    createCandidate,
+    return selected;
+  const candidates = matrix.representatives.map((plan) =>
+    createCandidate(plan.attempts[0]),
   );
-  if (candidates.length <= 1) {
-    decision.advisor = 'bypassed';
-    decision.bypassReason = 'single-candidate';
-    input.cache.rememberAdvisedDecision(turn, decision, policy, input.config);
-    return decision;
+  const activityCandidates = matrix.meaningfulActivities
+    ? matrix.plans.flatMap((plan) =>
+        plan.cell
+          ? [
+              {
+                activity: plan.cell,
+                candidate: createCandidate(plan.attempts[0]),
+              },
+            ]
+          : [],
+      )
+    : undefined;
+  const oneEffectivePlan =
+    matrix.meaningfulActivities &&
+    new Set(matrix.plans.map(planBehaviorKey)).size <= 1;
+  if ((candidates.length <= 1 && !activityCandidates) || oneEffectivePlan) {
+    selected.decision.advisor = 'bypassed';
+    selected.decision.bypassReason = 'single-candidate';
+    input.cache.rememberAdvisedDecision(
+      turn,
+      selected.decision,
+      policy,
+      input.config,
+      selected.plan,
+    );
+    return selected;
   }
-  if (!advisor) return decision;
-
   input.signal?.throwIfAborted();
+  const routingDeadline =
+    performance.now() + (advisor.timeoutMs ?? DEFAULT_CLASSIFIER_TIMEOUT_MS);
+  const authorization = JSON.stringify([advisor, input.profile.advisor]);
   const request: ClassifierRequest = {
     context: input.context,
     candidates,
+    ...(activityCandidates
+      ? { activityCandidates, askRoute: candidates.length > 1 }
+      : {}),
     profile: input.profile.advisor,
-    baselineTier: selectBaselineRoute(input.profileName, input.profile, pairs)
-      .pair.tier,
+    baselineTier: selectBaselinePlan(input.profileName, input.profile, matrix)
+      .plan.tier,
     routingDeadline,
   };
   const classifierRegistry: ClassifierRegistry = {
@@ -316,7 +318,11 @@ const chooseAdvisorRoute = async (
       input.profileName,
       candidates,
       advisor,
-      policy,
+      JSON.stringify([
+        policy,
+        matrix.plans.map((plan) => plan.id),
+        Boolean(activityCandidates),
+      ]),
     ),
     advisor,
     request,
@@ -329,217 +335,198 @@ const chooseAdvisorRoute = async (
   if (result.diagnostics.outcome === 'cancelled')
     throw new DOMException('Advisor aborted', 'AbortError');
   input.signal?.throwIfAborted();
-  pairs.splice(0, pairs.length, ...available());
+  const current = refreshMatrix();
   const candidate = candidates.find(
     (entry) => entry.id === result.advice?.candidateId,
   );
   const activeConfig = input.getCurrentConfig();
-  if (
-    candidate &&
+  const authorized =
     activeConfig === input.config &&
     authorization ===
       JSON.stringify([activeConfig.advisor, input.profile.advisor]) &&
-    performance.now() < routingDeadline &&
-    pairs.some(
-      (pair) =>
-        pair.model === candidate.model &&
-        pair.tier === candidate.tier &&
-        pair.thinking === candidate.thinking,
-    )
-  ) {
-    decision = {
-      ...decisionForPair(input.profileName, candidate, 'classifier'),
-      isClassifier: true,
-      advisor: 'classifier',
+    performance.now() < routingDeadline;
+  const activity = authorized ? result.advice?.activity : undefined;
+  const plan =
+    authorized && candidate
+      ? (current.plans.find(
+          (entry) => entry.tier === candidate.tier && entry.cell === activity,
+        ) ??
+        current.plans.find(
+          (entry) => entry.tier === candidate.tier && !entry.cell,
+        ))
+      : undefined;
+  // Advice resolves a current cell; representative IDs never become physical targets by themselves.
+  const validated = plan && matrix.plans.some((entry) => entry.id === plan.id);
+  if (validated)
+    selected = {
+      plan,
+      decision: {
+        ...decisionForPlan(input, plan, 'classifier'),
+        activity,
+        isClassifier: true,
+        advisor: 'classifier',
+      },
     };
-  } else {
-    const baseline = selectBaselineRoute(
+  else {
+    const baseline = selectBaselinePlan(
       input.profileName,
       input.profile,
-      pairs,
+      current,
     );
-    decision = {
-      ...decisionForPair(input.profileName, baseline.pair, baseline.reasonCode),
-      advisor: 'classifier-fallback',
-      errorClass: 'advisor-unavailable',
+    selected = {
+      plan: baseline.plan,
+      decision: {
+        ...decisionForPlan(input, baseline.plan, baseline.reasonCode),
+        advisor: 'classifier-fallback',
+        errorClass: 'advisor-unavailable',
+      },
     };
   }
-  decision.classification =
-    decision.advisor === 'classifier-fallback' &&
-    result.diagnostics.outcome === 'selected'
+  selected.decision.classification =
+    !validated && result.diagnostics.outcome === 'selected'
       ? {
           ...result.diagnostics,
           outcome:
             performance.now() >= routingDeadline ? 'deadline' : 'unavailable',
         }
       : result.diagnostics;
-  decision.reuse = flight.shared ? 'shared' : undefined;
-  decision.routingLatencyMs = result.diagnostics.latencyMs;
-  if (decision.classification.outcome === 'deadline')
-    decision.errorClass = 'deadline';
-  input.cache.rememberAdvisedDecision(turn, decision, policy, input.config);
-  return decision;
+  selected.decision.reuse = flight.shared ? 'shared' : undefined;
+  selected.decision.routingLatencyMs = result.diagnostics.latencyMs;
+  if (selected.decision.classification.outcome === 'deadline')
+    selected.decision.errorClass = 'deadline';
+  input.cache.rememberAdvisedDecision(
+    turn,
+    selected.decision,
+    policy,
+    input.config,
+    selected.plan,
+  );
+  return selected;
 };
 
 const continueCompatibleRoute = (
   input: RequestRouteInput,
-  decision: RoutingDecision,
-  continuationDecision: RoutingDecision | undefined,
-  available: RoutePair[],
-  eligible: () => RoutePair[],
-  toolContinuation: boolean,
-  priorAssistant: AssistantMessage | undefined,
+  selected: SelectedRoute,
+  matrix: RouteMatrix,
+  eligible: () => RouteMatrix,
+  assistant: AssistantMessage | undefined,
   mustContinueGoogle: boolean,
-): RoutingDecision => {
+): SelectedRoute => {
   if (
-    !toolContinuation ||
-    !priorAssistant ||
-    (!mustContinueGoogle && decision.reasonCode !== 'baseline') ||
-    (decision.targetProvider === priorAssistant.provider &&
-      decision.targetModelId === priorAssistant.model)
+    !assistant ||
+    (!mustContinueGoogle && selected.decision.reasonCode !== 'baseline') ||
+    (selected.decision.targetProvider === assistant.provider &&
+      selected.decision.targetModelId === assistant.model)
   )
-    return decision;
-
-  const priorRef = `${priorAssistant.provider}/${priorAssistant.model}`;
-  const priorRoute =
-    continuationDecision ??
+    return selected;
+  const priorRef = `${assistant.provider}/${assistant.model}`;
+  const record = input.identity.turn
+    ? input.cache.continuationFor(input.identity.turn)
+    : undefined;
+  const previous =
+    record?.decision ??
     (input.lastDecision?.targetLabel === priorRef
       ? input.lastDecision
       : undefined);
-  const continuable = mustContinueGoogle ? eligible() : available;
-  const sameTier = (pair: RoutePair) =>
-    pair.model === priorRef && pair.tier === priorRoute?.tier;
-  const priorPair =
-    continuable.find(
-      (pair) => sameTier(pair) && pair.thinking === priorRoute?.thinking,
-    ) ??
-    continuable.find(
-      mustContinueGoogle ? (pair) => pair.model === priorRef : sameTier,
+  const plans = (mustContinueGoogle ? eligible() : matrix).plans;
+  const compatible = plans
+    .flatMap((plan) => plan.attempts.map((pair) => ({ plan, pair })))
+    .filter(
+      ({ pair }) =>
+        pair.model === priorRef &&
+        (mustContinueGoogle || pair.tier === previous?.tier),
     );
-  if (!priorPair && mustContinueGoogle)
+  const match =
+    compatible.find(
+      ({ plan, pair }) =>
+        plan.cell === previous?.routeCell &&
+        pair.thinking === previous?.thinking,
+    ) ?? compatible[0];
+  if (!match && mustContinueGoogle)
     throw new Error('No compatible route for Google tool continuation.');
-  if (!priorPair) return decision;
+  if (!match) return selected;
   return {
-    ...decisionForPair(input.profileName, priorPair, 'continuation'),
-    advisor: decision.advisor,
-    bypassReason: decision.bypassReason,
+    plan: match.plan,
+    decision: {
+      ...decisionForPair(input.profileName, match.pair, 'continuation'),
+      routeCell: match.plan.cell,
+      activity: previous?.activity,
+      advisor: selected.decision.advisor,
+      bypassReason: selected.decision.bypassReason,
+    },
   };
 };
 
 export const prepareRouterRequest = async (
   input: RequestRouteInput,
 ): Promise<PreparedRouterRequest> => {
-  const isBudgetExceeded =
-    input.config.maxSessionBudget !== undefined &&
-    input.accumulatedCost >= input.config.maxSessionBudget;
-  const pinnedTier = input.pinnedTier;
-  const { eligible, available, imageAttached } = selectedRoutes(
-    input.profile,
-    input.registry,
-    input.context,
-    input.thinkingOverrides,
-    pinnedTier,
-  );
-  const pairs = available();
+  input.signal?.throwIfAborted();
+  const imageAttached = hasImageAttachment(input.context);
+  const contextTokens = estimateRequestTokens(input.context);
+  const matrixFor = (tokens: number) =>
+    buildRouteMatrix(
+      input.profile,
+      (provider, id) => input.registry.find(provider, id),
+      imageAttached,
+      tokens,
+      input.thinkingOverrides,
+      input.config.activityRouting !== 'off',
+      input.pinnedTier,
+    );
+  const available = () => matrixFor(contextTokens);
+  const matrix = available();
   const toolContinuation = input.context.messages.at(-1)?.role === 'toolResult';
-  const lastUserIndex = input.context.messages.findLastIndex(
-    (entry) => entry.role === 'user',
-  );
-  const user = input.context.messages[lastUserIndex];
-  const hasUserTurn = user?.role === 'user';
-  const advisor = input.config.advisor;
-  const authorization = JSON.stringify([advisor, input.profile.advisor]);
-  const advisorConfigured = Boolean(advisor?.enabled);
-  const policy = JSON.stringify([
-    input.profileName,
-    input.profile,
-    input.profile.advisor,
-    pinnedTier,
-    input.thinkingOverrides,
-    advisor,
-    isBudgetExceeded,
-  ]);
-  const turn = input.identity.turn;
-  const continuationRecord =
-    toolContinuation && turn ? input.cache.continuationFor(turn) : undefined;
-  const continuationDecision = continuationRecord?.decision;
-  const latestAssistantIndex = input.context.messages.findLastIndex(
+  const latest = input.context.messages.findLast(
     (entry) => entry.role === 'assistant',
   );
-  const latestAssistantMessage = input.context.messages[latestAssistantIndex];
-  const priorAssistant =
-    latestAssistantMessage?.role === 'assistant'
-      ? latestAssistantMessage
-      : undefined;
-  const latestResults = input.context.messages
-    .slice(latestAssistantIndex + 1)
-    .filter((entry) => entry.role === 'toolResult');
-  const reusable = canReuseContinuation(
-    input,
-    continuationDecision,
-    toolContinuation,
-    priorAssistant,
-    latestResults,
-    pairs,
-    policy,
-  );
-  const advisedDecision =
-    !toolContinuation && turn
-      ? input.cache.reusableAdvisedDecision(turn, policy, input.config, pairs)
-      : undefined;
-  let decision: RoutingDecision;
-  if (reusable && continuationDecision) {
-    decision = {
-      ...continuationDecision,
-      reasonCode: 'continuation',
-      reuse: 'continuation',
-      isClassifier: undefined,
-      routingLatencyMs: undefined,
-      errorClass: undefined,
-      timestamp: Date.now(),
-    };
-  } else if (advisedDecision) {
-    decision = advisedDecision;
-  } else {
-    if (toolContinuation && turn) input.cache.deleteContinuation(turn);
-    decision = baselineDecision(
-      input,
-      pairs,
-      pinnedTier,
-      isBudgetExceeded,
-      advisorConfigured,
-      toolContinuation,
-      hasUserTurn && Boolean(turn),
-    );
-  }
-  decision = await chooseAdvisorRoute(
-    input,
-    pairs,
-    available,
-    advisor,
-    authorization,
-    advisorConfigured,
-    toolContinuation,
-    hasUserTurn && Boolean(turn),
-    decision,
-    policy,
-  );
+  const priorAssistant = latest?.role === 'assistant' ? latest : undefined;
   const mustContinueGoogle = priorAssistant
     ? requiresGoogleContinuation(priorAssistant)
     : false;
-  decision = continueCompatibleRoute(
+  const budget =
+    input.config.maxSessionBudget !== undefined &&
+    input.accumulatedCost >= input.config.maxSessionBudget;
+  const policy = JSON.stringify([
+    input.profileName,
+    input.profile,
+    input.pinnedTier,
+    input.thinkingOverrides,
+    input.config.advisor,
+    input.config.activityRouting,
+    budget,
+  ]);
+  const turn = input.identity.turn;
+  let selected = toolContinuation
+    ? canReuseContinuation(input, matrix, policy, priorAssistant)
+    : turn
+      ? input.cache.reusableAdvisedDecision(
+          turn,
+          policy,
+          input.config,
+          matrix.plans,
+        )
+      : undefined;
+  selected ??= baselineRoute(input, matrix, toolContinuation);
+  selected = await chooseAdvisorRoute(
     input,
-    decision,
-    continuationDecision,
-    pairs,
-    eligible,
+    matrix,
+    available,
+    selected,
+    policy,
     toolContinuation,
-    priorAssistant,
-    mustContinueGoogle,
   );
-  decision.generation = undefined;
+  if (toolContinuation)
+    selected = continueCompatibleRoute(
+      input,
+      selected,
+      matrix,
+      () => matrixFor(0),
+      priorAssistant,
+      mustContinueGoogle,
+    );
+  selected.decision.generation = undefined;
   return {
-    decision,
+    ...selected,
     profile: input.profile,
     ...(turn ? { turn } : {}),
     branch: input.identity.branch,

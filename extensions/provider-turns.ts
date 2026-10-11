@@ -4,12 +4,13 @@ import type {
   ClassifierRequest,
   ClassifierResult,
   RouteCandidate,
-  RoutePair,
+  RoutePlan,
   RouterConfig,
   RoutingDecision,
 } from './types';
 
 interface ContinuationRecord {
+  plan: RoutePlan;
   turn: string;
   policy: string;
   branch: string[];
@@ -19,6 +20,7 @@ interface ContinuationRecord {
 }
 
 interface AdvisedTurnRecord {
+  plan: RoutePlan;
   policy: string;
   config: RouterConfig;
   decision: RoutingDecision;
@@ -48,13 +50,14 @@ export interface ProviderTurnCache {
     decision: RoutingDecision,
     policy: string,
     config: RouterConfig,
+    plan: RoutePlan,
   ) => void;
   reusableAdvisedDecision: (
     turn: string,
     policy: string,
     config: RouterConfig,
-    pairs: readonly RoutePair[],
-  ) => RoutingDecision | undefined;
+    plans: readonly RoutePlan[],
+  ) => { decision: RoutingDecision; plan: RoutePlan } | undefined;
   startClassifier: (
     key: string,
     config: AdvisorConfig,
@@ -168,22 +171,33 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
       rememberBounded(continuations, record.turn, record),
     hasAdvisedDecision: (turn) => advisedTurns.has(turn),
     deleteAdvisedDecision: (turn) => advisedTurns.delete(turn),
-    rememberAdvisedDecision: (turn, decision, policy, config) =>
-      rememberBounded(advisedTurns, turn, { policy, config, decision }),
-    reusableAdvisedDecision: (turn, policy, config, pairs) => {
+    rememberAdvisedDecision: (turn, decision, policy, config, plan) =>
+      rememberBounded(advisedTurns, turn, { policy, config, decision, plan }),
+    reusableAdvisedDecision: (turn, policy, config, plans) => {
       const record = advisedTurns.get(turn);
       if (!record) return undefined;
-      const available = pairs.some(
-        (pair) =>
-          pair.tier === record.decision.tier &&
-          pair.model === record.decision.targetLabel &&
-          pair.thinking === record.decision.thinking,
+      const available = plans.some(
+        (plan) =>
+          plan.id === record.plan.id &&
+          plan.attempts.some(
+            (pair) =>
+              pair.tier === record.decision.tier &&
+              pair.model === record.decision.targetLabel &&
+              pair.thinking === record.decision.thinking,
+          ),
       );
       if (record.policy !== policy || record.config !== config || !available) {
         advisedTurns.delete(turn);
         return undefined;
       }
-      return { ...record.decision, reuse: 'same-turn', timestamp: Date.now() };
+      return {
+        decision: {
+          ...record.decision,
+          reuse: 'same-turn',
+          timestamp: Date.now(),
+        },
+        plan: record.plan,
+      };
     },
     startClassifier: (key, config, request, run) =>
       startClassifierFlight(

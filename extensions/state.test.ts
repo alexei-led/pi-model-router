@@ -441,3 +441,79 @@ describe('state.ts', () => {
     ).toBe(true);
   });
 });
+
+describe('activity snapshots and native ownership', () => {
+  it('keeps only allowlisted activity identity and numeric diagnostics', () => {
+    const copy = snapshotDecision({
+      ...decision,
+      activity: 'code',
+      routeCell: 'docs',
+      classification: {
+        outcome: 'selected',
+        latencyMs: 1,
+        activity: 'code',
+        activityConfidence: 0.9,
+        activityOutcome: 'selected',
+        activityResponseIssue: 'missing-answer',
+      },
+    });
+    expect(copy).toMatchObject({
+      activity: 'code',
+      routeCell: 'docs',
+      classification: {
+        activity: 'code',
+        activityConfidence: 0.9,
+        activityOutcome: 'selected',
+        activityResponseIssue: 'missing-answer',
+      },
+    });
+    const invalid = JSON.parse(
+      JSON.stringify({
+        ...copy,
+        activity: 'secret',
+        routeCell: 'secret',
+        classification: {
+          ...copy.classification,
+          activity: 'secret',
+          activityConfidence: 2,
+          activityOutcome: 'secret',
+          activityResponseIssue: 'secret',
+          explanation: 'private',
+        },
+      }),
+    ) as RoutingDecision;
+    expect(snapshotDecision(invalid)).toMatchObject({
+      activity: undefined,
+      routeCell: undefined,
+      classification: { outcome: 'selected', latencyMs: 1 },
+    });
+    expect(JSON.stringify(snapshotDecision(invalid))).not.toMatch(
+      /secret|private/,
+    );
+  });
+
+  it('validates native owner and activity fields without accepting remote identity', () => {
+    const state = {
+      enabled: true,
+      selectedProfile: 'p',
+      timestamp: 1,
+      ownerSessionId: 'native-id',
+      lastDecision: { ...decision, activity: 'docs', routeCell: 'code' },
+    };
+    expect(isRouterPersistedState(state)).toBe(true);
+    for (const ownerSessionId of ['', 1, null])
+      expect(isRouterPersistedState({ ...state, ownerSessionId })).toBe(false);
+    expect(
+      isRouterPersistedState({
+        ...state,
+        lastDecision: { ...decision, activity: 'unknown' },
+      }),
+    ).toBe(false);
+    expect(
+      isRouterPersistedState({
+        ...state,
+        lastDecision: { ...decision, routeCell: 'uncertain' },
+      }),
+    ).toBe(false);
+  });
+});

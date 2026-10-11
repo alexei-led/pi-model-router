@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   buildChoicePayload,
+  parseActivity,
   parseAdvice,
   selectRoute,
   validCandidates,
@@ -11,7 +12,7 @@ import {
   buildClassifierContext,
   estimateClassifierRequestTokens,
 } from './context';
-import { parseCanonicalModelRef } from './domain';
+import { isRouterActivity, parseCanonicalModelRef } from './domain';
 import type {
   AdvisorConfig,
   ClassifierDependencies,
@@ -88,7 +89,17 @@ export const runClassifierDetailed = async (
       !request.profile?.models.includes(config.model) ||
       !request.context ||
       !Array.isArray(request.context.messages) ||
-      !validCandidates(request.candidates)
+      !validCandidates(request.candidates) ||
+      (request.askRoute === false &&
+        (request.candidates.length !== 1 ||
+          !request.activityCandidates?.length)) ||
+      (request.activityCandidates !== undefined &&
+        (request.activityCandidates.length === 0 ||
+          request.activityCandidates.some(
+            (entry) =>
+              !isRouterActivity(entry.activity) ||
+              !validCandidates([entry.candidate]),
+          )))
     )
       return result('unavailable');
     const deadline = Math.min(
@@ -114,6 +125,8 @@ export const runClassifierDetailed = async (
     const context = buildChoicePayload(
       selectedContext.state,
       request.candidates,
+      request.activityCandidates,
+      request.askRoute,
     );
     metrics = {
       ...metrics,
@@ -217,14 +230,34 @@ export const runClassifierDetailed = async (
               ? failure
               : 'unavailable',
         );
-      const parsed = parseAdvice(classified, request.candidates);
+      const activity = request.activityCandidates
+        ? parseActivity(classified, config.confidenceThreshold)
+        : undefined;
+      if (activity) {
+        metrics.activity = activity.choice;
+        metrics.activityConfidence = activity.confidence;
+        metrics.activityOutcome = activity.outcome;
+        metrics.activityResponseIssue = activity.issue;
+      }
+      const onlyCandidate = request.candidates[0];
+      const parsed =
+        request.askRoute === false && onlyCandidate
+          ? {
+              candidate: onlyCandidate,
+              confidence: 1,
+              probability: 1,
+              probabilities: { [onlyCandidate.id]: 1 },
+            }
+          : parseAdvice(classified, request.candidates);
       if (typeof parsed === 'string') {
         metrics.responseIssue = parsed;
         return result('invalid-response');
       }
-      metrics.choice = parsed.candidate?.tier ?? 'uncertain';
-      metrics.confidence = parsed.confidence;
-      metrics.probability = parsed.probability;
+      if (request.askRoute !== false) {
+        metrics.choice = parsed.candidate?.tier ?? 'uncertain';
+        metrics.confidence = parsed.confidence;
+        metrics.probability = parsed.probability;
+      }
       const selected = selectRoute(
         parsed,
         request.candidates,
@@ -233,9 +266,12 @@ export const runClassifierDetailed = async (
       );
       if (!selected) return result('uncertain');
       metrics.selectedTier = selected.candidate.tier;
-      metrics.selectionBasis = selected.basis;
-      metrics.routeProbability = selected.routeProbability;
+      if (request.askRoute !== false) {
+        metrics.selectionBasis = selected.basis;
+        metrics.routeProbability = selected.routeProbability;
+      }
       return result('selected', {
+        ...(activity?.activity ? { activity: activity.activity } : {}),
         candidateId: selected.candidate.id,
         confidence: parsed.confidence,
         latencyMs: Math.max(0, now() - start),

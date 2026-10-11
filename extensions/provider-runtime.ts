@@ -37,6 +37,8 @@ type RequestContext = {
 };
 
 interface ProviderStreamState {
+  readonly requestEpoch?: number;
+  readonly ownerSignal?: AbortSignal;
   readonly currentModelRegistry: ExtensionContext['modelRegistry'] | undefined;
   readonly currentConfig: RouterConfig;
   readonly lastExtensionContext: RequestContext | undefined;
@@ -58,6 +60,7 @@ interface ProviderStreamActions {
 }
 
 interface RouterStreamInput {
+  registrationEpoch?: number;
   model: Model<Api>;
   context: Context;
   options?: SimpleStreamOptions;
@@ -138,7 +141,7 @@ const prepareStreamRequest = async (
       )
       .map((entry) => entry.id) ?? [];
   const sessionId =
-    options?.sessionId ?? extensionContext?.sessionManager.getSessionId?.();
+    extensionContext?.sessionManager.getSessionId?.() ?? options?.sessionId;
   const identity = createRouterRequestIdentity(context, sessionId, branch);
   onTurnIdentified(identity.turn);
   const request = await prepareRouterRequest({
@@ -306,8 +309,88 @@ const startStream = (input: RouterStreamInput): void => {
   })();
 };
 
-export const startRouterProviderStream = (input: RouterStreamInput): void =>
-  startStream(input);
+export const startRouterProviderStream = (input: RouterStreamInput): void => {
+  const epoch = input.registrationEpoch ?? input.state.requestEpoch;
+  const ownerSignal = input.state.ownerSignal;
+  const isCurrent = () =>
+    input.state.requestEpoch === epoch && !ownerSignal?.aborted;
+  const signal =
+    ownerSignal && input.options?.signal
+      ? AbortSignal.any([ownerSignal, input.options.signal])
+      : (ownerSignal ?? input.options?.signal);
+  const guardedActions: ProviderStreamActions = {
+    persistState: () => {
+      if (isCurrent()) input.actions.persistState();
+    },
+    recordDebugDecision: (decision) => {
+      if (isCurrent()) input.actions.recordDebugDecision(decision);
+    },
+    updateStatus: () => {
+      if (isCurrent()) input.actions.updateStatus();
+    },
+    syncPiThinkingLevel: (level) => {
+      if (isCurrent()) input.actions.syncPiThinkingLevel(level);
+    },
+    beginRequest: (profile) => {
+      const observe = isCurrent()
+        ? input.actions.beginRequest?.(profile)
+        : undefined;
+      return (event) => {
+        if (isCurrent()) observe?.(event);
+      };
+    },
+  };
+  const state: ProviderStreamState = {
+    get currentModelRegistry() {
+      return input.state.currentModelRegistry;
+    },
+    get currentConfig() {
+      return input.state.currentConfig;
+    },
+    get lastExtensionContext() {
+      return input.state.lastExtensionContext;
+    },
+    get pinnedTierByProfile() {
+      return input.state.pinnedTierByProfile;
+    },
+    get thinkingByProfile() {
+      return input.state.thinkingByProfile;
+    },
+    get selectedProfile() {
+      return input.state.selectedProfile;
+    },
+    set selectedProfile(value) {
+      if (isCurrent()) input.state.selectedProfile = value;
+    },
+    get routerEnabled() {
+      return input.state.routerEnabled;
+    },
+    set routerEnabled(value) {
+      if (isCurrent()) input.state.routerEnabled = value;
+    },
+    get lastDecision() {
+      return input.state.lastDecision;
+    },
+    set lastDecision(value) {
+      if (isCurrent()) input.state.lastDecision = value;
+    },
+    get accumulatedCost() {
+      return input.state.accumulatedCost;
+    },
+    set accumulatedCost(value) {
+      if (isCurrent()) input.state.accumulatedCost = value;
+    },
+    ...(input.state.registryTimeoutMs !== undefined
+      ? { registryTimeoutMs: input.state.registryTimeoutMs }
+      : {}),
+  };
+  startStream({
+    ...input,
+    state,
+    actions: guardedActions,
+    options: { ...input.options, ...(signal ? { signal } : {}) },
+  });
+};
 
 export const createErrorMessage = (
   model: Model<Api>,

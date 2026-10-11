@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.13.0] - 2026-10-11
+
+### Summary
+
+Add configuration-driven activity-specific model and effort routes while keeping `router/<profile>` stable. Default activity routing is on, but profiles without effective activity overrides keep the existing route-only behavior.
+
+### Changes
+
+- Add sparse `code`, `debug`, `explore`, `plan`, `review`, `ops`, and `docs` route overrides with a single consent-gated classifier operation. Activity routing accepts only `on` and `off`; activity advice never grants classifier consent.
+- Carry each selected route cell's validated ordered fallbacks through generation and tool continuations. Keep pins generic-only and apply budget policy before the generic-first baseline.
+- Show configured activity cells, generic routes, fallback order, and text-eligibility status in the read-only Settings inspector. Add an actual Pi/agterm screenshot using local fixture models.
+- Bind router state and request lifetimes to native Pi sessions. Add real SDK isolation, replacement, steering, continuation, classifier, generation, and UI tests.
+
+### Upgrade
+
+No configuration migration is required. Activity routing defaults to `on`; without effective activity overrides it adds no classifier question or route change. Existing advisor enablement and exact per-profile approval remain required. Native `pi-subagents` automatic routing is not supported; see the [child integration boundary](docs/architecture.md#native-child-integration-boundary).
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.12.1...v0.13.0)
+
 ## [0.12.1] - 2026-10-08
 
 ### Fixed

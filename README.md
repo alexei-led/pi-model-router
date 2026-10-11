@@ -14,6 +14,7 @@ Optional advice uses any text-capable classifier registered in Pi. The router us
 
 - **Fewer manual changes.** One profile can combine fast, low-cost routes with stronger models.
 - **Control over cost and quality.** You choose the models, effort levels, fallback order, and baseline. You can pin a route at any time.
+- **Activity-specific routes.** Optional sparse code/debug/explore/plan/review/ops/docs overrides share one consent-gated classifier operation. [Configure activity routes](docs/user-guide.md#activity-routes).
 - **Stable tool calls.** A valid tool continuation keeps its route. The router does not ask an advisor for each tool result.
 - **Visible decisions.** A compact Signal Panel shows the actual model, effort and routing reason. Open `/router` for visual usage and session controls.
 

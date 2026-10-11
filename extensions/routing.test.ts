@@ -12,7 +12,9 @@ import { THINKING_LEVELS } from './domain';
 import {
   availableRoutePairs,
   BASELINE_TIER_ORDER,
+  buildRouteMatrix,
   clampEffort,
+  currentPlanPairs,
   decisionForPair,
   effortAdjustments,
   fitContextRoutes,
@@ -20,6 +22,7 @@ import {
   primaryRoutePairs,
   resolveRoutePair,
   routeThinking,
+  selectBaselinePlan,
   selectBaselineRoute,
 } from './routing';
 import { model, required } from './test/fixtures';
@@ -554,5 +557,140 @@ describe('routing decisions', () => {
         'fallback',
       ).reasonCode,
     ).toBe('fallback');
+  });
+});
+
+describe('immutable activity route matrix', () => {
+  it('uses stable activity order, generic-first preference and off exclusion', () => {
+    const profile = required(
+      normalizeConfig({
+        profiles: {
+          auto: {
+            high: { model: 'test/high' },
+            medium: { model: 'missing/generic' },
+            activities: {
+              docs: { medium: { model: 'test/docs' } },
+              code: { medium: { model: 'test/code' } },
+            },
+          },
+        },
+      }).config.profiles.auto,
+    );
+    const find = (provider: string, id: string) =>
+      provider === 'test' ? model(id) : undefined;
+    const matrix = buildRouteMatrix(profile, find, false, 1);
+    expect(
+      matrix.representatives.map((plan) => [plan.tier, plan.cell]),
+    ).toEqual([
+      ['medium', 'code'],
+      ['high', undefined],
+    ]);
+    expect(selectBaselinePlan('auto', profile, matrix).plan.tier).toBe('high');
+    expect(
+      selectBaselinePlan('auto', profile, matrix, undefined, true).plan.cell,
+    ).toBe('code');
+    const off = buildRouteMatrix(profile, find, false, 1, undefined, false);
+    expect(off.plans).toHaveLength(1);
+    expect(off.meaningfulActivities).toBe(false);
+    expect(() => selectBaselinePlan('auto', profile, matrix, 'medium')).toThrow(
+      /Pinned tier/,
+    );
+  });
+
+  it('freezes declarations and attempts, preserving only the selected cell chain on live revalidation', () => {
+    const profile = required(
+      normalizeConfig({
+        models: {
+          fallback: { model: 'test/fallback', thinkingLevels: ['medium'] },
+        },
+        profiles: {
+          auto: {
+            medium: {
+              model: 'test/base',
+              thinking: 'medium',
+              thinkingLevels: ['medium'],
+              fallbacks: ['fallback'],
+            },
+            activities: {
+              code: { medium: { model: 'test/code', fallbacks: ['fallback'] } },
+            },
+          },
+        },
+      }).config.profiles.auto,
+    );
+    const matrix = buildRouteMatrix(profile, findFixtureModel, false, 1);
+    const plan = required(matrix.plans.find((entry) => entry.cell === 'code'));
+    expect(Object.isFrozen(plan)).toBe(true);
+    expect(Object.isFrozen(plan.attempts)).toBe(true);
+    expect(Object.isFrozen(plan.config.fallbacks)).toBe(true);
+    expect(
+      Object.isFrozen(plan.config.resolvedFallbacks?.[0]?.thinkingLevels),
+    ).toBe(true);
+    required(profile.activities?.code?.medium).fallbacks = ['test/new'];
+    expect(
+      currentPlanPairs(plan, findFixtureModel, false).map((pair) => pair.model),
+    ).toEqual(['test/code', 'test/fallback']);
+    expect(
+      currentPlanPairs(
+        plan,
+        (_provider, id) => (id === 'fallback' ? undefined : model(id)),
+        false,
+      ).map((pair) => pair.model),
+    ).toEqual(['test/code']);
+  });
+
+  it('sees fallback-only behavioral differences and respects image/context eligibility', () => {
+    const profile = required(
+      normalizeConfig({
+        profiles: {
+          auto: {
+            medium: { model: 'test/base' },
+            activities: {
+              code: { medium: { fallbacks: ['test/backup'] } },
+              docs: { medium: { model: 'test/small', fallbacks: [] } },
+            },
+          },
+        },
+      }).config.profiles.auto,
+    );
+    const find = (_provider: string, id: string) =>
+      model(id, {
+        input: id === 'small' ? ['text'] : ['text', 'image'],
+        contextWindow: id === 'small' ? 100 : 8192,
+      });
+    expect(buildRouteMatrix(profile, find, false, 1).meaningfulActivities).toBe(
+      true,
+    );
+    expect(
+      buildRouteMatrix(profile, find, true, 1).plans.some(
+        (plan) => plan.cell === 'docs',
+      ),
+    ).toBe(false);
+    expect(
+      buildRouteMatrix(profile, find, false, 1000).plans.some(
+        (plan) => plan.cell === 'docs',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('activity-aware effort controls', () => {
+  it('validates coverage including enabled cells and reports their actual effort', () => {
+    const profile: RouterProfile = {
+      activities: {
+        code: { medium: { model: 'test/code', reasoning: false } },
+      },
+    };
+    const find = () => model('code', { reasoning: false });
+    expect(preservesRouteCoverage(profile, find, { medium: 'high' })).toBe(
+      true,
+    );
+    expect(
+      preservesRouteCoverage(profile, find, { medium: 'high' }, false),
+    ).toBe(false);
+    expect(effortAdjustments(profile, find, 'high')).toEqual([
+      'medium/code runs at off',
+    ]);
+    expect(effortAdjustments(profile, find, 'high', false)).toEqual([]);
   });
 });

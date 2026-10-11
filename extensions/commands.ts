@@ -115,6 +115,7 @@ export const registerCommands = (
     const lines = [
       `Router: ${state.routerEnabled ? 'on' : 'off'} · profile ${profile ?? 'none'} · available: ${profileNames(config).join(', ')}`,
       `Pin: ${formatPinSummary(state.pinnedTierByProfile)} · effort: ${formatThinkingSummary(state.thinkingByProfile)}`,
+      `Activity routing: ${config.activityRouting ?? 'on'} (configuration)`,
       `Recorded catalog cost: ${cost} (not billing; excludes advice)`,
       ...(last && state.routerEnabled
         ? [
@@ -229,6 +230,7 @@ export const registerCommands = (
         config,
         (provider, id) => ctx.modelRegistry.find(provider, id),
         Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
+        state.currentConfig.activityRouting !== 'off',
       ) === false
     ) {
       ctx.ui.notify(

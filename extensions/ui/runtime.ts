@@ -1,10 +1,15 @@
 import { normalizeAdvisorConfig } from '../config';
 import { parseCanonicalModelRef } from '../domain';
-import { availableRoutePairs, preservesRouteCoverage } from '../routing';
+import {
+  availableRoutePairs,
+  preservesRouteCoverage,
+  resolveRoutePair,
+} from '../routing';
 import { snapshotDecision } from '../state';
 import type {
   RouterRequestObservation,
   RouterThinkingByTier,
+  RouterUIActivityCell,
   RouterUIAdapters,
   RouterUIControls,
   RouterUIHistoryEntry,
@@ -15,7 +20,7 @@ import type {
   RouterUISnapshot,
   RoutingDecision,
 } from '../types';
-import { ROUTER_TIERS } from '../types';
+import { ROUTER_ACTIVITIES, ROUTER_TIERS } from '../types';
 import { validateRouterUIControls } from './controls';
 
 const thinkingFields = {
@@ -25,6 +30,8 @@ const thinkingFields = {
   micro: 'thinkingMicro',
 } as const;
 const routeOf = (decision: RoutingDecision): RouterUIRoute => ({
+  activity: decision.activity,
+  routeCell: decision.routeCell,
   tier: decision.tier,
   provider: decision.targetProvider,
   model: decision.targetModelId,
@@ -172,11 +179,23 @@ export const createRouterUIRuntime = (
         .some((model) => `${model.provider}/${model.id}` === value.advisor)
     )
       return false;
-    if (value.baseline !== 'auto' && !config[value.baseline]) return false;
+    const baseline = value.baseline;
+    if (
+      baseline !== 'auto' &&
+      !config[baseline] &&
+      (state.currentConfig.activityRouting === 'off' ||
+        !Object.values(config.activities ?? {}).some((cell) => cell[baseline]))
+    )
+      return false;
     const find = (provider: string, id: string) => registry.find(provider, id);
     const thinking = thinkingOf(value);
     return (
-      preservesRouteCoverage(config, find, thinking) &&
+      preservesRouteCoverage(
+        config,
+        find,
+        thinking,
+        state.currentConfig.activityRouting !== 'off',
+      ) &&
       (value.pin === 'auto' ||
         [false, true].some((image) =>
           availableRoutePairs(config, find, image, thinking).some(
@@ -230,6 +249,57 @@ export const createRouterUIRuntime = (
               }),
           )
         : {};
+    const activityRouting = config.activityRouting ?? 'on';
+    const activityCells: RouterUIActivityCell[] = ROUTER_ACTIVITIES.flatMap(
+      (activity) => {
+        const cell = configured?.activities?.[activity];
+        if (!cell) return [];
+        const pairs =
+          activityRouting === 'on' && registry
+            ? availableRoutePairs(
+                cell,
+                (provider, id) => registry.find(provider, id),
+                false,
+                state.thinkingByProfile[profile],
+              )
+            : [];
+        return ROUTER_TIERS.flatMap((tier): RouterUIActivityCell[] => {
+          const declaration = cell[tier];
+          if (!declaration) return [];
+          const pair = pairs.find((entry) => entry.tier === tier);
+          const ref = pair ? parseCanonicalModelRef(pair.model) : undefined;
+          return [
+            {
+              activity,
+              configured: resolveRoutePair(
+                cell,
+                tier,
+                state.thinkingByProfile[profile],
+              ),
+              fallbacks: [...(declaration.fallbacks ?? [])],
+              ...(pair && ref
+                ? {
+                    availability: 'eligible' as const,
+                    eligible: {
+                      tier,
+                      provider: ref.provider,
+                      model: ref.modelId,
+                      thinking: pair.thinking,
+                    },
+                  }
+                : {
+                    availability:
+                      activityRouting === 'off'
+                        ? ('disabled' as const)
+                        : !registry
+                          ? ('unknown' as const)
+                          : ('unavailable' as const),
+                  }),
+            },
+          ];
+        });
+      },
+    );
     return {
       profile,
       accumulatedCost: state.accumulatedCost,
@@ -264,6 +334,8 @@ export const createRouterUIRuntime = (
       controls: controls(profile),
       pendingControls: pendingValue(profile),
       eligible,
+      activityRouting,
+      activityCells,
       privacy: {
         advisorEnabled: config.advisor?.enabled === true,
         approvedModels: configured?.advisor?.models ?? [],

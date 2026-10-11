@@ -1,4 +1,5 @@
 {
+  "activityRouting": "on",
   "debug": false,
   "advisor": {
     "enabled": false,
@@ -15,22 +16,65 @@
       "model": "anthropic/claude-haiku-5-5",
       "contextWindow": 200000
     },
-    "fast": { "model": "anthropic/claude-haiku-5-5", "contextWindow": 200000 }
+    "fast": {
+      "model": "anthropic/claude-haiku-5-5",
+      "contextWindow": 200000
+    }
   },
   "profiles": {
     "personal": {
-      "advisor": { "models": ["openai/gpt-6-luna"] },
+      "advisor": {
+        "models": ["openai/gpt-6-luna"]
+      },
       "baselineTier": "medium",
-      "high": { "model": "strong", "thinking": "high" },
-      "medium": { "model": "strong", "thinking": "medium" },
-      "low": { "model": "fast", "thinking": "low" },
-      "micro": { "model": "fast", "thinking": "off" }
+      "high": {
+        "model": "strong",
+        "thinking": "high"
+      },
+      "medium": {
+        "model": "strong",
+        "thinking": "medium"
+      },
+      "low": {
+        "model": "fast",
+        "thinking": "low"
+      },
+      "micro": {
+        "model": "fast",
+        "thinking": "off"
+      },
+      "activities": {
+        "code": {
+          "medium": {
+            "model": "strong",
+            "thinking": "high"
+          }
+        },
+        "docs": {
+          "medium": {
+            "model": "fast",
+            "thinking": "off",
+            "fallbacks": []
+          }
+        }
+      }
     },
     "work": {
-      "advisor": { "models": [] },
-      "high": { "model": "strong", "thinking": "high" },
-      "medium": { "model": "fast", "thinking": "medium" },
-      "low": { "model": "fast", "thinking": "low" }
+      "advisor": {
+        "models": []
+      },
+      "high": {
+        "model": "strong",
+        "thinking": "high"
+      },
+      "medium": {
+        "model": "fast",
+        "thinking": "medium"
+      },
+      "low": {
+        "model": "fast",
+        "thinking": "low"
+      }
     }
   }
 }

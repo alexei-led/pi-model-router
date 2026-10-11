@@ -30,6 +30,7 @@ import type {
   RouterProfile,
   RouterTier,
 } from './types';
+import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
 
 export const parseConfigFile = (path: string): ParsedConfigFile => {
   if (!existsSync(path)) {
@@ -71,6 +72,26 @@ export const resolveModelRef = (
   return { canonicalRef: ref };
 };
 
+const mergeActivities = (base: unknown, override: unknown): unknown => {
+  if (override === undefined) return base;
+  if (!isObjectRecord(base) || !isObjectRecord(override)) return override;
+  const merged = { ...base };
+  for (const activity of ROUTER_ACTIVITIES) {
+    const previous = base[activity];
+    const next = override[activity];
+    merged[activity] =
+      isObjectRecord(previous) && isObjectRecord(next)
+        ? Object.fromEntries(
+            ROUTER_TIERS.map((tier) => [
+              tier,
+              mergeRawValue(previous[tier], next[tier]),
+            ]),
+          )
+        : mergeRawValue(previous, next);
+  }
+  return merged;
+};
+
 const mergeRawValue = (existing: unknown, next: unknown): unknown => {
   if (next === undefined) return existing;
   if (isObjectRecord(existing) && isObjectRecord(next)) {
@@ -105,6 +126,7 @@ export const mergeConfig = (
       ? mergedProfiles[name]
       : {};
     mergedProfiles[name] = {
+      activities: mergeActivities(existing.activities, profile.activities),
       baselineTier: mergeRawValue(existing.baselineTier, profile.baselineTier),
       high: mergeRawValue(existing.high, profile.high),
       medium: mergeRawValue(existing.medium, profile.medium),
@@ -131,6 +153,7 @@ export const mergeConfig = (
       }
     : mergedAdvisor;
   return {
+    activityRouting: override.activityRouting ?? base.activityRouting,
     ui: mergeRawValue(base.ui, override.ui),
     advisor,
     debug: override.debug ?? base.debug,
@@ -360,6 +383,71 @@ export const normalizeTierConfig = (
   };
 };
 
+/** Merge raw declarations, not another target's alias-derived capability metadata. */
+const normalizeActivities = (
+  raw: unknown,
+  generic: Record<string, unknown>,
+  profileName: string,
+  warnings: string[],
+  models: Record<string, ModelDefinition>,
+): RouterProfile['activities'] => {
+  if (raw === undefined) return undefined;
+  if (!isObjectRecord(raw)) {
+    warnings.push(
+      `Profile "${profileName}" activities must be an object. Ignored.`,
+    );
+    return undefined;
+  }
+  if (
+    Object.keys(raw).some(
+      (key) => !ROUTER_ACTIVITIES.some((activity) => activity === key),
+    )
+  )
+    warnings.push(
+      `Profile "${profileName}" has unknown activity keys. Ignored.`,
+    );
+  const activities: NonNullable<RouterProfile['activities']> = {};
+  for (const activity of ROUTER_ACTIVITIES) {
+    const overrides = raw[activity];
+    if (overrides === undefined) continue;
+    if (!isObjectRecord(overrides)) {
+      warnings.push(
+        `Profile "${profileName}" activity ${activity} must be an object. Ignored.`,
+      );
+      continue;
+    }
+    if (Object.keys(overrides).some((key) => !isRouterTier(key)))
+      warnings.push(
+        `Profile "${profileName}" activity ${activity} has unknown tier keys. Ignored.`,
+      );
+    const tiers: Partial<Record<RouterTier, RoutedTierConfig>> = {};
+    for (const tier of ROUTER_TIERS) {
+      const override = overrides[tier];
+      if (override === undefined) continue;
+      if (!isObjectRecord(override)) {
+        warnings.push(
+          `Profile "${profileName}" activity ${activity} ${tier} must be an object. Ignored.`,
+        );
+        continue;
+      }
+      const merged = {
+        ...(isObjectRecord(generic[tier]) ? generic[tier] : {}),
+        ...override,
+      };
+      const config = normalizeTierConfig(
+        merged,
+        `${profileName}/${activity}`,
+        tier,
+        warnings,
+        models,
+      );
+      if (config) tiers[tier] = config;
+    }
+    if (Object.keys(tiers).length) activities[activity] = tiers;
+  }
+  return Object.keys(activities).length ? activities : undefined;
+};
+
 // Node turns larger setTimeout delays into 1 ms rather than waiting longer.
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -560,7 +648,14 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       hasModels ? normalizedModels : undefined,
     );
 
-    if (!high && !medium && !low && !micro) {
+    const activities = normalizeActivities(
+      profileRecord.activities,
+      profileRecord,
+      name,
+      warnings,
+      normalizedModels,
+    );
+    if (!high && !medium && !low && !micro && !activities) {
       warnings.push(`Profile "${name}" has no valid tiers. Skipped.`);
       continue;
     }
@@ -569,7 +664,10 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     if (profileRecord.baselineTier !== undefined) {
       const candidate = profileRecord.baselineTier;
       const normalizedTier = isRouterTier(candidate)
-        ? { high, medium, low, micro }[candidate]
+        ? ({ high, medium, low, micro }[candidate] ??
+          ROUTER_ACTIVITIES.find(
+            (activity) => activities?.[activity]?.[candidate],
+          ))
         : undefined;
       if (isRouterTier(candidate) && normalizedTier) {
         baselineTier = candidate;
@@ -606,6 +704,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
         );
     }
     normalizedProfiles[name] = {
+      ...(activities ? { activities } : {}),
       ...(baselineTier ? { baselineTier } : {}),
       high,
       medium,
@@ -639,8 +738,15 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   )
     warnings.push('Invalid ui.statusLine; using compact.');
 
+  if (
+    raw.activityRouting !== undefined &&
+    raw.activityRouting !== 'on' &&
+    raw.activityRouting !== 'off'
+  )
+    warnings.push('Invalid activityRouting; using on.');
   return {
     config: {
+      activityRouting: raw.activityRouting === 'off' ? 'off' : 'on',
       ui: { statusLine: statusLine === 'detailed' ? 'detailed' : 'compact' },
       advisor: normalizeAdvisorConfig(raw.advisor, warnings),
       debug: typeof raw.debug === 'boolean' ? raw.debug : false,

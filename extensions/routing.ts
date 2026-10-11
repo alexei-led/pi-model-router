@@ -8,14 +8,16 @@ import { CONTEXT_FILL } from './constants';
 import { parseCanonicalModelRef, THINKING_LEVELS } from './domain';
 import type {
   ModelDefinition,
+  RoutedTierConfig,
   RoutePair,
+  RoutePlan,
   RouterProfile,
   RouterThinkingByTier,
   RouterTier,
   RoutingDecision,
   RoutingReasonCode,
 } from './types';
-import { ROUTER_TIERS } from './types';
+import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
 
 /** The configured default preference order when no baseline tier is supplied. */
 export const BASELINE_TIER_ORDER: readonly RouterTier[] = [
@@ -161,43 +163,55 @@ export const preservesRouteCoverage = (
   profile: RouterProfile,
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   thinkingOverrides: RouterThinkingByTier,
+  activityRouting = true,
 ): boolean => {
-  for (const imageAttached of [false, true]) {
-    const configured = availableRoutePairs(profile, findModel, imageAttached);
-    const overridden = availableRoutePairs(
-      profile,
-      findModel,
-      imageAttached,
-      thinkingOverrides,
+  const cells = [
+    profile,
+    ...(activityRouting ? Object.values(profile.activities ?? {}) : []),
+  ];
+  const pairsFor = (image: boolean, overrides?: RouterThinkingByTier) =>
+    cells.flatMap((cell) =>
+      availableRoutePairs(cell, findModel, image, overrides),
     );
+  for (const imageAttached of [false, true]) {
+    const configured = pairsFor(imageAttached);
+    const overridden = pairsFor(imageAttached, thinkingOverrides);
     if (configured.length > 0 && overridden.length === 0) return false;
   }
   return [false, true].some(
-    (imageAttached) =>
-      availableRoutePairs(profile, findModel, imageAttached, thinkingOverrides)
-        .length > 0,
+    (image) => pairsFor(image, thinkingOverrides).length > 0,
   );
 };
 
-/** Tiers whose text route runs an effort override at another level, as "tier runs at level". */
+/** Routes whose text effort override runs at another level. */
 export const effortAdjustments = (
   profile: RouterProfile,
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   level: ThinkingLevel,
-): string[] => {
-  const pairs = availableRoutePairs(
-    profile,
-    findModel,
-    false,
-    Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
-  );
-  return ROUTER_TIERS.flatMap((tier) => {
-    const pair = pairs.find((entry) => entry.tier === tier);
-    return pair && pair.thinking !== level
-      ? [`${tier} runs at ${pair.thinking}`]
-      : [];
+  activityRouting = true,
+): string[] =>
+  [
+    { label: '', profile },
+    ...(activityRouting
+      ? ROUTER_ACTIVITIES.flatMap((activity) => {
+          const cell = profile.activities?.[activity];
+          return cell ? [{ label: `/${activity}`, profile: cell }] : [];
+        })
+      : []),
+  ].flatMap((cell) => {
+    const pairs = availableRoutePairs(
+      cell.profile,
+      findModel,
+      false,
+      Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
+    );
+    return ROUTER_TIERS.flatMap((tier) => {
+      const pair = pairs.find((entry) => entry.tier === tier);
+      return pair && pair.thinking !== level
+        ? [`${tier}${cell.label} runs at ${pair.thinking}`]
+        : [];
+    });
   });
-};
 
 /**
  * Keep routes whose context window holds the estimated request. When none
@@ -231,7 +245,14 @@ const routeForTier = (
 
 const preferredOrder = (profile: RouterProfile): readonly RouterTier[] => {
   const baseline = profile.baselineTier;
-  if (!baseline || !profile[baseline]) return BASELINE_TIER_ORDER;
+  if (
+    !baseline ||
+    (!profile[baseline] &&
+      !ROUTER_ACTIVITIES.some(
+        (activity) => profile.activities?.[activity]?.[baseline],
+      ))
+  )
+    return BASELINE_TIER_ORDER;
   return [baseline, ...BASELINE_TIER_ORDER.filter((tier) => tier !== baseline)];
 };
 
@@ -327,3 +348,167 @@ export const decisionForPair = (
     timestamp: Date.now(),
   };
 };
+
+/** Snapshot only local declarations. A selected cell never picks up a different fallback list. */
+const freezeTierConfig = (
+  config: RoutedTierConfig,
+): Readonly<RoutedTierConfig> => {
+  const copy = structuredClone(config);
+  if (copy.fallbacks) Object.freeze(copy.fallbacks);
+  if (copy.thinkingLevels) Object.freeze(copy.thinkingLevels);
+  if (copy.resolvedFallbacks) {
+    for (const fallback of copy.resolvedFallbacks) {
+      if (fallback.thinkingLevels) Object.freeze(fallback.thinkingLevels);
+      Object.freeze(fallback);
+    }
+    Object.freeze(copy.resolvedFallbacks);
+  }
+  return Object.freeze(copy);
+};
+
+export interface RouteMatrix {
+  readonly plans: readonly RoutePlan[];
+  readonly representatives: readonly RoutePlan[];
+  readonly meaningfulActivities: boolean;
+}
+
+export const planBehaviorKey = (plan: RoutePlan): string =>
+  JSON.stringify(plan.attempts.map(({ model, thinking }) => [model, thinking]));
+
+/** Prevalidate each matrix cell; only its representative is subject to context fit. */
+export const buildRouteMatrix = (
+  profile: RouterProfile,
+  findModel: (provider: string, modelId: string) => Model<Api> | undefined,
+  imageAttached: boolean,
+  contextTokens: number,
+  thinkingOverrides?: RouterThinkingByTier,
+  activityRouting = true,
+  pinnedTier?: RouterTier,
+): RouteMatrix => {
+  const cells = [
+    { cell: undefined, profile },
+    ...(activityRouting && !pinnedTier
+      ? ROUTER_ACTIVITIES.flatMap((cell) => {
+          const overrides = profile.activities?.[cell];
+          return overrides ? [{ cell, profile: overrides }] : [];
+        })
+      : []),
+  ].map((cell) => ({
+    ...cell,
+    pairs: availableRoutePairs(
+      cell.profile,
+      findModel,
+      imageAttached,
+      thinkingOverrides,
+    ),
+  }));
+  const all = cells.flatMap(({ pairs }) => pairs);
+  const fitting = pinnedTier
+    ? all
+    : fitContextRoutes(
+        all,
+        (pair) => {
+          const { provider, modelId } = parseCanonicalModelRef(pair.model);
+          return findModel(provider, modelId)?.contextWindow;
+        },
+        contextTokens,
+      );
+  const plans: RoutePlan[] = cells.flatMap(
+    ({ cell, profile: cellProfile, pairs }) =>
+      primaryRoutePairs(
+        cellProfile,
+        pairs.filter((pair) => fitting.includes(pair)),
+      ).map((first) => {
+        const config = freezeTierConfig(
+          cellProfile[first.tier] as RoutedTierConfig,
+        );
+        const attempts = Object.freeze<
+          [Readonly<RoutePair>, ...Readonly<RoutePair>[]]
+        >([
+          Object.freeze({ ...first }),
+          ...pairs
+            .filter(
+              (pair) =>
+                pair.tier === first.tier &&
+                pair.model !== first.model &&
+                config.fallbacks?.includes(pair.model),
+            )
+            .map((pair) => Object.freeze({ ...pair })),
+        ]);
+        return Object.freeze({
+          id: JSON.stringify([first.tier, cell, config, attempts]),
+          tier: first.tier,
+          cell,
+          config,
+          attempts,
+          thinkingOverrides: thinkingOverrides
+            ? Object.freeze({ ...thinkingOverrides })
+            : undefined,
+        });
+      }),
+  );
+  const representatives = BASELINE_TIER_ORDER.flatMap((tier) => {
+    const plan = plans.find((entry) => entry.tier === tier);
+    return plan ? [plan] : [];
+  });
+  return Object.freeze({
+    plans: Object.freeze(plans),
+    representatives: Object.freeze(representatives),
+    meaningfulActivities: plans.some(
+      (plan) =>
+        plan.cell &&
+        !plans.some(
+          (generic) =>
+            generic.tier === plan.tier &&
+            !generic.cell &&
+            planBehaviorKey(generic) === planBehaviorKey(plan),
+        ),
+    ),
+  });
+};
+
+export const selectBaselinePlan = (
+  profileName: string,
+  profile: RouterProfile,
+  matrix: RouteMatrix,
+  pinnedTier?: RouterTier,
+  isBudgetExceeded = false,
+): {
+  plan: RoutePlan;
+  reasonCode: BaselineSelection['reasonCode'];
+  isBudgetForced: boolean;
+} => {
+  const lower = matrix.plans.filter((plan) => plan.tier !== 'high');
+  const pool = pinnedTier
+    ? matrix.plans.filter((plan) => !plan.cell)
+    : isBudgetExceeded && lower.length
+      ? lower
+      : matrix.plans;
+  const generic = pool.filter((plan) => !plan.cell);
+  const applicable = generic.length ? generic : pool;
+  const selection = selectBaselineRoute(
+    profileName,
+    profile,
+    applicable.map((plan) => plan.attempts[0]),
+    pinnedTier,
+    isBudgetExceeded,
+  );
+  const plan = applicable.find(
+    (entry) => entry.attempts[0] === selection.pair,
+  ) as RoutePlan;
+  return { ...selection, plan };
+};
+
+export const currentPlanPairs = (
+  plan: RoutePlan,
+  findModel: (provider: string, modelId: string) => Model<Api> | undefined,
+  imageAttached: boolean,
+): RoutePair[] =>
+  availableRoutePairs(
+    { [plan.tier]: plan.config },
+    findModel,
+    imageAttached,
+    plan.thinkingOverrides,
+  ).filter((pair) =>
+    plan.attempts.some((attempt) => attempt.model === pair.model),
+  );

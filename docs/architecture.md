@@ -43,6 +43,7 @@ Node labels identify each role without color.
 | Operator | Model configuration, provider access, and per-profile approval for external context. |
 
 The router never reads private authentication storage or claims to identify the provider account behind a login.
+Only a current locally prevalidated route-matrix cell can authorize generation.
 Every configured classifier uses Pi's public classifier registry and authentication. The router owns bounded context selection, candidate validation, deadline policy and user/profile authorization. Project configuration cannot select a classifier or grant profile approval.
 
 ## Route selection
@@ -68,7 +69,7 @@ flowchart TD
 
 A valid continuation reuses its route. For an invalid continuation, the router chooses a local route without advice. It first tries the model that issued the tool calls in its recorded tier. It uses the baseline if that route is no longer eligible.
 A pin or budget decision still takes priority. A mid-loop switch rereads the full context without the turn cache.
-Pins, budget policy, and only one eligible candidate also bypass advisors.
+Pins and budget policy bypass advisors. One effective plan bypasses advice; a single tier with distinct activity cells can still request activity advice.
 The budget is a soft generation-cost policy, not a billing cap.
 
 Eligibility requires provider availability, input support, and at least one allowed effort level.
@@ -83,7 +84,12 @@ This is a capacity check, not a size preference: every fitting route stays a can
 A pin, a Google tool continuation, and explicit generation fallbacks keep their route and rely on truncation.
 
 An eligible `baselineTier` takes priority. The remaining preference is `medium`, `high`, `low`, then `micro`.
-Each tier offers at most one advisor candidate: its primary, or its first eligible fallback when the primary is ineligible.
+Each eligible cell has a primary, or its first eligible fallback when the primary
+is ineligible. The generic cell represents a tier when eligible; otherwise its
+first eligible activity cell represents it. Off excludes activity cells. The
+matrix holds frozen cell declarations and ordered prevalidated physical attempts,
+not remote model references. Baseline selection is generic-first within the
+budget-applicable pool. See [configuration and baseline details](user-guide.md#activity-routes).
 Explicit fallback models retain their configured order. They are not extra classifier candidates.
 Prompt words, language, length, and inferred task phase never select a local tier.
 
@@ -94,7 +100,9 @@ recent dialogue, and permitted tool evidence.
 It never receives system prompts, tool definitions, thinking blocks, tool arguments, binary blocks, or raw configuration.
 Selected text can still contain private data. Filtering is not redaction.
 
-A candidate ID represents the tier, canonical model, and effort.
+A candidate ID represents the tier, canonical representative model, and effort.
+An optional activity answer is validated independently and resolves the actual matrix cell;
+it cannot extend the matrix or change the cell's generation fallback list.
 The adapter rejects unknown IDs, invalid confidence, malformed distributions, and oversized responses.
 It accepts only a current candidate. The [classifier guide](classifier-advisor.md) documents configuration and probability selection.
 
@@ -127,13 +135,47 @@ sequenceDiagram
 
 Concurrent callers for one turn share the advisor request and its deadline.
 Only the last departing caller can cancel the shared transport.
-The bounded cache stores the actual successful route, not only the advisor label.
+The bounded cache stores the actual successful route and its immutable selected-cell plan, not only the advisor label.
 
 Reuse requires matching session, user turn, profile, policy, configuration, branch ancestry, model, and tool-result identities.
 When the caller omits `sessionId`, the key uses Pi's native session ID.
-Changed capabilities or configuration invalidate reuse. The original provider `sessionId` passes through unchanged.
+Changed capabilities or configuration invalidate reuse. New user-role steering messages change turn identity; tool-result continuations never reclassify. The original provider `sessionId` passes through unchanged.
 Context truncation, the last resort after the window check, removes complete old user turns and preserves system instructions and the active tool chain.
 Its text estimate does not guarantee a fit for images or oversized active turns.
+
+## Native child integration boundary
+
+Fresh Pi SDK sessions use fresh extension factories, resource loaders and model
+runtimes. Router state is owned by the native session, not the transport
+`options.sessionId`; explicit transport IDs still pass through unchanged.
+Native lifecycle replacement/reload/shutdown aborts the old request lifetime,
+advances a request epoch and resets provider caches. Stale provider registrations
+and delayed advice/generation cannot mutate the replacement owner's controls,
+UI, persistence or cost. Foreign lifecycle events cannot take ownership of an
+initialized runtime. A new fork ignores foreign-owner (and legacy unowned)
+snapshots. Same-owner branch restoration remains supported.
+
+**Native pi-subagents auto-integration is not implemented.** The current public
+provider `streamSimple(model, context, options)` API does not identify its native
+caller. A child calling an inherited parent provider is indistinguishable from
+a legitimate transport session-ID override. The router does not claim to detect
+or fail-close such calls. Do not share router extension/provider runtimes across
+parent and child sessions.
+
+Safe upstream integration requires a supported public contract providing:
+
+- A fresh session-local extension factory/runtime and provider registration.
+- Native caller/session binding available to delegation, independent of transport IDs.
+- The child's effective **physical** model allowlist, after inherited restrictions.
+- Its inherited maximum thinking level, distinct from the current effort setting.
+
+Pi 1.1.0's `ExtensionContext.scopedModels`/SDK `scopedModels` describe session
+model cycling; `thinkingLevel` describes current effort. They do not establish
+the effective inherited physical scope or thinking ceiling required here.
+The router does not reinterpret them as that security contract, invent a private
+environment carrier, add a pi-subagents dependency, or auto-register unrestricted
+child routes. In-memory SDK isolation tests establish only fresh-runtime behavior,
+not native pi-subagents policy propagation.
 
 ## Failure behavior
 
@@ -152,7 +194,7 @@ Its text estimate does not guarantee a fit for images or oversized active turns.
 | State | Lifetime | Contents |
 | --- | --- | --- |
 | Runtime route cache | Current process | Turn hashes, branch identity, tool IDs, shared advice, and eligible routes. |
-| `router-state` entries | Pi session branch | Profile, pins, cost, display controls, latest decision, and up to 50 debug decisions. |
+| `router-state` entries | Pi session branch | Profile, pins, cost, display controls, latest decision, and up to 50 debug decisions, with native owner identity. |
 | Profile preference file | Across sessions | Last explicitly selected profile. Explicit startup selection takes priority. |
 
 Snapshots use deep copies and field-level validation.
@@ -175,10 +217,10 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 | `index.ts` | Wire Pi lifecycle hooks, extension state, branch restoration, commands, provider, and UI. |
 | `config.ts` | Load, merge, validate, and normalize configuration. |
 | `domain.ts` | Parse canonical model references and validate pure tier, effort, and pin values; no config I/O. |
-| `routing.ts` | Apply eligible baseline, pin, budget, input, context-fit, and effort policy. |
+| `routing.ts` | Build immutable eligible cell plans and apply baseline, pin, budget, input, context-fit, and effort policy. |
 | `provider.ts` | Register logical profile models from live capabilities, create the provider-scoped turn cache, and adapt Pi's stream API. |
-| `provider-request.ts` | Build turn identity, validate continuation reuse, select an eligible route, and coordinate classifier advice. |
-| `provider-turns.ts` | Keep bounded continuation/advice caches and reference-count shared classifier flights for one provider registration. |
+| `provider-request.ts` | Build turn identity, validate continuation reuse, resolve a current matrix cell, and coordinate classifier advice. |
+| `provider-turns.ts` | Keep bounded continuation/advice caches and retain selected plans and reference-count shared classifier flights for one session-owned provider registration. |
 | `provider-generation.ts` | Revalidate physical targets, run configured generation fallbacks before visible content, account for attempts, and forward events. |
 | `provider-runtime.ts` | Wait for the model registry and bridge request preparation/generation to Pi streams, persistence, and status updates. |
 | `context.ts` | Select bounded classifier text and extract generation input. |

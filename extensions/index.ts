@@ -18,6 +18,7 @@ import {
 } from './state';
 import type {
   RouterConfig,
+  RouterPersistedState,
   RouterPinByProfile,
   RouterThinkingByProfile,
   RoutingDecision,
@@ -32,6 +33,9 @@ const hasExplicitCliModel = () =>
     .some((arg) => arg === '--model' || arg.startsWith('--model='));
 
 const routerExtension = (pi: ExtensionAPI) => {
+  let ownerSessionId: string | undefined;
+  let requestEpoch = 0;
+  let ownerController = new AbortController();
   let currentConfig: RouterConfig = { profiles: {} };
   let currentModelRegistry: ExtensionContext['modelRegistry'] | undefined;
   let currentCwd = process.cwd();
@@ -58,7 +62,18 @@ const routerExtension = (pi: ExtensionAPI) => {
   }> = [];
   let ignoreStartupThinkingEvent = false;
 
+  const ownsContext = (ctx: ExtensionContext) => {
+    const id = ctx.sessionManager.getSessionId?.();
+    return ownerSessionId === undefined || id === ownerSessionId;
+  };
+
   const runtimeState = {
+    get requestEpoch() {
+      return requestEpoch;
+    },
+    get ownerSignal() {
+      return ownerController.signal;
+    },
     get lastRegisteredModels() {
       return lastRegisteredModels;
     },
@@ -136,6 +151,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   const setModelInternally = async (
     model: NonNullable<ExtensionContext['model']>,
   ) => {
+    const epoch = requestEpoch;
     isInternalModelSwitch = true;
     try {
       return await pi.setModel(model);
@@ -143,7 +159,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       // Extension context may be stale after session teardown.
       return false;
     } finally {
-      isInternalModelSwitch = false;
+      if (epoch === requestEpoch) isInternalModelSwitch = false;
     }
   };
 
@@ -203,7 +219,10 @@ const routerExtension = (pi: ExtensionAPI) => {
       return;
     }
     try {
-      pi.appendEntry('router-state', state);
+      pi.appendEntry('router-state', {
+        ...state,
+        ...(ownerSessionId ? { ownerSessionId } : {}),
+      });
     } catch {
       // Defensive fallback: the session_shutdown event may fire after this
       // code runs (due to event loop ordering), so isActive can still be
@@ -232,6 +251,11 @@ const routerExtension = (pi: ExtensionAPI) => {
       ctx?: ExtensionContext,
       options?: { preserveDebug?: boolean; deferStatus?: boolean },
     ) => {
+      ownerController.abort();
+      ownerController = new AbortController();
+      requestEpoch += 1;
+      isInternalModelSwitch = false;
+      pendingThinkingChanges.length = 0;
       routerUI.reset();
       const loaded = loadRouterConfig(currentCwd);
       currentConfig = loaded.config;
@@ -316,19 +340,65 @@ const routerExtension = (pi: ExtensionAPI) => {
 
   actions.reloadConfig();
 
+  const restorePersistedControls = (
+    savedState: RouterPersistedState,
+    hasExplicitStartupModel: boolean,
+  ) => {
+    if (!hasExplicitStartupModel) {
+      selectedProfile = resolveProfileName(
+        currentConfig,
+        savedState.selectedProfile,
+      );
+      routerEnabled = savedState.enabled && selectedProfile !== undefined;
+    }
+    if (savedState.pinByProfile) {
+      Object.assign(pinnedTierByProfile, savedState.pinByProfile);
+    }
+    if (savedState.thinkingByProfile) {
+      Object.assign(
+        thinkingByProfile,
+        structuredClone(savedState.thinkingByProfile),
+      );
+    }
+    if (savedState.pinTier && selectedProfile) {
+      pinnedTierByProfile[selectedProfile] = savedState.pinTier;
+    }
+    debugEnabled = savedState.debugEnabled ?? debugEnabled;
+    widgetEnabled = savedState.widgetEnabled ?? widgetEnabled;
+    debugHistory = savedState.debugHistory
+      ? savedState.debugHistory.map(snapshotDecision).slice(-MAX_DEBUG_HISTORY)
+      : [];
+    if (!hasExplicitStartupModel) {
+      lastNonRouterModel = savedState.lastNonRouterModel ?? lastNonRouterModel;
+    }
+    accumulatedCost = savedState.accumulatedCost ?? 0;
+  };
+
   const restoreStateFromSession = async (
     ctx: ExtensionContext,
     startReason: SessionStartEvent['reason'],
   ) => {
+    const nextOwner = ctx.sessionManager.getSessionId?.();
+    if (
+      ownerSessionId !== nextOwner ||
+      startReason === 'new' ||
+      startReason === 'fork'
+    ) {
+      selectedProfile = undefined;
+      lastNonRouterModel = undefined;
+    }
+    ownerSessionId = nextOwner;
     lastPersistedSnapshot = undefined;
     ignoreStartupThinkingEvent =
       startReason === 'startup' ||
       startReason === 'new' ||
-      startReason === 'reload';
+      startReason === 'reload' ||
+      startReason === 'fork';
     lastExtensionContext = ctx;
     currentModelRegistry = ctx.modelRegistry;
     currentCwd = ctx.cwd;
     actions.reloadConfig(ctx);
+    const restoringEpoch = requestEpoch;
     const hasExplicitStartupModel =
       startReason === 'startup' && hasExplicitCliModel();
 
@@ -354,6 +424,7 @@ const routerExtension = (pi: ExtensionAPI) => {
     lastDecision = undefined;
 
     await actions.ensureValidActiveRouterProfile(ctx);
+    if (restoringEpoch !== requestEpoch || !ownsContext(ctx)) return;
 
     const savedState = ctx.sessionManager
       .getBranch()
@@ -362,43 +433,20 @@ const routerExtension = (pi: ExtensionAPI) => {
           ? entry.data
           : undefined,
       )
-      .findLast(isRouterPersistedState);
+      .findLast(
+        (value): value is RouterPersistedState =>
+          isRouterPersistedState(value) &&
+          (value.ownerSessionId === undefined
+            ? startReason !== 'fork'
+            : value.ownerSessionId === ownerSessionId),
+      );
 
     if (savedState) {
-      if (!hasExplicitStartupModel) {
-        selectedProfile = resolveProfileName(
-          currentConfig,
-          savedState.selectedProfile,
-        );
-        routerEnabled = savedState.enabled && selectedProfile !== undefined;
-      }
-      if (savedState.pinByProfile) {
-        Object.assign(pinnedTierByProfile, savedState.pinByProfile);
-      }
-      if (savedState.thinkingByProfile) {
-        Object.assign(
-          thinkingByProfile,
-          structuredClone(savedState.thinkingByProfile),
-        );
-      }
-      if (savedState.pinTier && selectedProfile) {
-        pinnedTierByProfile[selectedProfile] = savedState.pinTier;
-      }
-      debugEnabled = savedState.debugEnabled ?? debugEnabled;
-      widgetEnabled = savedState.widgetEnabled ?? widgetEnabled;
-      debugHistory = savedState.debugHistory
-        ? savedState.debugHistory
-            .map(snapshotDecision)
-            .slice(-MAX_DEBUG_HISTORY)
-        : [];
-      if (!hasExplicitStartupModel) {
-        lastNonRouterModel =
-          savedState.lastNonRouterModel ?? lastNonRouterModel;
+      restorePersistedControls(savedState, hasExplicitStartupModel);
+      if (!hasExplicitStartupModel)
         lastDecision = savedState.lastDecision
           ? snapshotDecision(savedState.lastDecision)
           : undefined;
-      }
-      accumulatedCost = savedState.accumulatedCost ?? 0;
     } else if (
       ctx.model?.provider === 'router' &&
       (startReason === 'startup' || startReason === 'new') &&
@@ -418,6 +466,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       const routerModel = ctx.modelRegistry.find('router', selectedProfile);
       if (routerModel) {
         const success = await setModelInternally(routerModel);
+        if (restoringEpoch !== requestEpoch || !ownsContext(ctx)) return;
         if (!success) {
           ctx.ui.notify(
             `Failed to restore router/${selectedProfile} after relaunch.`,
@@ -462,6 +511,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   });
 
   pi.on('before_agent_start', (_event, ctx) => {
+    if (!ownsContext(ctx)) return;
     if (!routerUI.activatePending())
       ctx.ui.notify(
         'Pending router controls discarded: configuration changed or route became unavailable.',
@@ -470,11 +520,17 @@ const routerExtension = (pi: ExtensionAPI) => {
     persistState();
     actions.updateStatus(ctx);
   });
-  pi.on('session_shutdown', () => routerUI.reset());
+  pi.on('session_shutdown', (_event, ctx) => {
+    if (!ownsContext(ctx)) return;
+    ownerController.abort();
+    requestEpoch += 1;
+    routerUI.reset();
+  });
 
   pi.on('session_start', async (event, ctx) => {
     isInitialized = true;
     await restoreStateFromSession(ctx, event.reason);
+    if (!ownsContext(ctx)) return;
     if (debugEnabled) {
       ctx.ui.notify(
         `Router initialized with profiles: ${profileNames(currentConfig).join(', ')}`,
@@ -483,32 +539,31 @@ const routerExtension = (pi: ExtensionAPI) => {
     }
   });
 
-  // Eagerly initialize the model registry from any event that provides
-  // ExtensionContext. In subagent contexts (e.g. pi-dynamic-workflows),
-  // session_start may never fire, but turn_start/model_select fire before every LLM
-  // call — including the first call to the router provider's streamSimple.
-  // Only set when not already initialized: if extensions share instances across
-  // parent/subagent sessions, always overwriting would replace the parent's valid
-  // registry with the subagent's — which goes stale when the subagent ends.
-  const ensureInitializedFromContext = (ctx: ExtensionContext) => {
+  // SDK consumers must instantiate a fresh extension factory for each native session.
+  // Foreign events from an inherited runtime cannot take ownership without session_start.
+  const ensureInitializedFromContext = (ctx: ExtensionContext): boolean => {
+    if (!ownsContext(ctx)) return false;
     if (!currentModelRegistry) {
+      ownerSessionId = ctx.sessionManager.getSessionId?.();
       currentModelRegistry = ctx.modelRegistry;
       lastExtensionContext = ctx;
       currentCwd = ctx.cwd;
       actions.reloadConfig(ctx);
     }
+    return true;
   };
 
   pi.on('turn_start', async (_event, ctx) => {
+    if (!ensureInitializedFromContext(ctx)) return;
     ignoreStartupThinkingEvent = false;
-    ensureInitializedFromContext(ctx);
   });
 
   pi.on('model_select', async (event, ctx) => {
     // Ensure the model registry is captured even if session_start hasn't fired
     // (e.g. in subagent contexts spawned by pi-dynamic-workflows).
-    ensureInitializedFromContext(ctx);
+    if (!ensureInitializedFromContext(ctx)) return;
     if (!isInitialized || isInternalModelSwitch) return;
+    const epoch = requestEpoch;
     if (event.model.provider === 'router') {
       const profileName = resolveProfileName(currentConfig, event.model.id);
       if (!profileName) {
@@ -525,6 +580,7 @@ const routerExtension = (pi: ExtensionAPI) => {
           registryModel.maxTokens !== event.model.maxTokens)
       ) {
         await setModelInternally(registryModel);
+        if (epoch !== requestEpoch || !ownsContext(ctx)) return;
       }
 
       routerEnabled = true;
@@ -540,11 +596,13 @@ const routerExtension = (pi: ExtensionAPI) => {
   });
 
   pi.on('turn_end', async (_event, ctx) => {
-    ensureInitializedFromContext(ctx);
+    if (!ensureInitializedFromContext(ctx)) return;
+    const epoch = requestEpoch;
     if (routerEnabled && selectedProfile && ctx.model?.provider !== 'router') {
       const routerModel = ctx.modelRegistry.find('router', selectedProfile);
       if (routerModel) {
         await setModelInternally(routerModel);
+        if (epoch !== requestEpoch || !ownsContext(ctx)) return;
       }
     }
     persistState();
@@ -552,7 +610,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   });
 
   pi.on('thinking_level_select', (event, ctx) => {
-    ensureInitializedFromContext(ctx);
+    if (!ensureInitializedFromContext(ctx)) return;
     if (isInternalThinkingChange) {
       pendingThinkingChanges.pop();
       return;
@@ -588,6 +646,7 @@ const routerExtension = (pi: ExtensionAPI) => {
         activeProfile,
         (provider, id) => ctx.modelRegistry.find(provider, id),
         overrides,
+        currentConfig.activityRouting !== 'off',
       ) === false
     ) {
       actions.syncPiThinkingLevel(event.previousLevel);
@@ -604,6 +663,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       activeProfile,
       (provider, id) => ctx.modelRegistry.find(provider, id),
       event.level,
+      currentConfig.activityRouting !== 'off',
     );
     if (adjusted.length > 0)
       ctx.ui.notify(
