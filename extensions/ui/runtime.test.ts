@@ -251,6 +251,39 @@ describe('router UI runtime boundary', () => {
   });
 });
 
+it('queues adaptive-review and switch-policy controls until the next user boundary', async () => {
+  const { state, runtime } = setup();
+  const before = runtime.adapters.getSnapshot().controls;
+  expect(
+    await runtime.adapters.applyControls({
+      profile: 'auto',
+      action: 'apply',
+      changes: [
+        {
+          key: 'advisor',
+          before: before.advisor,
+          after: 'typesafe/jev-latest',
+        },
+        { key: 'reviewEveryRequests', before: 4, after: 2 },
+        { key: 'costHorizon', before: 5, after: 10 },
+        { key: 'costSensitivity', before: 0.5, after: 0.25 },
+        { key: 'strongAdviceConfidence', before: 0.9, after: 0.95 },
+      ],
+    }),
+  ).toBe('applied');
+  expect(state.currentConfig.switchPolicy).toMatchObject({
+    horizonRequests: 5,
+    costSensitivity: 0.5,
+  });
+  expect(runtime.activatePending()).toBe(true);
+  expect(state.currentConfig.advisor?.reviewEveryRequests).toBe(2);
+  expect(state.currentConfig.switchPolicy).toMatchObject({
+    horizonRequests: 10,
+    costSensitivity: 0.25,
+    strongAdviceConfidence: 0.95,
+  });
+});
+
 describe('configured activity-cell presentation boundary', () => {
   it('projects normalized sparse overrides in fixed order, including inherited/replaced fallbacks and mapped effort', () => {
     const { state, runtime } = setup();

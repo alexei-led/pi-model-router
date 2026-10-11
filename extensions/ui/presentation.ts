@@ -40,24 +40,42 @@ export const routerTone = (
 ): 'error' | 'warning' | 'accent' =>
   snapshot.lifecycle === 'failed'
     ? 'error'
-    : ['timeout', 'fallback', 'budget'].includes(snapshot.lifecycle)
+    : snapshot.switchCost?.reason === 'cost-held' ||
+        ['timeout', 'fallback', 'budget'].includes(snapshot.lifecycle)
       ? 'warning'
       : 'accent';
 
 export const routeReason = (snapshot: RouterUISnapshot): string => {
+  if (snapshot.lifecycle === 'off') return 'Router off';
+  if (snapshot.lifecycle === 'choosing')
+    return 'Choosing route · no generation started';
+  if (snapshot.lifecycle === 'cancelled') return 'Cancelled';
+  if (snapshot.lifecycle === 'failed') return 'Generation failed · /router log';
+  if (snapshot.lifecycle === 'fallback') return 'Explicit generation fallback';
+  if (snapshot.lifecycle === 'budget')
+    return 'Over soft budget → eligible baseline';
+  if (
+    snapshot.reuse === 'continuation' &&
+    snapshot.advice?.outcome !== 'selected' &&
+    snapshot.advice?.outcome !== undefined
+  )
+    return `Background review ${snapshot.advice.outcome} · current route retained`;
+  const switchCost = snapshot.switchCost;
+  const money = (value: number | undefined) =>
+    value === undefined ? 'unknown' : `$${value.toFixed(4)}`;
+  if (switchCost?.reason === 'cost-held')
+    return `Recommended ${formatRoute(snapshot.advised)} · held: ${money(switchCost.switchUsd)} vs ${money(switchCost.stayUsd)} over ${switchCost.horizonRequests} requests`;
+  if (switchCost?.reason === 'strong-advice')
+    return `Strong advice accepted · ${money(switchCost.switchUsd)} vs ${money(switchCost.stayUsd)} estimated`;
+  if (switchCost?.reason === 'effort-cache-shared')
+    return 'Effort changed · same model, cache-compatible';
+  if (switchCost?.reason === 'effort-cache-unknown')
+    return 'Effort changed · same model, cache behavior unknown';
+  if (switchCost?.reason === 'within-policy')
+    return `Model switch accepted · ${money(switchCost.switchUsd)} estimated over ${switchCost.horizonRequests} requests`;
+  if (switchCost?.reason === 'cost-unknown')
+    return 'Model switch accepted · cost or cache pricing unknown';
   switch (snapshot.lifecycle) {
-    case 'off':
-      return 'Router off';
-    case 'choosing':
-      return 'Choosing route · no generation started';
-    case 'cancelled':
-      return 'Cancelled';
-    case 'failed':
-      return 'Generation failed · /router log';
-    case 'fallback':
-      return 'Explicit generation fallback';
-    case 'budget':
-      return 'Over soft budget → eligible baseline';
     case 'continuation':
       return 'Tool route reused · no new advice';
     default:
@@ -122,7 +140,7 @@ export const budgetLines = (snapshot: RouterUISnapshot): string[] => {
 export const routeMix = (
   history: readonly RouterUIHistoryEntry[],
 ): string[] => {
-  const retained = history.slice(-50);
+  const retained = history.slice(-50).filter((entry) => !entry.reviewOnly);
   if (!retained.length) return ['No retained decisions. /router log on'];
   return [
     ...(['micro', 'low', 'medium', 'high'] as const).map((tier) => {

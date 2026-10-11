@@ -22,6 +22,10 @@ const snapshot: RouterUISnapshot = {
     budget: 2,
     advisor: undefined,
     timeout: 1500,
+    reviewEveryRequests: 4,
+    costHorizon: 5,
+    costSensitivity: 0.5,
+    strongAdviceConfidence: 0.9,
     thinkingHigh: undefined,
     thinkingMedium: undefined,
     thinkingLow: undefined,
@@ -64,6 +68,50 @@ describe('Signal Panel presentation', () => {
     expect(routeReason({ ...state, bypassReason: 'pinned' })).toBe(
       'Pinned route · advice skipped',
     );
+  });
+  it('explains held model proposals and effort-cache compatibility', () => {
+    const held = routeReason({
+      ...snapshot,
+      advised: {
+        tier: 'medium',
+        activity: 'docs',
+        provider: 'test',
+        model: 'docs',
+        thinking: 'low',
+      },
+      switchCost: {
+        reason: 'cost-held',
+        horizonRequests: 5,
+        stayUsd: 0.02,
+        switchUsd: 0.08,
+        incrementalUsd: 0.06,
+        confidenceOverride: false,
+      },
+    });
+    expect(held).toContain('held: $0.0800 vs $0.0200 over 5 requests');
+    expect(
+      routerTone({
+        ...snapshot,
+        switchCost: {
+          reason: 'cost-held',
+          horizonRequests: 5,
+          confidenceOverride: false,
+        },
+      }),
+    ).toBe('warning');
+    expect(
+      routeReason({
+        ...snapshot,
+        switchCost: {
+          reason: 'effort-cache-shared',
+          horizonRequests: 5,
+          stayUsd: 0,
+          switchUsd: 0,
+          incrementalUsd: 0,
+          confidenceOverride: false,
+        },
+      }),
+    ).toContain('cache-compatible');
   });
   it.each([0, 0.5, 1, 1.08])(
     'bounds bar fill but preserves the true budget ratio %s',

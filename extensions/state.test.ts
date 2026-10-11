@@ -213,6 +213,46 @@ describe('state.ts', () => {
     expect(sanitized.reuse).toBeUndefined();
   });
 
+  it('persists bounded switch-cost diagnostics and proposed route identity only', () => {
+    const snapshot = snapshotDecision({
+      ...decision,
+      proposedRoute: {
+        tier: 'high',
+        model: 'test/proposed',
+        thinking: 'high',
+        activity: 'debug',
+      },
+      switchCost: {
+        reason: 'cost-held',
+        horizonRequests: 5,
+        stayUsd: 0.02,
+        switchUsd: 0.08,
+        incrementalUsd: 0.06,
+        confidenceOverride: false,
+      },
+    });
+    expect(snapshot.proposedRoute).toEqual({
+      tier: 'high',
+      model: 'test/proposed',
+      thinking: 'high',
+      activity: 'debug',
+    });
+    expect(snapshot.switchCost).toMatchObject({
+      reason: 'cost-held',
+      horizonRequests: 5,
+    });
+    expect(
+      snapshotDecision({
+        ...decision,
+        switchCost: {
+          reason: 'remote text',
+          horizonRequests: 5,
+          confidenceOverride: false,
+        } as never,
+      }).switchCost,
+    ).toBeUndefined();
+  });
+
   it('persists only allowlisted generation metrics and rejects malformed estimates', () => {
     const generation: GenerationDiagnostics = {
       transition: 'model-switch',

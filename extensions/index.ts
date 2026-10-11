@@ -45,6 +45,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   let selectedProfile: string | undefined;
   let widgetEnabled = true;
   let lastRegisteredModels = '';
+  let disposeProvider: (() => void) | undefined;
   const pinnedTierByProfile: RouterPinByProfile = {};
   const thinkingByProfile: RouterThinkingByProfile = {};
   let debugHistory: RoutingDecision[] = [];
@@ -74,6 +75,12 @@ const routerExtension = (pi: ExtensionAPI) => {
     get ownerSignal() {
       return ownerController.signal;
     },
+    get disposeProvider() {
+      return disposeProvider;
+    },
+    set disposeProvider(value: (() => void) | undefined) {
+      disposeProvider = value;
+    },
     get lastRegisteredModels() {
       return lastRegisteredModels;
     },
@@ -102,6 +109,11 @@ const routerExtension = (pi: ExtensionAPI) => {
       return routerEnabled;
     },
     set routerEnabled(value: boolean) {
+      if (routerEnabled && !value) {
+        disposeProvider?.();
+        disposeProvider = undefined;
+        lastRegisteredModels = '';
+      }
       routerEnabled = value;
     },
     get lastDecision() {
@@ -585,9 +597,10 @@ const routerExtension = (pi: ExtensionAPI) => {
 
       routerEnabled = true;
       selectedProfile = profileName;
+      actions.registerRouterProvider();
       saveLastRouterProfile(profileName);
     } else {
-      routerEnabled = false;
+      runtimeState.routerEnabled = false;
       lastNonRouterModel = `${event.model.provider}/${event.model.id}`;
       ctx.ui.setHiddenThinkingLabel?.();
     }

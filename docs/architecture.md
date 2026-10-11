@@ -67,7 +67,7 @@ flowchart TD
     class Baseline local
 ```
 
-A valid continuation reuses its route. For an invalid continuation, the router chooses a local route without advice. It first tries the model that issued the tool calls in its recorded tier. It uses the baseline if that route is no longer eligible.
+A valid continuation normally reuses its actual route. Periodic background classification can recommend a current eligible cell, and a fresh result may apply on the immediately following request after switch-cost policy. Invalid or stale advice retains the valid incumbent. For an invalid continuation, the router chooses a compatible local route without advice; it first tries the model that issued the tool calls in its recorded tier, then the eligible baseline.
 A pin or budget decision still takes priority. A mid-loop switch rereads the full context without the turn cache.
 Pins and budget policy bypass advisors. One effective plan bypasses advice; a single tier with distinct activity cells can still request activity advice.
 The budget is a soft generation-cost policy, not a billing cap.
@@ -128,7 +128,11 @@ sequenceDiagram
     R-->>Pi: Forward stream
     Pi->>R: Tool results for the same turn
     R->>R: Validate route and tool identities
-    R->>M: Reuse actual route without new advice
+    opt Periodic review eligible
+        R->>J: Current-loop bounded text (background)
+    end
+    R->>R: Apply fresh previous review + switch-cost policy
+    R->>M: Delegate current eligible route without awaiting review
     M-->>R: Continuation events and usage
     R-->>Pi: Forward stream
 ```
@@ -139,7 +143,7 @@ The bounded cache stores the actual successful route and its immutable selected-
 
 Reuse requires matching session, user turn, profile, policy, configuration, branch ancestry, model, and tool-result identities.
 When the caller omits `sessionId`, the key uses Pi's native session ID.
-Changed capabilities or configuration invalidate reuse. New user-role steering messages change turn identity; tool-result continuations never reclassify. The original provider `sessionId` passes through unchanged.
+Changed capabilities or configuration invalidate reuse. New user-role steering messages change turn identity and abort prior background review. Valid tool-result continuations may schedule a periodic nonblocking classifier review; only the immediately following request may consume it. Branch/policy/plan/matrix identity changes and expiry drop the result. The original provider `sessionId` passes through unchanged.
 Context truncation, the last resort after the window check, removes complete old user turns and preserves system instructions and the active tool chain.
 Its text estimate does not guarantee a fit for images or oversized active turns.
 
@@ -181,7 +185,8 @@ not native pi-subagents policy propagation.
 
 | Event | Router action | Boundary |
 | --- | --- | --- |
-| The selected advisor times out, abstains, or returns invalid advice. | Select the eligible baseline. | Do not call a second advisor. |
+| Initial advisor times out, abstains, or returns invalid advice. | Select the eligible baseline. | Do not call a second advisor. |
+| Background review fails, is stale or expires. | Keep the valid eligible incumbent. | Do not delay generation or apply old advice. |
 | An explicit pin has no eligible route. | Return an error. | Do not substitute another tier. |
 | The caller cancels. | Stop the request. | Do not start baseline generation or retry. |
 | Generation fails before visible content. | Try the next configured fallback, or return an error. | Revalidate the target and account for reported costs. |
@@ -206,8 +211,8 @@ Missing usage remains unknown. Advisor costs are outside the generation budget.
 The final UI update cannot prevent persistence.
 
 `economics.ts` calls Pi `calculateCost()` for hypothetical cache scenarios on the same measured token workload, including request-wide input pricing tiers.
-This comparison never affects route selection. It stores no physical cache state or guessed TTL.
-A restored branch does not restore a server cache. Same-model effort changes do not imply cache preservation.
+This diagnostic comparison does not itself select routes. `switch-policy.ts` separately prices a cold first target request plus a bounded cache-read horizon and compares it with the incumbent estimate using the last observed read share. Cost sensitivity controls the accepted premium; relevant strong tier/activity advice may override it. An explicit exact-model `effortCacheSharing: shared` declaration removes cache rebuild cost for same-model effort changes; unknown metadata allows the change without claiming preservation. These catalog scenarios contain no physical cache state or guessed TTL.
+A restored branch does not restore a server cache. Same-model effort changes without explicit metadata do not imply cache preservation.
 The [evaluation](evaluation.md#cost-method) states the cost assumptions and evidence limits.
 
 ## Module ownership
@@ -226,7 +231,8 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 | `context.ts` | Select bounded classifier text and extract generation input. |
 | `classifier.ts` | Build typed bounded requests, call Pi's classifier registry, enforce deadlines, and validate advice. |
 | `choice.ts` | Define the provider-neutral rubric, candidate identity, and strict response validation. |
-| `economics.ts` | Produce generation metrics and hypothetical cost comparisons. |
+| `economics.ts` | Produce observed generation metrics and diagnostic hypothetical comparisons. |
+| `switch-policy.ts` | Evaluate catalog switch estimates, exact-model effort/cache metadata, confidence override and cost holds. |
 | `state.ts` | Validate, copy, and persist allowlisted branch-safe snapshots. |
 | `commands.ts` | Register router commands and completions. |
 | `ui.ts` | Format and publish the route strip and expose the native inspector entrypoint. |

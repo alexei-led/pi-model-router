@@ -22,6 +22,10 @@ const controls: RouterUIControls = {
   budget: 5,
   advisor: undefined,
   timeout: 1500,
+  reviewEveryRequests: 4,
+  costHorizon: 5,
+  costSensitivity: 0.5,
+  strongAdviceConfidence: 0.9,
   thinkingHigh: undefined,
   thinkingMedium: undefined,
   thinkingLow: undefined,
@@ -141,6 +145,17 @@ describe('Signal Panel', () => {
     expect(text).not.toContain('Classifier');
     expect(text).not.toContain('Apply');
     expect(text).not.toContain('Discard');
+    f.panel.dispose();
+  });
+  it('shows adaptive review and switch-policy controls in Advanced settings', () => {
+    const f = fixture();
+    f.panel.selectTab('settings');
+    f.panel.advanced = true;
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('Classifier review interval');
+    expect(text).toContain('Cost comparison horizon');
+    expect(text).toContain('Switch-cost sensitivity');
+    expect(text).toContain('Strong-advice override threshold');
     f.panel.dispose();
   });
   it('starts Settings with only pin visible until Advanced is opened', () => {
@@ -306,8 +321,8 @@ describe('ui/inspector.ts', () => {
     });
     const text = f.panel.render(80).join('\n');
     expect(text).toContain('Actual generation · fallback');
-    expect(text).toContain('Advised (not actual): high');
-    expect(text).toContain('Tier medium');
+    expect(text).toContain('Proposed · high');
+    expect(text).toContain('generic · medium · effort high');
     expect(f.draft.draft.pin).toBe('high');
     f.panel.dispose();
   });
@@ -337,7 +352,21 @@ describe('ui/inspector.ts', () => {
       httpAttempts: 2,
     };
     const history = [
-      { advice, generationCostUsd: 0.2 },
+      {
+        advice,
+        generationCostUsd: 0.2,
+        inputTokens: 20,
+        outputTokens: 5,
+        cacheReadTokens: 70,
+        cacheWriteTokens: 10,
+        actual: {
+          tier: 'medium' as const,
+          activity: 'code' as const,
+          provider: 'test',
+          model: 'm',
+          thinking: 'high' as const,
+        },
+      },
       { advice, reuse: 'continuation' as const },
       {
         advice: {
@@ -352,6 +381,9 @@ describe('ui/inspector.ts', () => {
     expect(text).toContain('Route reuses: 1');
     expect(text).toContain('coverage 1/3');
     expect(text).toContain('unknown (not free)');
+    expect(text).toContain('Cache-read share, last observed request: 70%');
+    expect(text).toContain('Catalog cost / request:');
+    expect(text).toContain('Observed activity labels: code 1');
     expect(
       formatRouterUIUsage(Array.from({ length: 70 }, () => ({}))).join('\n'),
     ).toContain('50 decisions');

@@ -247,6 +247,7 @@ describe('ui.ts lifecycle strip', () => {
             provider: 'test',
             model: 'model-medium',
             tier: 'medium',
+            activity: 'code',
             thinking: 'medium',
           },
           advice: {
@@ -259,6 +260,7 @@ describe('ui.ts lifecycle strip', () => {
       );
       const text = vi.mocked(ctx.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
       expect(text).toContain('model-medium');
+      expect(text).toContain('code');
       expect(visibleWidth(text)).toBeLessThanOrEqual(40);
     } finally {
       if (previous) Object.defineProperty(process.stdout, 'columns', previous);
@@ -341,6 +343,10 @@ describe('ui.ts lifecycle strip', () => {
       budget: undefined,
       advisor: 'classifier',
       timeout: 1500,
+      reviewEveryRequests: 4,
+      costHorizon: 5,
+      costSensitivity: 0.5,
+      strongAdviceConfidence: 0.9,
       thinkingHigh: undefined,
       thinkingMedium: undefined,
       thinkingLow: undefined,

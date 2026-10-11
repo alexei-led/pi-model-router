@@ -111,8 +111,14 @@ export const buildClassifierContext = (
     (message) => message.role === 'user',
   );
   const current = context.messages[latest];
+  const loopMessages = context.messages.slice(latest + 1);
+  const currentLoop =
+    options.currentLoopMessages > 0
+      ? loopMessages.slice(-options.currentLoopMessages)
+      : [];
+  const goalBudget = currentLoop.length ? Math.floor(budget / 2) : budget;
   const state: ClassifierContextState = {
-    currentRequest: excerpt(current ? textOnly(current) : '', budget),
+    currentRequest: excerpt(current ? textOnly(current) : '', goalBudget),
     recentDialogue: [],
     recentToolEvidence: [],
   };
@@ -131,6 +137,13 @@ export const buildClassifierContext = (
   }
   const dialogue: { role: 'user' | 'assistant'; text: string; turn: number }[] =
     [];
+  const loopDialogue = currentLoop.flatMap((message, index) => {
+    if (message.role !== 'assistant') return [];
+    const text = textOnly(message).trim();
+    return text ? [{ role: 'assistant' as const, text, turn: -1 - index }] : [];
+  });
+  // Current task progress receives the history budget before older completed turns.
+  for (const entry of loopDialogue.reverse()) dialogue.push(entry);
   for (const [turn, bounds] of turns
     .slice(0, options.previousTurns)
     .entries()) {
@@ -140,7 +153,6 @@ export const buildClassifierContext = (
       (message) =>
         message.role === 'assistant' && textOnly(message).trim().length > 0,
     );
-    // Newest turn first for allocation; render the final payload chronologically.
     if (answer)
       dialogue.push({ role: 'assistant', text: textOnly(answer), turn });
     if (user && textOnly(user).trim())
@@ -153,32 +165,57 @@ export const buildClassifierContext = (
     if (limit < 1) break;
     const selected = excerpt(entry.text, limit);
     state.recentDialogue.unshift({ role: entry.role, ...selected });
-    includedTurns.add(entry.turn);
+    if (entry.turn >= 0) includedTurns.add(entry.turn);
     const selectedTokens = estimateClassifierTextTokens(selected.text);
     historyBudget -= selectedTokens;
     remaining -= selectedTokens;
   }
-  const previous = turns[0];
-  if (
-    options.toolResults !== 'none' &&
-    previous &&
-    remaining > 0 &&
-    options.maxToolTokens > 0
-  ) {
-    const tool = context.messages
-      .slice(previous.start, previous.end)
-      .findLast((message) => message.role === 'toolResult');
-    if (
-      tool?.role === 'toolResult' &&
-      (options.toolResults === 'last' || tool.isError === true)
-    ) {
-      const text = textOnly(tool);
-      if (text.trim())
-        state.recentToolEvidence.push({
-          ...excerpt(text, Math.min(remaining, options.maxToolTokens)),
-          isError: tool.isError === true,
-        });
-    }
+  const currentToolResults = currentLoop.filter(
+    (message) => message.role === 'toolResult',
+  );
+  const loopToolSelection =
+    options.toolResults === 'recent'
+      ? currentToolResults
+      : options.toolResults === 'last'
+        ? currentToolResults.slice(-1)
+        : options.toolResults === 'last-error'
+          ? currentToolResults
+              .slice(-1)
+              .filter((message) => message.isError === true)
+          : [];
+  const loopTools = loopToolSelection.flatMap((message) => {
+    const text = textOnly(message).trim();
+    return text ? [{ text, isError: message.isError === true }] : [];
+  });
+  const priorTool = turns[0]
+    ? context.messages
+        .slice(turns[0].start, turns[0].end)
+        .findLast((message) => message.role === 'toolResult')
+    : undefined;
+  const toolCandidates = loopTools.length
+    ? loopTools
+    : !loopMessages.some((message) => message.role === 'toolResult') &&
+        priorTool?.role === 'toolResult' &&
+        (options.toolResults === 'last' ||
+          options.toolResults === 'recent' ||
+          (options.toolResults === 'last-error' && priorTool.isError === true))
+      ? [
+          {
+            text: textOnly(priorTool).trim(),
+            isError: priorTool.isError === true,
+          },
+        ]
+      : [];
+  let toolBudget = Math.min(remaining, options.maxToolTokens);
+  const newestTools = [...toolCandidates].reverse();
+  for (const [index, entry] of newestTools.entries()) {
+    const limit = Math.floor(toolBudget / (newestTools.length - index));
+    if (limit < 1) break;
+    const selected = excerpt(entry.text, limit);
+    state.recentToolEvidence.unshift({ ...selected, isError: entry.isError });
+    const selectedTokens = estimateClassifierTextTokens(selected.text);
+    toolBudget -= selectedTokens;
+    remaining -= selectedTokens;
   }
   const all = [
     state.currentRequest,

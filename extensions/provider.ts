@@ -53,6 +53,7 @@ export const registerRouterProvider = (
   pi: ExtensionAPI,
   state: {
     lastRegisteredModels: string;
+    disposeProvider?: (() => void) | undefined;
     readonly requestEpoch?: number;
     readonly ownerSignal?: AbortSignal;
     readonly currentConfig: RouterConfig;
@@ -148,8 +149,20 @@ export const registerRouterProvider = (
   const modelsKey = JSON.stringify([state.requestEpoch, modelDefinitions]);
   if (state.lastRegisteredModels === modelsKey) return;
 
+  state.disposeProvider?.();
   const turnCache = createProviderTurnCache();
-  const registrationSignal = state.ownerSignal;
+  const registrationController = new AbortController();
+  const registrationSignal = state.ownerSignal
+    ? AbortSignal.any([state.ownerSignal, registrationController.signal])
+    : registrationController.signal;
+  registrationSignal.addEventListener('abort', turnCache.dispose, {
+    once: true,
+  });
+  state.disposeProvider = () => {
+    registrationController.abort();
+    registrationSignal.removeEventListener('abort', turnCache.dispose);
+    turnCache.dispose();
+  };
   const registrationEpoch = state.requestEpoch;
   pi.registerProvider('router', {
     baseUrl: 'router://local',
@@ -163,6 +176,7 @@ export const registerRouterProvider = (
     ): AssistantMessageEventStream {
       const stream = createAssistantMessageEventStream();
       startRouterProviderStream({
+        registrationSignal,
         ...(registrationEpoch !== undefined ? { registrationEpoch } : {}),
         model,
         context,

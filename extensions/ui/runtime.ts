@@ -37,10 +37,29 @@ const routeOf = (decision: RoutingDecision): RouterUIRoute => ({
   model: decision.targetModelId,
   thinking: decision.thinking,
 });
+const recommendationOf = (
+  decision: RoutingDecision,
+): RouterUIRoute | undefined => {
+  if (!decision.proposedRoute) return undefined;
+  const model = parseCanonicalModelRef(decision.proposedRoute.model);
+  return {
+    activity: decision.proposedRoute.activity,
+    tier: decision.proposedRoute.tier,
+    provider: model.provider,
+    model: model.modelId,
+    thinking: decision.proposedRoute.thinking,
+  };
+};
 const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
   const metrics = decision.classification;
   return {
-    actual: decision.generation ? routeOf(decision) : undefined,
+    reviewOnly: decision.reviewOnly,
+    actual:
+      !decision.reviewOnly && decision.generation
+        ? routeOf(decision)
+        : undefined,
+    proposed: recommendationOf(decision),
+    switchCost: decision.switchCost,
     advice:
       metrics ||
       decision.advisor === 'classifier' ||
@@ -63,6 +82,10 @@ const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
     reuse: decision.reuse,
     generationCostUsd: decision.generation?.reportedCostUsd,
     generationAttempts: decision.generation?.attempts,
+    inputTokens: decision.generation?.inputTokens,
+    outputTokens: decision.generation?.outputTokens,
+    cacheReadTokens: decision.generation?.cacheReadTokens,
+    cacheWriteTokens: decision.generation?.cacheWriteTokens,
   };
 };
 const lifecycleOf = (
@@ -92,6 +115,10 @@ export const createRouterUIRuntime = (
     'advisor',
     'timeout',
     'budget',
+    'reviewEveryRequests',
+    'costHorizon',
+    'costSensitivity',
+    'strongAdviceConfidence',
   ]);
   const edited = (
     entry: RouterUIPendingControls | undefined,
@@ -130,6 +157,11 @@ export const createRouterUIRuntime = (
       budget: config.maxSessionBudget,
       advisor: config.advisor?.model,
       timeout: config.advisor?.timeoutMs ?? 10_000,
+      reviewEveryRequests: config.advisor?.reviewEveryRequests ?? 4,
+      costHorizon: config.switchPolicy?.horizonRequests ?? 5,
+      costSensitivity: config.switchPolicy?.costSensitivity ?? 0.5,
+      strongAdviceConfidence:
+        config.switchPolicy?.strongAdviceConfidence ?? 0.9,
       thinkingHigh: thinking?.high,
       thinkingMedium: thinking?.medium,
       thinkingLow: thinking?.low,
@@ -329,7 +361,12 @@ export const createRouterUIRuntime = (
         : last?.generation
           ? routeOf(last)
           : undefined,
-      advised: sameProfile ? advised : undefined,
+      advised: sameProfile
+        ? advised
+        : last
+          ? recommendationOf(last)
+          : undefined,
+      switchCost: last?.switchCost,
       advice: last ? historyOf(last).advice : undefined,
       controls: controls(profile),
       pendingControls: pendingValue(profile),
@@ -408,6 +445,12 @@ export const createRouterUIRuntime = (
     if (!configured) return false;
     const nextConfig = {
       ...config,
+      switchPolicy: {
+        ...config.switchPolicy,
+        horizonRequests: next.costHorizon,
+        costSensitivity: next.costSensitivity,
+        strongAdviceConfidence: next.strongAdviceConfidence,
+      },
       maxSessionBudget: next.budget,
       profiles: {
         ...config.profiles,
@@ -424,6 +467,7 @@ export const createRouterUIRuntime = (
             model: next.advisor,
             enabled: config.advisor?.enabled ?? false,
             timeoutMs: next.timeout,
+            reviewEveryRequests: next.reviewEveryRequests,
           },
           [],
         )
@@ -465,7 +509,7 @@ export const createRouterUIRuntime = (
       if (event.decision) observation = snapshotDecision(event.decision);
       if (event.stage === 'selected') {
         if (event.decision?.advisor === 'classifier')
-          advised = routeOf(event.decision);
+          advised = recommendationOf(event.decision) ?? routeOf(event.decision);
       } else if (event.stage === 'generating' && event.decision) {
         actual = routeOf(event.decision);
         lifecycle = lifecycleOf(event.decision, true);

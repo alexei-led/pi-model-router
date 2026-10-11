@@ -25,8 +25,11 @@ export type RouterPinByProfile = Partial<Record<string, RouterTier>>;
 export type RouterThinkingByTier = Partial<Record<RouterTier, ThinkingLevel>>;
 export type RouterThinkingByProfile = Record<string, RouterThinkingByTier>;
 
+export type EffortCacheSharing = 'shared' | 'separate' | 'unknown';
+
 export interface ModelDefinition {
   model: string;
+  effortCacheSharing?: EffortCacheSharing | undefined;
   contextWindow?: number | undefined;
   maxTokens?: number | undefined;
   reasoning?: boolean | undefined;
@@ -52,8 +55,9 @@ export interface RoutedTierConfig {
 export interface ClassifierContextConfig {
   previousTurns: number;
   maxHistoryTokens: number;
-  toolResults: 'none' | 'last' | 'last-error';
+  toolResults: 'none' | 'last' | 'last-error' | 'recent';
   maxToolTokens: number;
+  currentLoopMessages: number;
 }
 export interface ClassifierTextExcerpt {
   text: string;
@@ -77,6 +81,7 @@ export interface AdvisorConfig {
   enabled: boolean;
   model: string;
   timeoutMs: number;
+  reviewEveryRequests: number;
   confidenceThreshold: number;
   probabilityThreshold: number;
   maxStateTokens: number;
@@ -122,8 +127,15 @@ export interface RouterProfile {
 
 export type StatusLineMode = 'compact' | 'detailed';
 
+export interface RouterSwitchPolicy {
+  horizonRequests: number;
+  costSensitivity: number;
+  strongAdviceConfidence: number;
+}
+
 export interface RouterConfig {
   activityRouting?: ActivityRouting | undefined;
+  switchPolicy?: RouterSwitchPolicy | undefined;
   ui?: { statusLine: StatusLineMode } | undefined;
   advisor?: AdvisorConfig | undefined;
   debug?: boolean | undefined;
@@ -136,6 +148,10 @@ export interface RoutePair {
   tier: RouterTier;
   model: string;
   thinking: ThinkingLevel;
+}
+
+export interface RouteRecommendation extends RoutePair {
+  activity?: RouterActivity | undefined;
 }
 
 export interface RouteCandidate extends RoutePair {
@@ -317,7 +333,28 @@ export interface GenerationDiagnostics {
   shadow?: CacheCostShadow | undefined;
 }
 
+export interface SwitchCostDiagnostic {
+  reason:
+    | 'same-route'
+    | 'effort-cache-shared'
+    | 'effort-cache-unknown'
+    | 'within-policy'
+    | 'strong-advice'
+    | 'cost-held'
+    | 'cost-unknown';
+  horizonRequests: number;
+  stayUsd?: number | undefined;
+  switchUsd?: number | undefined;
+  incrementalUsd?: number | undefined;
+  /** Estimated first-request premium, separate from generation totals. */
+  rebuildUsd?: number | undefined;
+  steadyDeltaUsd?: number | undefined;
+  confidenceOverride: boolean;
+}
+
 export interface RoutingDecision {
+  /** Classifier terminal observation only; never an observed generation. */
+  reviewOnly?: boolean | undefined;
   /** Validated semantic answer, independent of the local cell used for availability. */
   activity?: RouterActivity | undefined;
   /** Local cell provenance, not an inferred activity. Omitted means generic. */
@@ -334,6 +371,8 @@ export interface RoutingDecision {
   bypassReason?: BypassReason | undefined;
   classification?: ClassifierDiagnostics | undefined;
   generation?: GenerationDiagnostics | undefined;
+  proposedRoute?: RouteRecommendation | undefined;
+  switchCost?: SwitchCostDiagnostic | undefined;
   reuse?: 'same-turn' | 'shared' | 'continuation' | undefined;
   thinking: ThinkingLevel;
   timestamp: number;
@@ -380,6 +419,7 @@ export interface RouterPersistedState {
 
 export interface RawRouterConfig {
   activityRouting?: unknown;
+  switchPolicy?: unknown;
   ui?: unknown;
   advisor?: unknown;
   debug?: unknown;
@@ -421,6 +461,10 @@ export interface RouterUIControls {
   budget: number | undefined;
   advisor: RouterUIAdvisorId | undefined;
   timeout: number;
+  reviewEveryRequests: number;
+  costHorizon: number;
+  costSensitivity: number;
+  strongAdviceConfidence: number;
   thinkingHigh: ThinkingLevel | undefined;
   thinkingMedium: ThinkingLevel | undefined;
   thinkingLow: ThinkingLevel | undefined;
@@ -471,12 +515,19 @@ export interface RouterUIAdviceObservation {
   costUsd?: number | undefined;
 }
 export interface RouterUIHistoryEntry {
+  reviewOnly?: boolean | undefined;
   actual?: RouterUIRoute | undefined;
+  proposed?: RouterUIRoute | undefined;
+  switchCost?: SwitchCostDiagnostic | undefined;
   advice?: RouterUIAdviceObservation | undefined;
   reuse?: RoutingDecision['reuse'];
   /** Cost for this observation only; reuses must not repeat an earlier cost. */
   generationCostUsd?: number | undefined;
   generationAttempts?: number | undefined;
+  inputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+  cacheReadTokens?: number | undefined;
+  cacheWriteTokens?: number | undefined;
 }
 /** Presentation only: no credentials, transcript text or remote explanations. */
 export interface RouterUISnapshot {
@@ -491,6 +542,7 @@ export interface RouterUISnapshot {
   failure?: 'request-failed' | undefined;
   actual?: RouterUIRoute | undefined;
   advised?: RouterUIRoute | undefined;
+  switchCost?: SwitchCostDiagnostic | undefined;
   advice?: RouterUIAdviceObservation | undefined;
   controls: Readonly<RouterUIControls>;
   pendingControls?: Readonly<RouterUIControls> | undefined;

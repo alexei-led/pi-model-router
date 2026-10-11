@@ -26,6 +26,21 @@ interface AdvisedTurnRecord {
   decision: RoutingDecision;
 }
 
+export interface ReviewStamp {
+  identity: string;
+  branch: readonly string[];
+  requestCount: number;
+  signal?: AbortSignal | undefined;
+}
+
+interface BackgroundReview {
+  identity: string;
+  branch: readonly string[];
+  startedAtRequest: number;
+  controller: AbortController;
+  result?: ClassifierResult;
+}
+
 interface ClassifierFlight {
   config: AdvisorConfig;
   promise: Promise<ClassifierResult>;
@@ -58,6 +73,18 @@ export interface ProviderTurnCache {
     config: RouterConfig,
     plans: readonly RoutePlan[],
   ) => { decision: RoutingDecision; plan: RoutePlan } | undefined;
+  requestCount: (turn: string) => number;
+  takeReview: (
+    turn: string,
+    stamp: ReviewStamp,
+  ) => ClassifierResult | undefined;
+  clearReviewsExcept: (turn: string | undefined) => void;
+  startReview: (
+    turn: string,
+    stamp: ReviewStamp,
+    run: (signal: AbortSignal) => Promise<ClassifierResult>,
+  ) => void;
+  dispose: () => void;
   startClassifier: (
     key: string,
     config: AdvisorConfig,
@@ -154,6 +181,8 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
   const continuations = new Map<string, ContinuationRecord>();
   const advisedTurns = new Map<string, AdvisedTurnRecord>();
   const pendingClassifierFlights = new Map<string, ClassifierFlight>();
+  const turnRequests = new Map<string, number>();
+  const reviews = new Map<string, BackgroundReview>();
   const rememberBounded = <T>(map: Map<string, T>, key: string, value: T) => {
     map.delete(key);
     map.set(key, value);
@@ -198,6 +227,83 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
         },
         plan: record.plan,
       };
+    },
+    requestCount: (turn) => {
+      const count = (turnRequests.get(turn) ?? 0) + 1;
+      rememberBounded(turnRequests, turn, count);
+      return count;
+    },
+    takeReview: (turn, stamp) => {
+      const review = reviews.get(turn);
+      if (!review) return undefined;
+      if (
+        review.identity !== stamp.identity ||
+        stamp.requestCount - review.startedAtRequest !== 1 ||
+        review.controller.signal.aborted ||
+        stamp.signal?.aborted ||
+        !review.branch.length ||
+        !review.branch.every((id, index) => stamp.branch[index] === id)
+      ) {
+        review.controller.abort();
+        reviews.delete(turn);
+        return undefined;
+      }
+      if (!review.result) return undefined;
+      reviews.delete(turn);
+      return review.result;
+    },
+    clearReviewsExcept: (turn) => {
+      for (const [key, review] of reviews)
+        if (key !== turn) {
+          review.controller.abort();
+          reviews.delete(key);
+        }
+    },
+    startReview: (turn, stamp, run) => {
+      if (stamp.signal?.aborted) return;
+      const existing = reviews.get(turn);
+      if (
+        existing?.identity === stamp.identity &&
+        existing.startedAtRequest === stamp.requestCount
+      )
+        return;
+      existing?.controller.abort();
+      const review: BackgroundReview = {
+        identity: stamp.identity,
+        branch: [...stamp.branch],
+        startedAtRequest: stamp.requestCount,
+        controller: new AbortController(),
+      };
+      reviews.delete(turn);
+      reviews.set(turn, review);
+      while (reviews.size > MAX_TURN_CACHE_ENTRIES) {
+        const oldest = reviews.keys().next().value;
+        if (oldest === undefined) break;
+        reviews.get(oldest)?.controller.abort();
+        reviews.delete(oldest);
+      }
+      const signal = stamp.signal
+        ? AbortSignal.any([review.controller.signal, stamp.signal])
+        : review.controller.signal;
+      void run(signal).then(
+        (result) => {
+          if (reviews.get(turn) === review && !signal.aborted)
+            review.result = result;
+        },
+        () => {
+          if (reviews.get(turn) === review) reviews.delete(turn);
+        },
+      );
+    },
+    dispose: () => {
+      for (const flight of pendingClassifierFlights.values())
+        flight.controller.abort();
+      for (const review of reviews.values()) review.controller.abort();
+      pendingClassifierFlights.clear();
+      reviews.clear();
+      continuations.clear();
+      advisedTurns.clear();
+      turnRequests.clear();
     },
     startClassifier: (key, config, request, run) =>
       startClassifierFlight(

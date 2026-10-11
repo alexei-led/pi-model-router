@@ -15,7 +15,7 @@ import type {
   RouterUISnapshot,
   RouterUIView,
 } from '../types';
-import { ROUTER_TIERS } from '../types';
+import { ROUTER_ACTIVITIES, ROUTER_TIERS } from '../types';
 import { validateRouterUIControls } from './controls';
 import {
   activityRouteLines,
@@ -26,6 +26,7 @@ import {
   routeMix,
   routeReason,
   routerTone,
+  textBar,
 } from './presentation';
 
 const keys = [
@@ -34,6 +35,10 @@ const keys = [
   'budget',
   'advisor',
   'timeout',
+  'reviewEveryRequests',
+  'costHorizon',
+  'costSensitivity',
+  'strongAdviceConfidence',
   'thinkingHigh',
   'thinkingMedium',
   'thinkingLow',
@@ -46,6 +51,10 @@ const fieldNames: Record<keyof RouterUIControls, string> = {
   budget: 'Soft budget ($)',
   advisor: 'Classifier model',
   timeout: 'Advisor deadline (ms)',
+  reviewEveryRequests: 'Classifier review interval',
+  costHorizon: 'Cost comparison horizon',
+  costSensitivity: 'Switch-cost sensitivity',
+  strongAdviceConfidence: 'Strong-advice override threshold',
   thinkingHigh: 'High effort',
   thinkingMedium: 'Medium effort',
   thinkingLow: 'Low effort',
@@ -55,6 +64,40 @@ const display = (value: unknown): string =>
   value === undefined ? 'default / unknown' : String(value);
 const money = (value: number | undefined): string =>
   value === undefined ? 'unknown (not free)' : `$${value.toFixed(4)}`;
+const controlDisplay = (key: keyof RouterUIControls, value: unknown): string =>
+  key === 'reviewEveryRequests' && value === 0
+    ? 'off'
+    : key === 'reviewEveryRequests' || key === 'costHorizon'
+      ? `${String(value)} requests`
+      : (key === 'costSensitivity' || key === 'strongAdviceConfidence') &&
+          typeof value === 'number'
+        ? `${Math.round(value * 100)}%`
+        : display(value);
+const controlChoices = (
+  field: keyof RouterUIControls,
+  snapshot: RouterUISnapshot,
+  draft: RouterUIControls,
+): (string | number | undefined)[] => {
+  const choices: (string | number | undefined)[] =
+    field === 'advisor'
+      ? [
+          ...new Set([
+            draft.advisor,
+            ...snapshot.classifiers.map((model) => model.model),
+          ]),
+        ]
+      : field.startsWith('thinking')
+        ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+        : field === 'reviewEveryRequests'
+          ? [0, 2, 4, 8]
+          : field === 'costHorizon'
+            ? [1, 3, 5, 10]
+            : field === 'costSensitivity' || field === 'strongAdviceConfidence'
+              ? [0, 0.25, 0.5, 0.75, 0.9, 0.95, 1]
+              : ['auto', ...ROUTER_TIERS];
+  return choices.includes(draft[field]) ? choices : [draft[field], ...choices];
+};
+
 const changes = (
   before: Readonly<RouterUIControls>,
   after: Readonly<RouterUIControls>,
@@ -73,12 +116,13 @@ const changes = (
 export const formatRouterUIUsage = (
   history: readonly RouterUIHistoryEntry[],
 ): string[] => {
-  const retained = history.slice(-50);
+  const observations = history.slice(-50);
+  const retained = observations.filter((entry) => !entry.reviewOnly);
   const requests = new Map<
     string,
     NonNullable<RouterUIHistoryEntry['advice']>
   >();
-  for (const entry of retained)
+  for (const entry of observations)
     if (entry.advice?.requestId && !requests.has(entry.advice.requestId))
       requests.set(entry.advice.requestId, entry.advice);
   const samples = [...requests.values()];
@@ -94,6 +138,39 @@ export const formatRouterUIUsage = (
   const generationAttempts = retained.flatMap((entry) =>
     entry.generationAttempts === undefined ? [] : [entry.generationAttempts],
   );
+  const latestUsage = [...retained]
+    .reverse()
+    .find(
+      (entry) =>
+        entry.inputTokens !== undefined &&
+        entry.cacheReadTokens !== undefined &&
+        entry.cacheWriteTokens !== undefined,
+    );
+  const inputTotal = latestUsage
+    ? (latestUsage.inputTokens ?? 0) +
+      (latestUsage.cacheReadTokens ?? 0) +
+      (latestUsage.cacheWriteTokens ?? 0)
+    : 0;
+  const cacheReadShare =
+    latestUsage && inputTotal > 0
+      ? (latestUsage.cacheReadTokens ?? 0) / inputTotal
+      : undefined;
+  const costSamples = costs.slice(-12);
+  const maxCost = Math.max(...costSamples, 0);
+  const spark = costSamples.length
+    ? costSamples
+        .map(
+          (value) =>
+            '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor((value / (maxCost || 1)) * 7))],
+        )
+        .join('')
+    : 'unknown';
+  const activityCounts = ROUTER_ACTIVITIES.flatMap((activity) => {
+    const count = retained.filter(
+      (entry) => entry.actual?.activity === activity,
+    ).length;
+    return count ? [`${activity} ${count}`] : [];
+  });
   const latencies = samples
     .flatMap((entry) =>
       entry.latencyMs === undefined ? [] : [entry.latencyMs],
@@ -111,6 +188,9 @@ export const formatRouterUIUsage = (
     `Known generation cost: ${costs.length ? money(costs.reduce((sum, cost) => sum + cost, 0)) : 'unknown'} · coverage ${costs.length}/${retained.length}`,
     'Catalog only, not an invoice.',
     `Generation attempts: ${generationAttempts.length ? generationAttempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${generationAttempts.length}/${retained.length}`,
+    `Cache-read share, last observed request: ${cacheReadShare === undefined ? 'unknown' : `${Math.round(cacheReadShare * 100)}%`} · measured, not forecast ${cacheReadShare === undefined ? '' : textBar(cacheReadShare)}`,
+    `Catalog cost / request: ${spark} · ${costSamples.length} known samples · not a savings prediction`,
+    `Observed activity labels: ${activityCounts.join(' · ') || 'unknown'} · no inferred phase`,
     '',
     `Unique advice requests: ${samples.length}`,
     `HTTP attempts: ${attempts.length ? attempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${attempts.length}/${samples.length}`,
@@ -397,17 +477,7 @@ export class RouterUIInspector implements Component {
         matchesKey(data, 'right') ||
         matchesKey(data, 'left'))
     ) {
-      const choices =
-        field === 'advisor'
-          ? [
-              ...new Set([
-                this.editor.draft.advisor,
-                ...this.snapshot.classifiers.map((model) => model.model),
-              ]),
-            ]
-          : field.startsWith('thinking')
-            ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
-            : ['auto', ...ROUTER_TIERS];
+      const choices = controlChoices(field, this.snapshot, this.editor.draft);
       const value =
         choices[
           (choices.indexOf(this.editor.draft[field]) +
@@ -459,15 +529,29 @@ export class RouterUIInspector implements Component {
         (s.advised.model !== actual?.model ||
           s.advised.provider !== actual?.provider ||
           s.advised.thinking !== actual?.thinking ||
-          s.advised.tier !== actual?.tier);
+          s.advised.tier !== actual?.tier ||
+          s.advised.activity !== actual?.activity ||
+          s.advised.routeCell !== actual?.routeCell);
       return [
         muted(
           `${s.lifecycle === 'idle' ? 'Last generation' : 'Actual generation'} · ${s.lifecycle}`,
         ),
         heading(actual ? actual.model : 'unknown / no observed generation'),
-        ...(actual ? [`Tier ${actual.tier} · effort ${actual.thinking}`] : []),
+        ...(actual
+          ? [
+              this.theme.bg(
+                'toolSuccessBg',
+                this.theme.fg(
+                  'success',
+                  `${actual.activity ?? 'generic'} · ${actual.tier} · effort ${actual.thinking}`,
+                ),
+              ),
+            ]
+          : []),
         this.theme.fg(routerTone(s), routeReason(s)),
-        ...(differs ? [`Advised (not actual): ${route(s.advised)}`] : []),
+        ...(differs
+          ? [this.theme.fg('warning', `Proposed · ${route(s.advised)}`)]
+          : []),
         ...(s.pendingControls
           ? [
               this.theme.fg(
@@ -512,14 +596,26 @@ export class RouterUIInspector implements Component {
     if (this.tab === 1)
       return [
         heading('Observed routes · retained active branch'),
-        ...routeMix(s.history),
+        ...routeMix(s.history).map((line, index) =>
+          this.theme.fg(
+            (['dim', 'accent', 'success', 'warning'] as const)[index] ??
+              'muted',
+            line,
+          ),
+        ),
         '',
-        ...this.usage,
+        ...this.usage.map((line) =>
+          line.startsWith('Cache-read')
+            ? this.theme.fg('success', line)
+            : line.startsWith('Catalog cost')
+              ? this.theme.fg('accent', line)
+              : muted(line),
+        ),
       ];
     return [
       muted(activityRoutingSummary(s)),
       muted('Pin / effort / baseline: this profile.'),
-      muted('Advisor / deadline / budget: session-wide.'),
+      muted('Advisor / deadline / budget / switch policy: session-wide.'),
       muted('Apply queues the next user turn; not tool turns.'),
       ...(this.advanced
         ? [
@@ -631,7 +727,7 @@ export class RouterUIInspector implements Component {
           ...wrapTextWithAnsi(
             color(
               selected,
-              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'not configured') : display(this.editor.draft[field])}`,
+              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'not configured') : controlDisplay(field, this.editor.draft[field])}`,
             ),
             w,
           ),

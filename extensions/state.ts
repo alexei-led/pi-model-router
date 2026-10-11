@@ -14,10 +14,12 @@ import type {
   ClassifierDiagnostics,
   GenerationDiagnostics,
   PersistedStateInput,
+  RouteRecommendation,
   RouterLastProfileState,
   RouterPersistedState,
   RouterPinByProfile,
   RoutingDecision,
+  SwitchCostDiagnostic,
 } from './types';
 import {
   CLASSIFIER_OUTCOMES,
@@ -56,6 +58,38 @@ const isPersistedReasonCode = (value: unknown): boolean =>
   isRoutingReasonCode(value) ||
   (typeof value === 'string' && OBSOLETE_REASON_CODES.has(value));
 
+const SWITCH_COST_REASONS = [
+  'same-route',
+  'effort-cache-shared',
+  'effort-cache-unknown',
+  'within-policy',
+  'strong-advice',
+  'cost-held',
+  'cost-unknown',
+] as const;
+const isRouteRecommendation = (value: unknown): value is RouteRecommendation =>
+  isObjectRecord(value) &&
+  isRouterTier(value.tier) &&
+  isModelRef(value.model) &&
+  isThinkingLevel(value.thinking) &&
+  (value.activity === undefined || isRouterActivity(value.activity));
+const isSwitchCost = (value: unknown): value is SwitchCostDiagnostic =>
+  isObjectRecord(value) &&
+  SWITCH_COST_REASONS.some((reason) => reason === value.reason) &&
+  Number.isSafeInteger(value.horizonRequests) &&
+  Number(value.horizonRequests) >= 1 &&
+  Number(value.horizonRequests) <= 20 &&
+  ['stayUsd', 'switchUsd', 'rebuildUsd'].every(
+    (key) =>
+      value[key] === undefined ||
+      (isFiniteNumber(value[key]) && value[key] >= 0),
+  ) &&
+  (value.incrementalUsd === undefined ||
+    isFiniteNumber(value.incrementalUsd)) &&
+  (value.steadyDeltaUsd === undefined ||
+    isFiniteNumber(value.steadyDeltaUsd)) &&
+  typeof value.confidenceOverride === 'boolean';
+
 const isDecision = (value: unknown): value is RoutingDecision =>
   isObjectRecord(value) &&
   isRouterTier(value.tier) &&
@@ -70,9 +104,16 @@ const isDecision = (value: unknown): value is RoutingDecision =>
     ? typeof value.reasoning === 'string'
     : isPersistedReasonCode(value.reasonCode)) &&
   (value.advisor === undefined || isAdvisorOutcome(value.advisor)) &&
-  ['isClassifier', 'isFallback', 'isBudgetForced', 'isGenerationFailed'].every(
-    (key) => value[key] === undefined || typeof value[key] === 'boolean',
-  );
+  (value.proposedRoute === undefined ||
+    isRouteRecommendation(value.proposedRoute)) &&
+  (value.switchCost === undefined || isSwitchCost(value.switchCost)) &&
+  [
+    'isClassifier',
+    'isFallback',
+    'isBudgetForced',
+    'isGenerationFailed',
+    'reviewOnly',
+  ].every((key) => value[key] === undefined || typeof value[key] === 'boolean');
 const isMap = (value: unknown, validate: (entry: unknown) => boolean) =>
   isObjectRecord(value) &&
   Object.entries(value).every(
@@ -318,9 +359,46 @@ const snapshotGeneration = (
 };
 
 // Copy only the decision contract, never incidental runtime properties.
+const snapshotRecommendation = (
+  value: unknown,
+): RouteRecommendation | undefined =>
+  isRouteRecommendation(value)
+    ? {
+        tier: value.tier,
+        model: value.model,
+        thinking: value.thinking,
+        ...(isRouterActivity(value.activity)
+          ? { activity: value.activity }
+          : {}),
+      }
+    : undefined;
+
+const snapshotSwitchCost = (
+  value: unknown,
+): SwitchCostDiagnostic | undefined => {
+  if (!isSwitchCost(value)) return undefined;
+  return {
+    reason: value.reason,
+    horizonRequests: value.horizonRequests,
+    ...(isFiniteNumber(value.stayUsd) ? { stayUsd: value.stayUsd } : {}),
+    ...(isFiniteNumber(value.switchUsd) ? { switchUsd: value.switchUsd } : {}),
+    ...(isFiniteNumber(value.rebuildUsd)
+      ? { rebuildUsd: value.rebuildUsd }
+      : {}),
+    ...(isFiniteNumber(value.steadyDeltaUsd)
+      ? { steadyDeltaUsd: value.steadyDeltaUsd }
+      : {}),
+    ...(isFiniteNumber(value.incrementalUsd)
+      ? { incrementalUsd: value.incrementalUsd }
+      : {}),
+    confidenceOverride: value.confidenceOverride,
+  };
+};
+
 export const snapshotDecision = (
   decision: RoutingDecision,
 ): RoutingDecision => ({
+  reviewOnly: decision.reviewOnly === true ? true : undefined,
   activity: isRouterActivity(decision.activity) ? decision.activity : undefined,
   routeCell: isRouterActivity(decision.routeCell)
     ? decision.routeCell
@@ -348,6 +426,8 @@ export const snapshotDecision = (
     : undefined,
   classification: snapshotClassification(decision.classification),
   generation: snapshotGeneration(decision.generation),
+  proposedRoute: snapshotRecommendation(decision.proposedRoute),
+  switchCost: snapshotSwitchCost(decision.switchCost),
   reuse:
     decision.reuse === 'same-turn' ||
     decision.reuse === 'shared' ||

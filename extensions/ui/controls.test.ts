@@ -8,6 +8,10 @@ const controls: RouterUIControls = {
   budget: 5,
   advisor: undefined,
   timeout: 1500,
+  reviewEveryRequests: 4,
+  costHorizon: 5,
+  costSensitivity: 0.5,
+  strongAdviceConfidence: 0.9,
   thinkingHigh: undefined,
   thinkingMedium: undefined,
   thinkingLow: undefined,
@@ -15,6 +19,23 @@ const controls: RouterUIControls = {
 };
 
 describe('UI control validation', () => {
+  it.each([1, 2, 8, 20])(
+    'accepts the configured cost horizon %i',
+    (costHorizon) => {
+      expect(
+        validateRouterUIControls({ ...controls, costHorizon }),
+      ).toBeUndefined();
+    },
+  );
+  it.each([0, 21, 1.5, Number.NaN])(
+    'rejects invalid cost horizon %s',
+    (costHorizon) => {
+      expect(validateRouterUIControls({ ...controls, costHorizon })).toContain(
+        'Cost horizon',
+      );
+    },
+  );
+
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
     'rejects invalid budget %s',
     (budget) => {

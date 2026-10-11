@@ -23,6 +23,7 @@ export const DEFAULT_CLASSIFIER_CONTEXT = {
   maxHistoryTokens: 500,
   toolResults: 'last-error',
   maxToolTokens: 250,
+  currentLoopMessages: 8,
 } as const;
 export const DEFAULT_CLASSIFIER_TIMEOUT_MS = 10_000;
 export const MAX_CLASSIFIER_RETRIES = 4;

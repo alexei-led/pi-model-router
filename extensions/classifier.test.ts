@@ -27,6 +27,7 @@ const config: AdvisorConfig = {
   enabled: true,
   model: 'custom/decision:model/v2',
   timeoutMs: 1500,
+  reviewEveryRequests: 4,
   confidenceThreshold: 0.65,
   probabilityThreshold: 0.8,
   maxStateTokens: 3000,

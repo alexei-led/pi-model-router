@@ -1010,6 +1010,7 @@ const classifierConfig: AdvisorConfig = {
   enabled: true,
   model: 'typesafe/jev-latest',
   timeoutMs: 1500,
+  reviewEveryRequests: 4,
   confidenceThreshold: 0.65,
   probabilityThreshold: 0.8,
   maxStateTokens: 3000,
@@ -1542,6 +1543,407 @@ describe('activity matrix provider routing', () => {
       routeCell: 'docs',
       targetModelId: 'docs',
     });
+  });
+
+  it('reviews current-loop context in the background and applies fresh activity advice on the next request', async () => {
+    const s = activitySetup();
+    s.state.currentConfig.advisor = {
+      ...required(s.state.currentConfig.advisor),
+      context: {
+        previousTurns: 2,
+        maxHistoryTokens: 500,
+        maxToolTokens: 250,
+        currentLoopMessages: 8,
+        toolResults: 'last',
+      },
+    };
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            {
+              type: 'text',
+              text: 'The retry implementation is complete; checking results.',
+            },
+            {
+              type: 'toolCall',
+              name: 'read',
+              id: `adaptive-${target.id}`,
+              arguments: {},
+            },
+          ],
+        }),
+      }),
+    );
+    const firstUser = {
+      role: 'user' as const,
+      content: 'Implement retry handling and document it.',
+      timestamp: 10,
+    };
+    const messages: Context['messages'] = [firstUser];
+    const first = await consume(s.stream({ messages }));
+    messages.push(first.result);
+    const firstCall = first.result.content.find(
+      (part) => part.type === 'toolCall',
+    );
+    if (firstCall?.type !== 'toolCall')
+      throw new Error('Expected fixture tool call');
+    messages.push({
+      role: 'toolResult',
+      toolCallId: firstCall.id,
+      toolName: firstCall.name,
+      content: [{ type: 'text', text: 'Retry regression passes.' }],
+      isError: false,
+      timestamp: 11,
+    });
+    s.answer.activity = 'docs';
+    const immediate = s.classify.getMockImplementation();
+    if (!immediate) throw new Error('Missing fixture classifier');
+    let releaseReview: (() => void) | undefined;
+    const reviewGate = new Promise<void>((resolve) => {
+      releaseReview = resolve;
+    });
+    s.classify.mockImplementationOnce(async (...args) => {
+      const result = immediate(...args);
+      await reviewGate;
+      return result;
+    });
+    let last: Awaited<ReturnType<typeof consume>> | undefined;
+    for (let continuation = 0; continuation < 3; continuation += 1) {
+      last = await consume(s.stream({ messages }));
+      messages.push(last.result);
+      const call = last.result.content.find((part) => part.type === 'toolCall');
+      if (call?.type !== 'toolCall')
+        throw new Error('Expected fixture tool call');
+      messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [
+          { type: 'text', text: `Recent tool evidence ${continuation}` },
+        ],
+        isError: false,
+        timestamp: 12 + continuation,
+      });
+    }
+    expect(s.classify).toHaveBeenCalledTimes(2);
+    expect(last?.result.stopReason).toBe('toolUse');
+    const reviewPayload = required(s.classify.mock.calls[1]?.[1]);
+    expect(JSON.stringify(reviewPayload.state)).not.toContain(
+      'Retry regression passes.',
+    );
+    expect(JSON.stringify(reviewPayload.state)).toContain(
+      'Recent tool evidence 1',
+    );
+    releaseReview?.();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const applied = await consume(s.stream({ messages }));
+    expect(applied.result.model).toBe('docs');
+    expect(s.state.lastDecision).toMatchObject({
+      activity: 'docs',
+      routeCell: 'docs',
+      targetModelId: 'docs',
+    });
+    expect(s.classify).toHaveBeenCalledTimes(2);
+  });
+
+  it('holds a pricey activity switch but keeps the actual route and visible proposal distinct', async () => {
+    const s = activitySetup();
+    s.state.currentConfig.switchPolicy = {
+      horizonRequests: 1,
+      costSensitivity: 1,
+      strongAdviceConfidence: 0.9,
+    };
+    s.state.currentConfig.advisor = {
+      ...required(s.state.currentConfig.advisor),
+      context: {
+        previousTurns: 2,
+        maxHistoryTokens: 500,
+        maxToolTokens: 250,
+        currentLoopMessages: 8,
+        toolResults: 'last',
+      },
+    };
+    s.models[s.models.findIndex((entry) => entry.id === 'code')] = model(
+      'code',
+      {
+        cost: { input: 0.1, output: 0.1, cacheRead: 0.01, cacheWrite: 0.1 },
+      },
+    );
+    s.models[s.models.findIndex((entry) => entry.id === 'docs')] = model(
+      'docs',
+      {
+        cost: { input: 100, output: 100, cacheRead: 10, cacheWrite: 125 },
+      },
+    );
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            {
+              type: 'text',
+              text: 'Implementation is passing; documentation remains.',
+            },
+            {
+              type: 'toolCall',
+              name: 'read',
+              id: `cost-${target.id}`,
+              arguments: {},
+            },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      {
+        role: 'user',
+        content: 'Implement retry handling and update the guide.',
+        timestamp: 30,
+      },
+    ];
+    const advance = async () => {
+      const response = await consume(s.stream({ messages }));
+      messages.push(response.result);
+      const call = response.result.content.find(
+        (part) => part.type === 'toolCall',
+      );
+      if (call?.type !== 'toolCall')
+        throw new Error('Expected fixture tool call');
+      messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: 'text', text: 'Current implementation evidence.' }],
+        isError: false,
+        timestamp: 31 + messages.length,
+      });
+      return response.result;
+    };
+    await advance();
+    s.answer.activity = 'docs';
+    s.answer.confidence = 0.8;
+    await advance();
+    await advance();
+    const reviewRequest = await advance();
+    expect(reviewRequest.stopReason).toBe('toolUse');
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const applied = await advance();
+    expect(applied.model).toBe('code');
+    expect(s.state.lastDecision).toMatchObject({
+      activity: 'code',
+      targetModelId: 'code',
+      proposedRoute: { activity: 'docs', model: 'test/docs' },
+      switchCost: { reason: 'cost-held', confidenceOverride: false },
+    });
+  });
+
+  it('can disable in-loop classifier reviews independently of initial-turn advice', async () => {
+    const s = activitySetup();
+    s.state.currentConfig.advisor = {
+      ...required(s.state.currentConfig.advisor),
+      reviewEveryRequests: 0,
+    };
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            {
+              type: 'toolCall',
+              name: 'read',
+              id: `disabled-${target.id}`,
+              arguments: {},
+            },
+          ],
+        }),
+      }),
+    );
+    const user = {
+      role: 'user' as const,
+      content: 'Implement the change.',
+      timestamp: 50,
+    };
+    const messages: Context['messages'] = [user];
+    const advance = async () => {
+      const response = await consume(s.stream({ messages }));
+      messages.push(response.result);
+      const call = response.result.content.find(
+        (part) => part.type === 'toolCall',
+      );
+      if (call?.type !== 'toolCall')
+        throw new Error('Expected fixture tool call');
+      messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: 'text', text: 'done' }],
+        isError: false,
+        timestamp: 51 + messages.length,
+      });
+    };
+    await advance();
+    await advance();
+    await advance();
+    await advance();
+    await advance();
+    expect(s.classify).toHaveBeenCalledOnce();
+  });
+
+  it('discards a background review that missed its next-request window', async () => {
+    const s = activitySetup();
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            { type: 'text', text: 'Work is progressing.' },
+            {
+              type: 'toolCall',
+              name: 'read',
+              id: `fresh-${target.id}`,
+              arguments: {},
+            },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      {
+        role: 'user',
+        content: 'Implement retry handling and update docs.',
+        timestamp: 40,
+      },
+    ];
+    const advance = async () => {
+      const response = await consume(s.stream({ messages }));
+      messages.push(response.result);
+      const call = response.result.content.find(
+        (part) => part.type === 'toolCall',
+      );
+      if (call?.type !== 'toolCall')
+        throw new Error('Expected fixture tool call');
+      messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: 'text', text: 'tool evidence' }],
+        isError: false,
+        timestamp: 41 + messages.length,
+      });
+      return response.result;
+    };
+    await advance();
+    s.answer.activity = 'docs';
+    const immediate = s.classify.getMockImplementation();
+    if (!immediate) throw new Error('Missing fixture classifier');
+    let releaseReview: (() => void) | undefined;
+    const reviewGate = new Promise<void>((resolve) => {
+      releaseReview = resolve;
+    });
+    s.classify.mockImplementationOnce(async (...args) => {
+      const result = immediate(...args);
+      await reviewGate;
+      return result;
+    });
+    await advance();
+    await advance();
+    await advance();
+    expect(s.classify).toHaveBeenCalledTimes(2);
+    expect((await advance()).model).toBe('code');
+    expect((await advance()).model).toBe('code');
+    releaseReview?.();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect((await advance()).model).toBe('code');
+    await advance();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect((await advance()).model).toBe('docs');
+    expect(s.classify).toHaveBeenCalledTimes(3);
+  });
+
+  it('raises and lowers tier within one tool loop from fresh classifier reviews', async () => {
+    const s = activitySetup();
+    s.state.currentConfig.advisor = {
+      ...required(s.state.currentConfig.advisor),
+      reviewEveryRequests: 2,
+    };
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            { type: 'text', text: 'Current work is progressing.' },
+            {
+              type: 'toolCall',
+              name: 'read',
+              id: `phase-${target.id}`,
+              arguments: {},
+            },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      {
+        role: 'user',
+        content: 'Implement and verify the retry behavior.',
+        timestamp: 20,
+      },
+    ];
+    const advance = async () => {
+      const response = await consume(s.stream({ messages }));
+      messages.push(response.result);
+      const call = response.result.content.find(
+        (part) => part.type === 'toolCall',
+      );
+      if (call?.type !== 'toolCall')
+        throw new Error('Expected fixture tool call');
+      messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: 'text', text: 'step result' }],
+        isError: false,
+        timestamp: 21 + messages.length,
+      });
+      return response.result;
+    };
+    await advance();
+    s.answer.tier = 'high';
+    await advance();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const up = await advance();
+    expect(up.model).toBe('primary');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      targetModelId: 'primary',
+    });
+    s.answer.tier = 'low';
+    await advance();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const down = await advance();
+    expect(down.model).toBe('small');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'low',
+      targetModelId: 'small',
+    });
+    expect(s.classify).toHaveBeenCalledTimes(3);
   });
 
   it.each(['off', 'identical', 'ineligible', 'overridden-effort'] as const)(

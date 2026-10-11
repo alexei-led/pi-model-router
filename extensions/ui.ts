@@ -317,7 +317,10 @@ export const formatDecision = (decision: RoutingDecision): string => {
   const flagsStr = flags.length > 0 ? ` [${flags.join(',')}]` : '';
   const advisor = formatAdvisorDetail(decision);
   const generation = formatGenerationDetail(decision);
-  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}${generation ? ` [${generation}]` : ''}`;
+  const switchCost = decision.switchCost
+    ? `switch ${decision.switchCost.reason} · horizon ${decision.switchCost.horizonRequests} · stay ${decision.switchCost.stayUsd === undefined ? 'unknown' : `$${decision.switchCost.stayUsd.toFixed(4)}`} · target ${decision.switchCost.switchUsd === undefined ? 'unknown' : `$${decision.switchCost.switchUsd.toFixed(4)}`}${decision.proposedRoute ? ` · proposed ${decision.proposedRoute.tier}/${decision.proposedRoute.activity ?? 'generic'} ${decision.proposedRoute.model} [${decision.proposedRoute.thinking}]` : ''}`
+    : undefined;
+  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}${switchCost ? ` [${switchCost}]` : ''}${generation ? ` [${generation}]` : ''}`;
 };
 
 export const formatPinSummary = (
@@ -363,7 +366,11 @@ export const updateRouterUIStrip = (
     if (!route)
       return truncateToWidth(`Router / ${snapshot.profile} · ${state}`, width);
     const detail =
-      width >= 70 ? ` · ${route.tier} · effort ${route.thinking}` : '';
+      width >= 70
+        ? ` · ${route.activity ?? 'generic'} · ${route.tier} · effort ${route.thinking}`
+        : width >= 30
+          ? ` · ${route.activity ?? 'generic'}`
+          : '';
     const modelWidth = Math.max(1, width - visibleWidth(suffix + detail));
     const model =
       preferences.statusLine === 'detailed'
@@ -378,7 +385,15 @@ export const updateRouterUIStrip = (
   }
   if (!preferences.widgetEnabled) {
     ctx.ui.setWidget('router', undefined);
-    const suffix = pending ? ' · pending settings' : ` · ${reason}`;
+    const suffix = pending
+      ? ' · pending'
+      : snapshot.switchCost?.reason === 'cost-held'
+        ? ' · held'
+        : ['fallback', 'timeout', 'budget'].includes(snapshot.lifecycle)
+          ? ` · ${snapshot.lifecycle}`
+          : snapshot.advice?.outcome === 'selected'
+            ? ' · advised'
+            : '';
     const width = Math.max(1, process.stdout.columns ?? 80);
     ctx.ui.setStatus(
       'router',

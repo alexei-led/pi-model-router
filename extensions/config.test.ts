@@ -718,6 +718,67 @@ describe('micro config compatibility', () => {
   );
 });
 
+describe('adaptive switch configuration', () => {
+  it('merges sparse policy declarations with defaults and user policy', () => {
+    const loaded = normalizeConfig(
+      mergeConfig(
+        {
+          switchPolicy: { horizonRequests: 8, costSensitivity: 0.5 },
+          profiles: { work: { medium: { model: 'test/model' } } },
+        },
+        { switchPolicy: { costSensitivity: 0.2 } },
+      ),
+    );
+    expect(loaded.config.switchPolicy).toEqual({
+      horizonRequests: 8,
+      costSensitivity: 0.2,
+      strongAdviceConfidence: 0.9,
+    });
+    expect(loaded.warnings).toEqual([]);
+  });
+
+  it('normalizes cost sensitivity, horizon and exact-model effort cache sharing', () => {
+    const { config, warnings } = normalizeConfig({
+      switchPolicy: {
+        horizonRequests: 8,
+        costSensitivity: 0.2,
+        strongAdviceConfidence: 0.95,
+      },
+      models: {
+        balanced: { model: 'openai/gpt-6-luna', effortCacheSharing: 'shared' },
+      },
+      profiles: { work: { medium: { model: 'balanced' } } },
+    });
+    expect(config.switchPolicy).toEqual({
+      horizonRequests: 8,
+      costSensitivity: 0.2,
+      strongAdviceConfidence: 0.95,
+    });
+    expect(config.models?.balanced?.effortCacheSharing).toBe('shared');
+    expect(warnings).toEqual([]);
+  });
+
+  it('uses safe defaults for invalid switch policy and effort cache metadata', () => {
+    const { config, warnings } = normalizeConfig({
+      switchPolicy: { horizonRequests: 21 },
+      models: {
+        balanced: { model: 'openai/gpt-6-luna', effortCacheSharing: 'maybe' },
+      },
+      profiles: { work: { medium: { model: 'balanced' } } },
+    });
+    expect(config.switchPolicy).toEqual({
+      horizonRequests: 5,
+      costSensitivity: 0.5,
+      strongAdviceConfidence: 0.9,
+    });
+    expect(config.models?.balanced?.effortCacheSharing).toBeUndefined();
+    expect(warnings).toContain('Invalid switchPolicy; using defaults.');
+    expect(warnings).toContain(
+      'Model definition "balanced" has invalid effortCacheSharing. Ignored.',
+    );
+  });
+});
+
 describe('classifier advisor config', () => {
   it('normalizes arbitrary provider classifier references and explicit profile approvals', () => {
     const { config, warnings } = normalizeConfig({
@@ -726,6 +787,7 @@ describe('classifier advisor config', () => {
         model: 'openai/gpt-6-luna',
         temperature: 1.3,
         maxRetries: 0,
+        context: { currentLoopMessages: 12 },
       },
       profiles: {
         work: {
@@ -739,6 +801,7 @@ describe('classifier advisor config', () => {
       enabled: true,
       temperature: 1.3,
       maxRetries: 0,
+      context: { currentLoopMessages: 12 },
     });
     expect(config.profiles.work?.advisor?.models).toEqual([
       'openai/gpt-6-luna',

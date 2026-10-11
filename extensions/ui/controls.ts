@@ -14,5 +14,29 @@ export const validateRouterUIControls = (
     controls.timeout > 2147483647
   )
     return 'Timeout must be positive, finite and at most 2147483647 ms.';
+  if (
+    !Number.isSafeInteger(controls.reviewEveryRequests) ||
+    controls.reviewEveryRequests < 0 ||
+    controls.reviewEveryRequests > 1000
+  )
+    return 'Review interval must be 0–1000 requests.';
+  if (
+    !Number.isSafeInteger(controls.costHorizon) ||
+    controls.costHorizon < 1 ||
+    controls.costHorizon > 20
+  )
+    return 'Cost horizon must be 1–20 requests.';
+  if (
+    !Number.isFinite(controls.costSensitivity) ||
+    controls.costSensitivity < 0 ||
+    controls.costSensitivity > 1
+  )
+    return 'Switch-cost sensitivity must be between 0 and 1.';
+  if (
+    !Number.isFinite(controls.strongAdviceConfidence) ||
+    controls.strongAdviceConfidence < 0 ||
+    controls.strongAdviceConfidence > 1
+  )
+    return 'Strong-advice threshold must be between 0 and 1.';
   return undefined;
 };
