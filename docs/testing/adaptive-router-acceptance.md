@@ -1,11 +1,13 @@
 # Adaptive routing and native Routes: acceptance
 
 Date: 11 October 2026. Branch: `feature/adaptive-router-and-ui`.
-Runtime source: `de2011d1`; validation-only tests: `7216fe5a`.
+Initial runtime source: `de2011d1`; final repaint fix: `100fd6c0`.
 No release, version change, push or merge.
 
-**Result:** automated gates pass. Native adaptation and route-edit activation pass;
-remaining native checks are blocked by agterm control timeouts.
+**Result:** automated gates and native adaptation, route-edit activation,
+reset/inheritance and tier-effort masking checks pass. The repaint defect has a
+regression and independent review. Its final screenshot could not be captured
+because the macOS GUI session was locked.
 
 ## Isolation and evidence
 
@@ -42,14 +44,17 @@ persisted router generation decisions, not that field.
 | Layout | Wide floating right overlay; narrow custom screen replaces the editor, not a docked sidebar |
 | Resize/focus | Wide → narrow → wide, Escape/back and Routes focus restoration worked |
 | Themes | Dark controls and light Now screen inspected; footer fixture label remained visible |
-| Reset/masked effort | Automated regressions pass; final native interactions not completed |
-| Cleanup | Final fixture-session cleanup not completed |
+| Reset/masked effort | Native code/medium reset to inherited generic medium; scalar medium/off persisted and masked cell effort during generation |
+| Cleanup | Owned fixture session and window closed; absence/closed state verified |
 
 Agterm window sizes were 1200×850 and 800×650 points. Window chrome/sidebar
 reduce usable columns. These are not claims of exhaustive width, IME or widget
 coexistence coverage. Later input timed out after 30 seconds; even
 `agtermctl version --json` timed out after 10 seconds. The app was not restarted
-because unrelated sessions could be affected.
+because unrelated sessions could be affected. After the operator restored
+agterm 0.36.0, a new isolated fixture completed reset/masking checks. The old
+fixture sessions were already absent. Only the newly owned session/window were
+closed; unrelated sessions were not touched.
 
 ## Captures
 
@@ -57,14 +62,20 @@ because unrelated sessions could be affected.
 - [Routes queued, dark](../assets/router-ui/adaptive-routes-pending-dark.png).
 - [Now with pending routes, narrow light](../assets/router-ui/adaptive-now-narrow-light.png).
 
-The parent inspected the original captures. The light capture contains a
-background discontinuity after the effort text; text and controls remain
-readable, but pixel-perfect repaint was not established before control failed.
+The parent inspected these captures. The light image predates the final fix and
+shows the background discontinuity that led to it. A fresh resumed fixture
+reproduced the issue: a nested background reset left padding at the terminal
+default. The fix retains success foreground and lets the panel own the full row
+background. The terminal-paint regression failed before the fix and passed after.
+Opus 5.5 reviewed the current code and Pi theme reset semantics with no required
+changes; its restricted tools could not inspect the git diff. Post-fix native
+recapture failed because the GUI was locked. Truncated/embedded ANSI styling and
+pixel-perfect repaint are not exhaustively verified.
 
 ## Verification
 
 - Build, Biome/TypeScript, knip and package dry-run: passed.
-- **611 tests in 23 files passed**, including the coverage gate.
+- **612 tests in 23 files passed**, including the coverage gate.
 - Overall coverage: statements 91.45%, branches 84.25%, functions 92.94%, lines
   93.08%. Thresholds were not reduced. Coverage is not proof of correctness.
 - Package dry-run: 28 files; no tests or fixture extensions included.
@@ -78,5 +89,6 @@ readable, but pixel-perfect repaint was not established before control failed.
 
 Local raw evidence remains outside the repository. No provider-cache retention,
 real billing savings, advisor quality or live-service compatibility is inferred
-from these fixtures. Native reset/masked-effort, repaint and cleanup checks remain
-open; this report is not a release sign-off.
+from these fixtures. Post-fix screenshot confirmation remains unperformed because
+of the GUI lock. This report is not a release sign-off. Git branch/worktree
+cleanup is deferred until a separately authorized release.
