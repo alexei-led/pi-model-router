@@ -34,8 +34,10 @@ const snapshot: RouterUISnapshot = {
   eligible: {},
   activityRouting: 'on',
   activityCells: [],
+  routeCells: [],
   history: [],
   classifiers: [],
+  chatModels: [],
   privacy: { advisorEnabled: false, approvedModels: [], auth: 'unknown' },
 };
 
@@ -177,7 +179,7 @@ it('distinguishes classified activity from local availability-cell provenance', 
 describe('activity override presentation', () => {
   it('shows mode, generic inheritance and an explicit empty state', () => {
     expect(activityRoutingSummary(snapshot)).toBe(
-      'Activity routing: on · 0 override cells · read-only',
+      'Activity routing: on · 0 override cells · session Routes editor',
     );
     expect(activityRouteLines(snapshot)).toEqual([
       'Unlisted cells use generic tiers, if configured.',

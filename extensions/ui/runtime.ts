@@ -1,21 +1,32 @@
+import { createHash } from 'node:crypto';
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { normalizeAdvisorConfig } from '../config';
-import { parseCanonicalModelRef } from '../domain';
+import { isThinkingLevel, parseCanonicalModelRef } from '../domain';
 import {
   availableRoutePairs,
   preservesRouteCoverage,
   resolveRoutePair,
+  routeThinking,
 } from '../routing';
 import { snapshotDecision } from '../state';
 import type {
+  ModelDefinition,
+  RoutedTierConfig,
+  RouterActivity,
+  RouterProfile,
   RouterRequestObservation,
   RouterThinkingByTier,
+  RouterTier,
   RouterUIActivityCell,
   RouterUIAdapters,
+  RouterUIChatModel,
   RouterUIControls,
   RouterUIHistoryEntry,
   RouterUILifecycle,
   RouterUIPendingControls,
   RouterUIRoute,
+  RouterUIRouteCellState,
+  RouterUIRouteSelection,
   RouterUIRuntimeState,
   RouterUISnapshot,
   RoutingDecision,
@@ -29,6 +40,48 @@ const thinkingFields = {
   low: 'thinkingLow',
   micro: 'thinkingMicro',
 } as const;
+const routeKey = (activity: RouterActivity, tier: RouterTier): string =>
+  `${activity}/${tier}`;
+const routeRevision = (route: RoutedTierConfig): string =>
+  createHash('sha256')
+    .update(
+      JSON.stringify({
+        model: route.model,
+        thinking: route.thinking,
+        thinkingExplicit: route.thinkingExplicit,
+        fallbacks: route.fallbacks,
+        resolvedFallbacks: route.resolvedFallbacks,
+        contextWindow: route.contextWindow,
+        maxTokens: route.maxTokens,
+        reasoning: route.reasoning,
+        thinkingLevels: route.thinkingLevels,
+        resolvedContextWindow: route.resolvedContextWindow,
+        resolvedMaxTokens: route.resolvedMaxTokens,
+      }),
+    )
+    .digest('hex')
+    .slice(0, 20);
+const routeStateEqual = (
+  left: RouterUIRouteCellState,
+  right: RouterUIRouteCellState,
+): boolean =>
+  left.state === right.state &&
+  left.revision === right.revision &&
+  left.model === right.model &&
+  left.thinking === right.thinking &&
+  left.fallbacks.length === right.fallbacks.length &&
+  left.fallbacks.every(
+    (fallback, index) => fallback === right.fallbacks[index],
+  );
+interface RouterUIRouteOverride extends RouterUIRouteSelection {
+  fallbacks: string[];
+  revision?: string | undefined;
+  resolvedFallbacks?: ModelDefinition[] | undefined;
+}
+interface PendingRouterUIRoute {
+  base: RouterUIRouteCellState;
+  value: RouterUIRouteOverride | undefined;
+}
 const routeOf = (decision: RoutingDecision): RouterUIRoute => ({
   activity: decision.activity,
   routeCell: decision.routeCell,
@@ -110,6 +163,7 @@ export const createRouterUIRuntime = (
   changed: () => void,
 ) => {
   const pending = new Map<string, RouterUIPendingControls>();
+  const pendingRoutes = new Map<string, Map<string, PendingRouterUIRoute>>();
   let sessionPending: RouterUIPendingControls | undefined;
   const globalFields = new Set<keyof RouterUIControls>([
     'advisor',
@@ -199,6 +253,226 @@ export const createRouterUIRuntime = (
         (tier) => value[thinkingFields[tier]] !== undefined,
       ).map((tier) => [tier, value[thinkingFields[tier]]]),
     );
+  const chatModelCatalog = (): {
+    entries: RouterUIChatModel[];
+    find: (
+      model: string,
+    ) => ReturnType<NonNullable<typeof state.currentModelRegistry>['find']>;
+  } => {
+    const registry = state.currentModelRegistry;
+    const models =
+      typeof registry?.getModelsOfType === 'function'
+        ? registry.getModelsOfType('chat')
+        : [];
+    const physical = models.filter(
+      (model) => model.provider !== 'router' && model.input.includes('text'),
+    );
+    const find = (reference: string) => {
+      try {
+        const { provider, modelId } = parseCanonicalModelRef(reference);
+        if (provider === 'router') return undefined;
+        const model = registry?.find(provider, modelId);
+        return model?.provider === provider && model.id === modelId
+          ? model
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    return {
+      entries: physical
+        .map((model) => ({
+          model: `${model.provider}/${model.id}`,
+          name: model.name,
+          efforts: getSupportedThinkingLevels(model).filter(isThinkingLevel),
+        }))
+        .sort((left, right) => left.model.localeCompare(right.model)),
+      find,
+    };
+  };
+  const routeState = (
+    profileName: string,
+    activity: RouterActivity,
+    tier: RouterTier,
+  ): RouterUIRouteCellState => {
+    const profile = state.currentConfig.profiles[profileName];
+    const override = profile?.activities?.[activity]?.[tier];
+    const generic = profile?.[tier];
+    const declaration = override ?? generic;
+    if (!declaration) return { state: 'missing', fallbacks: [] };
+    const stateValue = override ? 'override' : 'inherited';
+    try {
+      const { provider, modelId } = parseCanonicalModelRef(declaration.model);
+      return {
+        state: stateValue,
+        revision: routeRevision(declaration),
+        model: `${provider}/${modelId}`,
+        thinking: declaration.thinking ?? (tier === 'micro' ? 'off' : tier),
+        fallbacks: [...(declaration.fallbacks ?? [])],
+      };
+    } catch {
+      return {
+        state: stateValue,
+        revision: routeRevision(declaration),
+        thinking: declaration.thinking ?? (tier === 'micro' ? 'off' : tier),
+        fallbacks: [...(declaration.fallbacks ?? [])],
+      };
+    }
+  };
+  const genericRouteState = (
+    profileName: string,
+    tier: RouterTier,
+  ): RouterUIRouteCellState => {
+    const profile = state.currentConfig.profiles[profileName];
+    const declaration = profile?.[tier];
+    if (!declaration) return { state: 'missing', fallbacks: [] };
+    try {
+      const { provider, modelId } = parseCanonicalModelRef(declaration.model);
+      return {
+        state: 'inherited',
+        revision: routeRevision(declaration),
+        model: `${provider}/${modelId}`,
+        thinking: declaration.thinking ?? (tier === 'micro' ? 'off' : tier),
+        fallbacks: [...(declaration.fallbacks ?? [])],
+      };
+    } catch {
+      return {
+        state: 'inherited',
+        revision: routeRevision(declaration),
+        thinking: declaration.thinking ?? (tier === 'micro' ? 'off' : tier),
+        fallbacks: [...(declaration.fallbacks ?? [])],
+      };
+    }
+  };
+  const stateForOverride = (
+    profileName: string,
+    tier: RouterTier,
+    value: RouterUIRouteOverride | undefined,
+  ): RouterUIRouteCellState =>
+    value
+      ? {
+          state: 'override',
+          revision: value.revision,
+          model: value.model,
+          thinking: value.thinking,
+          fallbacks: [...value.fallbacks],
+        }
+      : genericRouteState(profileName, tier);
+  const sameFallbacks = (
+    left: readonly string[] | undefined,
+    right: readonly string[],
+  ): boolean =>
+    (left ?? []).length === right.length &&
+    (left ?? []).every((fallback, index) => fallback === right[index]);
+  const fallbackMetadataFor = (
+    profileName: string,
+    activity: RouterActivity,
+    tier: RouterTier,
+    fallbacks: readonly string[],
+  ): ModelDefinition[] | undefined => {
+    const profile = state.currentConfig.profiles[profileName];
+    const activityRoute = profile?.activities?.[activity]?.[tier];
+    const genericRoute = profile?.[tier];
+    const source = [activityRoute, genericRoute].find((route) =>
+      sameFallbacks(route?.fallbacks, fallbacks),
+    );
+    return source?.resolvedFallbacks?.map((fallback) => ({ ...fallback }));
+  };
+  const profileWithRouteOverrides = (
+    profileName: string,
+    overrides: ReadonlyMap<string, RouterUIRouteOverride | undefined>,
+  ): RouterProfile | undefined => {
+    const configured = state.currentConfig.profiles[profileName];
+    if (!configured) return undefined;
+    const catalog = chatModelCatalog();
+    const activities = { ...configured.activities };
+    for (const [key, value] of overrides) {
+      const [activityName, tierName] = key.split('/');
+      const activity = ROUTER_ACTIVITIES.find((item) => item === activityName);
+      const tier = ROUTER_TIERS.find((item) => item === tierName);
+      if (!activity || !tier) return undefined;
+      const tiers = { ...activities[activity] };
+      if (value) {
+        const target = catalog.entries.find(
+          (model) => model.model === value.model,
+        );
+        const targetModel = catalog.find(value.model);
+        const targetEfforts = targetModel
+          ? getSupportedThinkingLevels(targetModel).filter(isThinkingLevel)
+          : [];
+        if (!target || !targetModel || !targetEfforts.includes(value.thinking))
+          return undefined;
+        const inherited =
+          configured.activities?.[activity]?.[tier] ?? configured[tier];
+        const fallbackMetadata =
+          value.resolvedFallbacks ??
+          fallbackMetadataFor(profileName, activity, tier, value.fallbacks);
+        const updated: RoutedTierConfig = {
+          model: target.model,
+          thinking: value.thinking,
+          thinkingExplicit: true,
+          fallbacks: [...value.fallbacks],
+          ...(fallbackMetadata
+            ? {
+                resolvedFallbacks: fallbackMetadata.map((entry) => ({
+                  ...entry,
+                })),
+              }
+            : {}),
+          ...(inherited?.contextWindow === undefined
+            ? {}
+            : { contextWindow: inherited.contextWindow }),
+          ...(inherited?.maxTokens === undefined
+            ? {}
+            : { maxTokens: inherited.maxTokens }),
+          reasoning: targetModel.reasoning,
+          resolvedContextWindow:
+            inherited?.contextWindow ?? targetModel.contextWindow,
+          resolvedMaxTokens: inherited?.maxTokens ?? targetModel.maxTokens,
+        };
+        // Use the canonical registry target directly; don't normalize other cells or aliases again.
+        tiers[tier] = updated;
+        activities[activity] = tiers;
+      } else {
+        delete tiers[tier];
+        if (Object.keys(tiers).length) activities[activity] = tiers;
+        else delete activities[activity];
+      }
+    }
+    const nextProfile: RouterProfile = { ...configured };
+    if (Object.keys(activities).length) nextProfile.activities = activities;
+    else delete nextProfile.activities;
+    return nextProfile;
+  };
+  const validateRouteProfile = (
+    profile: RouterProfile | undefined,
+    value: RouterUIControls,
+  ): boolean => {
+    const registry = state.currentModelRegistry;
+    if (!profile || !registry) return false;
+    const find = (provider: string, id: string) => registry.find(provider, id);
+    const thinking = thinkingOf(value);
+    const activityRouting = state.currentConfig.activityRouting !== 'off';
+    if (!preservesRouteCoverage(profile, find, thinking, activityRouting))
+      return false;
+    const baseline = value.baseline === 'auto' ? undefined : value.baseline;
+    if (
+      baseline &&
+      !profile[baseline] &&
+      (!activityRouting ||
+        !Object.values(profile.activities ?? {}).some((cell) => cell[baseline]))
+    )
+      return false;
+    const pin = value.pin === 'auto' ? undefined : value.pin;
+    return (
+      !pin ||
+      [false, true].some((image) =>
+        availableRoutePairs(profile, find, image, thinking).some(
+          (pair) => pair.tier === pin,
+        ),
+      )
+    );
+  };
   const validate = (profile: string, value: RouterUIControls) => {
     const config = state.currentConfig.profiles[profile];
     const registry = state.currentModelRegistry;
@@ -332,9 +606,83 @@ export const createRouterUIRuntime = (
         });
       },
     );
+    const catalog = chatModelCatalog();
+    const activeControls = controls(profile);
+    const queuedControls = pendingValue(profile);
+    const pendingEffortFor = (tier: RouterTier) =>
+      queuedControls
+        ? queuedControls[thinkingFields[tier]]
+        : activeControls[thinkingFields[tier]];
+    const mappedEffort = (
+      route: RouterUIRouteCellState,
+      tier: RouterTier,
+      effort: RouterUIControls['thinkingHigh'],
+      declaredLevels?: readonly import('@earendil-works/pi-agent-core').ThinkingLevel[],
+    ) => {
+      if (!route.model) return undefined;
+      return routeThinking(
+        {
+          tier,
+          model: route.model,
+          thinking:
+            effort ?? route.thinking ?? (tier === 'micro' ? 'off' : tier),
+        },
+        (provider, id) => registry?.find(provider, id),
+        false,
+        declaredLevels ? [...declaredLevels] : undefined,
+      );
+    };
+    const routeCells = ROUTER_ACTIVITIES.flatMap((activity) =>
+      ROUTER_TIERS.map((tier) => {
+        const key = routeKey(activity, tier);
+        const current = routeState(profile, activity, tier);
+        const generic = genericRouteState(profile, tier);
+        const queued = pendingRoutes.get(profile)?.get(key);
+        const pendingRoute = queued
+          ? stateForOverride(profile, tier, queued.value)
+          : undefined;
+        const declaration =
+          configured?.activities?.[activity]?.[tier] ?? configured?.[tier];
+        const activeEffort = activeControls[thinkingFields[tier]];
+        const nextEffort = pendingEffortFor(tier);
+        return {
+          activity,
+          tier,
+          current,
+          generic,
+          ...(pendingRoute ? { pending: pendingRoute } : {}),
+          effectiveThinking:
+            activityRouting === 'off' && current.state === 'override'
+              ? undefined
+              : mappedEffort(
+                  current,
+                  tier,
+                  activeEffort,
+                  declaration?.thinkingLevels,
+                ),
+          pendingEffectiveThinking:
+            activityRouting === 'off' &&
+            (pendingRoute ?? current).state === 'override'
+              ? undefined
+              : mappedEffort(
+                  pendingRoute ?? current,
+                  tier,
+                  nextEffort,
+                  pendingRoute ? undefined : declaration?.thinkingLevels,
+                ),
+          ...(activeEffort === undefined
+            ? {}
+            : { tierEffortOverride: activeEffort }),
+          ...(nextEffort === undefined
+            ? {}
+            : { pendingTierEffortOverride: nextEffort }),
+        };
+      }),
+    );
     return {
       profile,
       accumulatedCost: state.accumulatedCost,
+      chatModels: catalog.entries,
       classifiers:
         (typeof registry?.getModelsOfType === 'function'
           ? registry.getModelsOfType('classifier')
@@ -373,6 +721,7 @@ export const createRouterUIRuntime = (
       eligible,
       activityRouting,
       activityCells,
+      routeCells,
       privacy: {
         advisorEnabled: config.advisor?.enabled === true,
         approvedModels: configured?.advisor?.models ?? [],
@@ -380,6 +729,16 @@ export const createRouterUIRuntime = (
       },
       history,
     };
+  };
+  const routeStateWithPending = (
+    profile: string,
+    activity: RouterActivity,
+    tier: RouterTier,
+  ): RouterUIRouteCellState => {
+    const queued = pendingRoutes.get(profile)?.get(routeKey(activity, tier));
+    return queued
+      ? stateForOverride(profile, tier, queued.value)
+      : routeState(profile, activity, tier);
   };
   const adapters: RouterUIAdapters = {
     getSnapshot,
@@ -417,66 +776,171 @@ export const createRouterUIRuntime = (
       changed();
       return 'applied';
     },
+    applyRoutes: async (transaction) => {
+      const profile = transaction.profile;
+      if (
+        profile !== state.selectedProfile ||
+        !state.currentConfig.profiles[profile] ||
+        new Set(
+          transaction.changes.map((change) =>
+            routeKey(change.activity, change.tier),
+          ),
+        ).size !== transaction.changes.length
+      )
+        return 'conflict';
+      const nextPending = new Map(pendingRoutes.get(profile));
+      const catalog = chatModelCatalog();
+      for (const change of transaction.changes) {
+        const key = routeKey(change.activity, change.tier);
+        const current = routeStateWithPending(
+          profile,
+          change.activity,
+          change.tier,
+        );
+        if (!routeStateEqual(current, change.before)) return 'conflict';
+        let value: RouterUIRouteOverride | undefined;
+        if (change.after) {
+          const candidate = catalog.entries.find(
+            (model) => model.model === change.after?.model,
+          );
+          if (!candidate?.efforts.includes(change.after.thinking))
+            return 'invalid';
+          const fallbacks = change.after.fallbacks ?? current.fallbacks;
+          const genericFallbacks = genericRouteState(
+            profile,
+            change.tier,
+          ).fallbacks;
+          if (
+            ![current.fallbacks, genericFallbacks].some(
+              (allowed) =>
+                allowed.length === fallbacks.length &&
+                allowed.every((entry, index) => entry === fallbacks[index]),
+            )
+          )
+            return 'invalid';
+          const resolvedFallbacks = fallbackMetadataFor(
+            profile,
+            change.activity,
+            change.tier,
+            fallbacks,
+          );
+          const preservesRevision =
+            current.model === candidate.model &&
+            current.thinking === change.after.thinking &&
+            sameFallbacks(current.fallbacks, [...fallbacks]);
+          value = {
+            model: candidate.model,
+            thinking: change.after.thinking,
+            // Keep the entire ordered effective chain; edits only replace the primary.
+            fallbacks: [...fallbacks],
+            ...(preservesRevision && current.revision
+              ? { revision: current.revision }
+              : {}),
+            ...(resolvedFallbacks ? { resolvedFallbacks } : {}),
+          };
+        }
+        const base =
+          nextPending.get(key)?.base ??
+          routeState(profile, change.activity, change.tier);
+        const nextState = stateForOverride(profile, change.tier, value);
+        if (routeStateEqual(nextState, base)) nextPending.delete(key);
+        else nextPending.set(key, { base, value });
+      }
+      const overrides = new Map(
+        [...nextPending].map(([key, change]) => [key, change.value]),
+      );
+      const candidate = profileWithRouteOverrides(profile, overrides);
+      const effectiveControls = pendingValue(profile) ?? controls(profile);
+      if (!validateRouteProfile(candidate, effectiveControls)) return 'invalid';
+      if (nextPending.size) pendingRoutes.set(profile, nextPending);
+      else pendingRoutes.delete(profile);
+      publish();
+      changed();
+      return 'applied';
+    },
   };
   const activatePending = (): boolean => {
     const profile = state.selectedProfile;
     if (!profile) return true;
     const entries = [sessionPending, pending.get(profile)];
-    const next = pendingValue(profile);
-    if (!next) return true;
+    const nextControls = pendingValue(profile);
+    const routeEdits = pendingRoutes.get(profile);
+    if (!nextControls && !routeEdits) return true;
     sessionPending = undefined;
     pending.delete(profile);
+    pendingRoutes.delete(profile);
     const latest = controls(profile);
+    const baseConflict = entries.some(
+      (entry) =>
+        entry && edited(entry).some((key) => latest[key] !== entry.base[key]),
+    );
+    const overrides = new Map<string, RouterUIRouteOverride | undefined>();
+    let routeConflict = false;
+    for (const [key, entry] of routeEdits ?? []) {
+      const [activityName, tierName] = key.split('/');
+      const activity = ROUTER_ACTIVITIES.find((item) => item === activityName);
+      const tier = ROUTER_TIERS.find((item) => item === tierName);
+      if (
+        !activity ||
+        !tier ||
+        !routeStateEqual(entry.base, routeState(profile, activity, tier))
+      ) {
+        routeConflict = true;
+        break;
+      }
+      overrides.set(key, entry.value);
+    }
+    const config = state.currentConfig;
+    const configured = config.profiles[profile];
+    const candidateProfile = routeEdits
+      ? profileWithRouteOverrides(profile, overrides)
+      : configured;
+    const applying = nextControls ?? latest;
     if (
-      entries.some(
-        (entry) =>
-          entry && edited(entry).some((key) => latest[key] !== entry.base[key]),
-      )
+      baseConflict ||
+      routeConflict ||
+      !configured ||
+      (nextControls && !validate(profile, applying)) ||
+      !validateRouteProfile(candidateProfile, applying)
     ) {
       publish();
       return false;
     }
-    if (!validate(profile, next)) {
-      publish();
-      return false;
-    }
-    const config = state.currentConfig;
-    const configured = config.profiles[profile];
-    if (!configured) return false;
     const nextConfig = {
       ...config,
       switchPolicy: {
         ...config.switchPolicy,
-        horizonRequests: next.costHorizon,
-        costSensitivity: next.costSensitivity,
-        strongAdviceConfidence: next.strongAdviceConfidence,
+        horizonRequests: applying.costHorizon,
+        costSensitivity: applying.costSensitivity,
+        strongAdviceConfidence: applying.strongAdviceConfidence,
       },
-      maxSessionBudget: next.budget,
+      maxSessionBudget: applying.budget,
       profiles: {
         ...config.profiles,
         [profile]: {
-          ...configured,
-          baselineTier: next.baseline === 'auto' ? undefined : next.baseline,
+          ...candidateProfile,
+          baselineTier:
+            applying.baseline === 'auto' ? undefined : applying.baseline,
         },
       },
     };
-    const advisor = next.advisor
+    const advisor = applying.advisor
       ? normalizeAdvisorConfig(
           {
             ...config.advisor,
-            model: next.advisor,
+            model: applying.advisor,
             enabled: config.advisor?.enabled ?? false,
-            timeoutMs: next.timeout,
-            reviewEveryRequests: next.reviewEveryRequests,
+            timeoutMs: applying.timeout,
+            reviewEveryRequests: applying.reviewEveryRequests,
           },
           [],
         )
       : undefined;
     state.currentConfig = { ...nextConfig, advisor };
 
-    if (next.pin === 'auto') delete state.pinnedTierByProfile[profile];
-    else state.pinnedTierByProfile[profile] = next.pin;
-    state.thinkingByProfile[profile] = thinkingOf(next);
+    if (applying.pin === 'auto') delete state.pinnedTierByProfile[profile];
+    else state.pinnedTierByProfile[profile] = applying.pin;
+    state.thinkingByProfile[profile] = thinkingOf(applying);
     publish();
     changed();
     return true;
@@ -486,6 +950,7 @@ export const createRouterUIRuntime = (
     controller.abort();
     controller = new AbortController();
     pending.clear();
+    pendingRoutes.clear();
     sessionPending = undefined;
     lifecycle = 'idle';
     actual = undefined;

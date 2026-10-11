@@ -15,7 +15,7 @@ export const formatRoute = (route: RouterUIRoute | undefined): string =>
     : 'unknown / no observed generation';
 
 export const activityRoutingSummary = (snapshot: RouterUISnapshot): string =>
-  `Activity routing: ${snapshot.activityRouting} · ${snapshot.activityCells.length} override cells · read-only`;
+  `Activity routing: ${snapshot.activityRouting} · ${snapshot.activityCells.length} override cells · session Routes editor`;
 
 export const activityRouteLines = (snapshot: RouterUISnapshot): string[] => [
   'Unlisted cells use generic tiers, if configured.',

@@ -64,21 +64,22 @@ Run **`/router`**, **`/router usage`** or **`/router settings`**.
 
 - **Now:** actual model, activity, tier and effort. A held proposal is labeled separately and explains its switch-cost estimate.
 - **Usage:** up to 50 retained decisions, route mix, observed activity labels, per-request catalog-cost sparkline and last measured cache-read share. These are observations, not quality or future-cache predictions.
-- **Settings:** pin first. **Advanced** exposes baseline, budget, per-tier effort, Pi classifier, deadline, review interval, switch horizon/sensitivity and strong-advice threshold.
+- **Settings:** pin first. **Advanced** exposes baseline, budget, all-activity per-tier effort, Pi classifier, deadline, review interval, switch horizon/sensitivity, strong-advice threshold and **Routes**.
   The separate Pi classifier path is shown when configured.
-  Settings also shows the read-only activity-routing mode and override count.
+  Settings also shows the activity-routing mode and override count.
   Adaptive switch controls queue until the next user turn. Changing review interval to 0 disables background reviews; it does not disable initial classifier advice.
-  Advanced lists effective configured activity cells, their ordered fallback
-  declarations and first currently text-eligible attempt (or unavailable/unknown
-  state). Unlisted cells use generic tiers, if configured; mode off retains the
-  declarations but excludes them. These are not advised or actual routes, and
-  generation still rechecks request input, context fit and authentication.
+  **Routes** opens a native per-cell editor. Select an activity/tier, search registered physical chat models (logical `router/*` models are excluded), and choose an effort supported by that model. The editor labels inherited versus overridden cells and can reset a cell to generic inheritance. It retains the cell's ordered fallback chain. Edits use compare-and-set transactions and queue for the next user turn; browsing, drafting and applying pending settings do not change the actual route or write configuration files. The selector reads the public model registry only; it does not check credentials, call a classifier or change approval.
+  The read-only route summary lists effective configured activity cells, their ordered fallback declarations and first currently text-eligible attempt (or unavailable/unknown state). Unlisted cells use generic tiers, if configured; mode off retains the declarations but excludes them. These are not advised or actual routes, and generation still rechecks request input, context fit and authentication.
+  A per-tier effort override applies to every activity and takes precedence over a cell's configured effort. The editor shows both values; clear the tier override to use the cell effort.
 
 Use Left/Right on the tab row to change sections. Tab/Shift+Tab changes focus.
 On a selector, Left/Right or Enter changes the value. Numeric fields use normal
 text editing. Page Up/Down scrolls. Enter activates the focused action.
-Apply/Discard appear only with a changed draft. Undo appears after applying.
-Escape closes the inspector and discards unapplied edits.
+In Routes, Enter opens the native activity/tier, model or effort selector; model
+search uses the Input field, then Tab moves focus to the SelectList. Apply/Discard
+appear only with a changed draft. Undo appears after applying controls.
+Escape returns from a Routes selector to the editor, then from Routes to Settings;
+from the main inspector it closes and discards unapplied edits.
 
 The inspector is a content-sized right overlay at 100 columns or wider. It
 covers rather than reflows the transcript. Narrow terminals use a custom
@@ -97,7 +98,7 @@ request. It does not change the displayed actual route. Discard affects only
 the draft. Undo reverses only unchanged editor-owned fields. Conflicting edits
 are rejected rather than overwritten.
 
-Pin, effort and baseline are profile-scoped. Advisor, deadline, budget, review cadence and switch-cost policy are session-wide and activate on the next user turn even after a profile switch.
+Pin, all-activity effort and baseline are profile-scoped. Per-cell activity route edits are session-only profile overrides. Advisor, deadline, budget, review cadence and switch-cost policy are session-wide and activate on the next user turn even after a profile switch.
 No configuration files are written. Activated pins/effort use branch-safe
 session persistence. Pending edits and baseline/advisor/deadline/budget
 overrides reset on reload, session replacement or restart. Use configuration

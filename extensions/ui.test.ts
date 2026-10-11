@@ -355,8 +355,10 @@ describe('ui.ts lifecycle strip', () => {
     eligible: {},
     activityRouting: 'on',
     activityCells: [],
+    routeCells: [],
     history: [],
     classifiers: [],
+    chatModels: [],
     privacy: {
       advisorEnabled: false,
       approvedModels: [],

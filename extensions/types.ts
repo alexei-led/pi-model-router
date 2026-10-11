@@ -506,6 +506,55 @@ export type RouterUIActivityCell = {
       eligible?: undefined;
     }
 );
+export interface RouterUIChatModel {
+  /** Canonical physical chat target; logical router models are excluded. */
+  model: string;
+  name: string;
+  efforts: readonly ThinkingLevel[];
+}
+export interface RouterUIRouteCellState {
+  state: 'inherited' | 'override' | 'missing';
+  /** Opaque CAS token for normalized capability metadata; never rendered. */
+  revision?: string | undefined;
+  model?: string | undefined;
+  thinking?: ThinkingLevel | undefined;
+  fallbacks: readonly string[];
+}
+export interface RouterUIRouteCell {
+  activity: RouterActivity;
+  tier: RouterTier;
+  /** Current effective profile configuration, before queued UI changes. */
+  current: RouterUIRouteCellState;
+  /** Next-user-boundary route value, when a transaction is already queued. */
+  pending?: RouterUIRouteCellState | undefined;
+  /** Configured generic route used by reset-to-generic. */
+  generic: RouterUIRouteCellState;
+  /** Effective mapped effort under the active all-activity tier override. */
+  effectiveThinking?: ThinkingLevel | undefined;
+  /** Effective effort after any queued control changes are activated. */
+  pendingEffectiveThinking?: ThinkingLevel | undefined;
+  /** Tier-wide session override, if one currently applies to this cell. */
+  tierEffortOverride?: ThinkingLevel | undefined;
+  /** Tier-wide override that will apply after queued controls activate. */
+  pendingTierEffortOverride?: ThinkingLevel | undefined;
+}
+export interface RouterUIRouteSelection {
+  model: string;
+  thinking: ThinkingLevel;
+  /** Ordered target fallback chain retained by the editor. */
+  fallbacks?: readonly string[] | undefined;
+}
+export interface RouterUIRouteCellChange {
+  activity: RouterActivity;
+  tier: RouterTier;
+  before: RouterUIRouteCellState;
+  /** Undefined removes the sparse cell override and restores generic inheritance. */
+  after: RouterUIRouteSelection | undefined;
+}
+export interface RouterUIRouteTransaction {
+  profile: string;
+  changes: readonly RouterUIRouteCellChange[];
+}
 export interface RouterUIAdviceObservation {
   advisor: RouterUIAdvisorId;
   requestId?: string | undefined;
@@ -536,6 +585,8 @@ export interface RouterUISnapshot {
   /** Recorded catalog costs only, not a complete billing ledger. */
   accumulatedCost?: number | undefined;
   classifiers: readonly { model: string; name: string }[];
+  /** Physical chat targets only; excludes logical router recursion and auth data. */
+  chatModels: readonly RouterUIChatModel[];
   reuse?: RoutingDecision['reuse'];
   bypassReason?: BypassReason | undefined;
   reason?: RoutingReasonCode | undefined;
@@ -549,6 +600,7 @@ export interface RouterUISnapshot {
   eligible: Readonly<Partial<Record<RouterTier, RouterUIRoute>>>;
   activityRouting: ActivityRouting;
   activityCells: readonly RouterUIActivityCell[];
+  routeCells: readonly RouterUIRouteCell[];
   privacy: {
     advisorEnabled: boolean;
     approvedModels: readonly string[];
@@ -565,6 +617,10 @@ export interface RouterUIAdapters {
   applyControls: (
     transaction: RouterUIControlTransaction,
   ) => Promise<'applied' | 'conflict'>;
+  /** Compare-and-set sparse per-cell route edits; changes stay pending until a user boundary. */
+  applyRoutes: (
+    transaction: RouterUIRouteTransaction,
+  ) => Promise<'applied' | 'conflict' | 'invalid'>;
   subscribe: (refresh: () => void) => () => void;
   /** Abort on session replacement/reload/shutdown to complete and dispose the inspector. */
   signal?: AbortSignal | undefined;
