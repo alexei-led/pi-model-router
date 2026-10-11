@@ -53,15 +53,20 @@ flowchart TD
     Start["Validate request and eligible routes"] --> Policy["Continuation, pin, budget, then candidate count"]
     Policy -->|"Local rule selects a route"| Generate["Revalidate and generate through Pi"]
     Policy -->|"Advice needed"| Advisor["Configured Pi classifier"]
-    Advisor -->|"Valid choice"| Generate
-    Advisor -->|"No valid advice"| Baseline["Eligible baseline"]
+    Advisor -->|"Valid choice"| Switch["Initial selection or in-loop cost policy"]
+    Switch -->|"Accepted"| Generate
+    Switch -->|"Held"| Incumbent["Eligible incumbent"]
+    Incumbent --> Generate
+    Advisor -->|"Initial advice unavailable"| Baseline
+    Advisor -->|"Review unavailable"| Incumbent["Eligible baseline"]
     Policy -->|"No active advisor"| Baseline
     Baseline --> Generate
     classDef policy fill:#dbeafe,stroke:#2563eb,color:#0f172a
     classDef advisor fill:#fef3c7,stroke:#b45309,color:#451a03
     classDef generation fill:#dcfce7,stroke:#15803d,color:#14532d
     classDef local fill:#f1f5f9,stroke:#64748b,color:#0f172a
-    class Start,Policy policy
+    class Start,Policy,Switch policy
+    class Incumbent local
     class Advisor advisor
     class Generate generation
     class Baseline local
@@ -138,8 +143,8 @@ sequenceDiagram
 ```
 
 Concurrent callers for one turn share the advisor request and its deadline.
-Only the last departing caller can cancel the shared transport.
-The bounded cache stores the actual successful route and its immutable selected-cell plan, not only the advisor label.
+Only the last departing caller can cancel the shared initial transport. Background reviews have their own bounded lifetime linked to the caller and provider registration. Their branch snapshot is checked as ancestry, not exact full-branch equality; normal assistant/tool appends do not invalidate a fresh result.
+The bounded cache stores the actual successful route and its immutable selected-cell plan, not only the advisor label. Reuse clears request-local switch/proposal diagnostics. Every terminal background-review observation is allowlisted and recorded separately from generation when history collection is enabled; unique classifier IDs deduplicate a consumed review's repeated metrics.
 
 Reuse requires matching session, user turn, profile, policy, configuration, branch ancestry, model, and tool-result identities.
 When the caller omits `sessionId`, the key uses Pi's native session ID.
@@ -211,7 +216,7 @@ Missing usage remains unknown. Advisor costs are outside the generation budget.
 The final UI update cannot prevent persistence.
 
 `economics.ts` calls Pi `calculateCost()` for hypothetical cache scenarios on the same measured token workload, including request-wide input pricing tiers.
-This diagnostic comparison does not itself select routes. `switch-policy.ts` separately prices a cold first target request plus a bounded cache-read horizon and compares it with the incumbent estimate using the last observed read share. Cost sensitivity controls the accepted premium; relevant strong tier/activity advice may override it. An explicit exact-model `effortCacheSharing: shared` declaration removes cache rebuild cost for same-model effort changes; unknown metadata allows the change without claiming preservation. These catalog scenarios contain no physical cache state or guessed TTL.
+This diagnostic comparison does not itself select routes. `switch-policy.ts` separately prices a cold first target request plus a bounded cache-read horizon and compares it with the incumbent estimate using the last observed read share. Cost sensitivity controls the accepted premium for fresh in-loop advice; relevant strong tier/activity advice may override it. New user-turn advice starts a new task and is not held by the previous task's estimate. Both stay and future target requests use the same observed read-share scenario; the first target request is cold. Rebuild premium and steady price difference are separate diagnostics, and shared-effort rebuild metadata never implies free generation. An explicit exact-model `effortCacheSharing: shared` declaration removes cache rebuild cost for same-model effort changes; unknown metadata allows the change without claiming preservation. These catalog scenarios contain no physical cache state or guessed TTL.
 A restored branch does not restore a server cache. Same-model effort changes without explicit metadata do not imply cache preservation.
 The [evaluation](evaluation.md#cost-method) states the cost assumptions and evidence limits.
 
@@ -247,7 +252,7 @@ Request preparation applies routing policy and uses provider-scoped coordination
 The Signal Panel reads a sanitized presentation snapshot through one `/router`
 command family. `ui/presentation.ts` formats fixed local reasons and bounded bars.
 It makes no advisor calls. The widget and fallback footer status are mutually
-exclusive. The host footer stays intact. Now, Usage and Settings share one draft.
+exclusive. Wide inspectors are floating right overlays, not transcript-reflowing sidebars; narrow custom screens replace the editor area while preserving the host footer and widgets. The host footer stays intact. Now, Usage and Settings share one draft.
 Recorded session cost is projected separately from retained-window history.
 Provider observations distinguish
 selected advice from attempted/actual generation and cannot affect routing or retries.

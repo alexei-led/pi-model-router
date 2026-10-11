@@ -522,13 +522,34 @@ const routerExtension = (pi: ExtensionAPI) => {
     else ctx.ui.notify(text, 'info');
   });
 
-  pi.on('before_agent_start', (_event, ctx) => {
+  pi.on('before_agent_start', async (_event, ctx) => {
     if (!ownsContext(ctx)) return;
-    if (!routerUI.activatePending())
+    const epoch = requestEpoch;
+    if (!routerUI.activatePending()) {
       ctx.ui.notify(
         'Pending router controls discarded: configuration changed or route became unavailable.',
         'warning',
       );
+    } else {
+      actions.registerRouterProvider();
+      const selected = ctx.model;
+      const refreshed =
+        selected?.provider === 'router'
+          ? ctx.modelRegistry.find('router', selected.id)
+          : undefined;
+      if (
+        selected &&
+        refreshed &&
+        (selected.contextWindow !== refreshed.contextWindow ||
+          selected.maxTokens !== refreshed.maxTokens ||
+          selected.reasoning !== refreshed.reasoning ||
+          JSON.stringify(selected.thinkingLevelMap) !==
+            JSON.stringify(refreshed.thinkingLevelMap))
+      ) {
+        await setModelInternally(refreshed);
+        if (epoch !== requestEpoch || !ownsContext(ctx)) return;
+      }
+    }
     persistState();
     actions.updateStatus(ctx);
   });
@@ -624,6 +645,7 @@ const routerExtension = (pi: ExtensionAPI) => {
 
   pi.on('thinking_level_select', (event, ctx) => {
     if (!ensureInitializedFromContext(ctx)) return;
+    if (isInternalModelSwitch) return;
     if (isInternalThinkingChange) {
       pendingThinkingChanges.pop();
       return;

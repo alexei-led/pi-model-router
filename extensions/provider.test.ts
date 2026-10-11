@@ -1743,6 +1743,9 @@ describe('activity matrix provider routing', () => {
       proposedRoute: { activity: 'docs', model: 'test/docs' },
       switchCost: { reason: 'cost-held', confidenceOverride: false },
     });
+    expect((await advance()).model).toBe('code');
+    expect(s.state.lastDecision?.proposedRoute).toBeUndefined();
+    expect(s.state.lastDecision?.switchCost).toBeUndefined();
   });
 
   it('can disable in-loop classifier reviews independently of initial-turn advice', async () => {
@@ -1872,6 +1875,18 @@ describe('activity matrix provider routing', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect((await advance()).model).toBe('docs');
     expect(s.classify).toHaveBeenCalledTimes(3);
+    const reviewRecords = s.actions.recordDebugDecision.mock.calls
+      .map(([decision]) => decision)
+      .filter((decision) => decision.reviewOnly);
+    expect(reviewRecords).toHaveLength(2);
+    expect(
+      reviewRecords.every((decision) => decision.generation === undefined),
+    ).toBe(true);
+    expect(
+      reviewRecords.every(
+        (decision) => decision.classification?.requestId !== undefined,
+      ),
+    ).toBe(true);
   });
 
   it('raises and lowers tier within one tool loop from fresh classifier reviews', async () => {

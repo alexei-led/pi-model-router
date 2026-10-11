@@ -126,8 +126,14 @@ export const evaluateSwitch = (
   if (effortOnly && sharing === 'unknown')
     return result(true, 'effort-cache-unknown', horizon);
 
-  const inputTokens = Math.max(0, Math.floor(input.contextTokens));
-  const outputTokens = Math.max(0, Math.floor(input.outputTokens));
+  if (
+    ![input.contextTokens, input.outputTokens].every(
+      (value) => Number.isSafeInteger(value) && value >= 0,
+    )
+  )
+    return result(true, 'cost-unknown', horizon);
+  const inputTokens = input.contextTokens;
+  const outputTokens = input.outputTokens;
   if (
     inputTokens === 0 ||
     !priceable(currentModel, inputTokens) ||

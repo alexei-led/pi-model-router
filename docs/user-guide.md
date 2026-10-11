@@ -100,8 +100,7 @@ are rejected rather than overwritten.
 
 Pin, all-activity effort and baseline are profile-scoped. Per-cell activity route edits are session-only profile overrides. Advisor, deadline, budget, review cadence and switch-cost policy are session-wide and activate on the next user turn even after a profile switch.
 No configuration files are written. Activated pins/effort use branch-safe
-session persistence. Pending edits and baseline/advisor/deadline/budget
-overrides reset on reload, session replacement or restart. Use configuration
+session persistence. Pending route/control edits and baseline/advisor/deadline/budget/review/switch-policy session overrides reset on reload, session replacement or restart. Use configuration
 for durable settings.
 
 ![Queued controls in actual Pi](assets/router-ui/signal-settings-dark.png)
@@ -210,13 +209,13 @@ The [complete example](../model-router.example.json) shows aliases, all four tie
 | `switchPolicy.horizonRequests` | Cost-comparison horizon, 1–20 requests (default 5). |
 | `switchPolicy.costSensitivity` | 0 is opportunistic (accepts a larger estimated premium); 1 only accepts switches no more expensive than staying. Default 0.5. |
 | `switchPolicy.strongAdviceConfidence` | Minimum relevant classifier confidence that can override estimated switch cost. Default 0.9. Tier and activity confidence are independent. |
-| `models` | Aliases with a `model` reference, optional `contextWindow`/`maxTokens`, and exact `effortCacheSharing: shared|separate|unknown` metadata. Omitted metadata means unknown. |
+| `models` | Aliases with a `model` reference, optional `contextWindow`/`maxTokens`, and exact `effortCacheSharing: shared\|separate\|unknown` metadata. Omitted metadata means unknown. |
 | `ui.statusLine` | `compact` by default. `detailed` adds the full provider/model reference and recorded catalog cost, still within two widget lines. |
 
 Budgets and model capacities must be positive, finite numbers. Invalid values are ignored with a warning.
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
 Without an eligible lower tier, the budget policy keeps an eligible baseline.
-The classifier deadline defaults to 10 seconds. An unavailable model, rejected answer, timeout or provider error selects the local baseline. Profile approval is required for the exact configured classifier model.
+The initial classifier deadline defaults to 10 seconds. An unavailable model, rejected answer, timeout or provider error on initial selection uses the local baseline; a failed background review keeps the eligible incumbent. Profile approval is required for the exact configured classifier model.
 
 ## Activity routes
 
@@ -281,15 +280,15 @@ An attempt without terminal usage makes the request total unknown. The session t
 Zero placeholder tariffs do not establish free generation.
 Catalog prices do not establish subscription charges.
 
-The diagnostics-only shadow comparison still does not predict savings. Route selection separately estimates stay versus switching over the configured horizon: the first target request is cold (using the greater of input/cache-write catalog cost); later requests use a cache-read scenario. Staying uses the last observed cache-read share when available. Output volume is reused from the latest request. This is an explicit catalog scenario, not a prediction, invoice, cache-hit promise, or quality score.
+The diagnostics-only shadow comparison still does not predict savings. Fresh in-loop advice separately estimates stay versus switching over the configured horizon: the first target request is cold (using the greater of ordinary input/cache-write catalog cost, with request-wide output pricing); later target requests and staying use the same last-observed read-share scenario, or an explicit all-read scenario if no share is known. Output volume is reused from the latest request. Rebuild premium and steady generation-price difference are separate diagnostics. Initial new-user advice is not held by the previous task's estimate. This is an explicit catalog scenario, not a prediction, invoice, cache-hit promise, or quality score.
 
-Same-model effort changes have no rebuild penalty only when exact model alias metadata says `effortCacheSharing: "shared"`. `"separate"` prices the switch like a cold route change. Missing or conflicting metadata means `unknown`: the effort change is allowed, but the UI does not claim cache preservation. Cross-model switches with missing/placeholder rates also remain eligible and are marked cost-unknown; missing price is not treated as free evidence. Strong tier/activity evidence above `strongAdviceConfidence` can override a catalog cost hold.
+Same-model effort changes have no estimated rebuild penalty only when the operator declares `effortCacheSharing: "shared"` for the exact model/backend currently configured. This is not provider verification and never means generation or extra reasoning tokens are free. `"separate"` prices the switch like a cold route change. Missing or conflicting metadata means `unknown`: the effort change is allowed, but the UI does not claim cache preservation. Cross-model switches with missing/placeholder rates also remain eligible and are marked cost-unknown; missing price is not treated as free evidence. Strong tier/activity evidence above `strongAdviceConfidence` can override a catalog cost hold.
 The [evaluation](evaluation.md) separates observed use from hypothetical cost.
 
 ## Sessions and history
 
 Pins, costs, display controls, and recent decisions follow the Pi session branch. Adaptive switch session overrides reset on reload or session replacement; put durable policy in configuration.
-Debug collection retains the last 50 decisions. Turning collection off preserves existing history and the latest decision.
+Debug collection retains the last 50 generation/review observations. Usage separates generation decisions from terminal classifier diagnostics and deduplicates classifier IDs, including reviews that expired or did not apply. Turning collection off preserves existing history and the latest decision.
 
 An explicit startup `--model` takes priority.
 Otherwise, a resumed branch uses its saved state.

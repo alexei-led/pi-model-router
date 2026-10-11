@@ -61,6 +61,62 @@ const evaluate = (
 };
 
 describe('adaptive switch economics', () => {
+  it('separates cache rebuild from steady generation prices and respects long-context tariffs', () => {
+    const tiered = model('tiered', {
+      cost: {
+        input: 1,
+        output: 2,
+        cacheRead: 0.1,
+        cacheWrite: 1.25,
+        tiers: [
+          {
+            inputTokensAbove: 200000,
+            input: 2,
+            output: 4,
+            cacheRead: 0.2,
+            cacheWrite: 2.5,
+          },
+        ],
+      },
+    });
+    const result = evaluateSwitch({
+      current: pair('test/current', 'low'),
+      proposed: pair('test/tiered', 'high'),
+      currentModel: current,
+      proposedModel: tiered,
+      config: normalizeConfig({ switchPolicy: { horizonRequests: 1 } }).config,
+      contextTokens: 300000,
+      outputTokens: 1000,
+      adviceConfidence: 0.95,
+    });
+    expect(result.diagnostic.switchUsd).toBeCloseTo(0.754, 10);
+    expect(result.diagnostic.rebuildUsd).toBeCloseTo(0.69, 10);
+    expect(result.diagnostic.steadyDeltaUsd).toBeCloseTo(-0.256, 10);
+    expect(result.diagnostic.incrementalUsd).toBeCloseTo(
+      (result.diagnostic.rebuildUsd ?? 0) +
+        (result.diagnostic.steadyDeltaUsd ?? 0),
+      10,
+    );
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    'keeps invalid workload %s unknown, not free',
+    (contextTokens) => {
+      const result = evaluateSwitch({
+        current: pair('test/current', 'low'),
+        proposed: pair('test/cheap', 'high'),
+        currentModel: current,
+        proposedModel: cheap,
+        config: normalizeConfig({}).config,
+        contextTokens,
+        outputTokens: 1000,
+        adviceConfidence: 0.95,
+      });
+      expect(result.diagnostic.reason).toBe('cost-unknown');
+      expect(result.diagnostic.switchUsd).toBeUndefined();
+    },
+  );
+
   it('treats explicitly cache-compatible effort-only changes as zero rebuild cost', () => {
     const result = evaluate({
       currentModel: current,

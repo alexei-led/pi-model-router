@@ -61,6 +61,7 @@ export const adaptiveFixtureConfig = {
 
 export default (pi: ExtensionAPI) => {
   let requests = 0;
+  let interactive = false;
   const physical: { request: number; model: string; effort: string }[] = [];
   const observed: {
     tier: string;
@@ -173,8 +174,10 @@ export default (pi: ExtensionAPI) => {
         {
           type: 'text',
           text: finished
-            ? 'ADAPTIVE_FIXTURE_TRACE ' +
-              JSON.stringify({ physical, observed, noNetwork: true })
+            ? interactive
+              ? 'Local adaptive fixture complete: 21 requests; explore → code → debug → docs → explore. No network calls.'
+              : 'ADAPTIVE_FIXTURE_TRACE ' +
+                JSON.stringify({ physical, observed, noNetwork: true })
             : 'Local fixture is now working on ' +
               currentPhase().activity +
               '.',
@@ -274,6 +277,7 @@ export default (pi: ExtensionAPI) => {
     },
   });
   pi.on('session_start', (_event, ctx) => {
+    interactive = ctx.mode === 'tui';
     ctx.ui.setStatus('adaptive-fixture', 'LOCAL FIXTURE · no network');
   });
 };
