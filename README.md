@@ -74,7 +74,14 @@ The model answers and calls tools. Periodic background reviews use bounded curre
 Recent records cover 1,967 Pi responses across 25 sessions. They show route use, not guaranteed savings.
 [See the chart, cost calculations, and limits →](docs/evaluation.md)
 
-## Upgrading to 0.12.0
+## Upgrading to 0.14.0
+
+Restart Pi after updating. No configuration migration is required.
+For an enabled, approved classifier, background reviews default to every four requests.
+Set `advisor.reviewEveryRequests: 0` to keep advice at new user-task boundaries only.
+Reviews send bounded recent text and add advisor requests; existing consent requirements still apply.
+
+### From versions before 0.12.0
 
 After updating, restart Pi. Replace `/router-ui` with `/router`, and
 `/router <profile>` with `/router profile <name>`. Classifier advice now uses any Pi-registered classifier. Replace provider-specific configuration with the generic advisor model and exact per-profile approvals.

@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.14.0] - 2026-10-12
+
+### Summary
+
+Adapt physical model and reasoning effort during long tool loops, use switch-cost estimates in routing decisions, and edit activity routes through Pi's native inspector.
+
+### Changes
+
+- Review bounded current-loop progress in the background. Fresh recommendations can raise or lower tier, activity and effort on the next request without delaying current generation. Keep the logical `router/<profile>` selection stable.
+- Compare staying with switching over a short request horizon, including estimated context/cache rebuild cost. Hold an uneconomic proposal unless validated strong advice overrides it. Same-model effort changes respect declared cache sharing; estimates are catalog scenarios, not billing or cache guarantees.
+- Add a searchable physical-model and supported-effort Routes editor with sparse cell overrides, reset/inheritance, queued activation and capability refresh. Keep tier-wide effort overrides authoritative and explain masked cell effort.
+- Distinguish actual, proposed, held, initial/review and pending decisions in the Signal Panel. Preserve native wide/narrow layouts and themed row backgrounds.
+- Fence reviews to the current session, turn, branch and policy. Expire advice after its next-request window. Preserve pins, generation budgets, cancellation and immutable explicit fallbacks. Leaving the router does not interrupt an active response.
+
+### Upgrade
+
+Restart Pi after updating. No configuration migration is required. For an enabled, approved classifier, background reviews default to every four requests. Selected recent text can contain private data and reviews add advisor requests. Set `advisor.reviewEveryRequests: 0` for task-boundary-only advice; initial advice remains enabled. Existing classifier enablement and exact per-profile approvals still apply.
+
+### Verification
+
+612 tests and release gates pass. Native Pi/agterm fixtures demonstrated upgrades, downgrades and route-edit activation/reset/masking. Cost-held paths have automated coverage; live routing quality, backend cache retention and billing savings were not measured. Post-repaint-fix screenshot capture was blocked by a locked GUI; the regression and bounded Opus review passed. See [acceptance and limits](docs/testing/adaptive-router-acceptance.md).
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.13.0...v0.14.0)
+
 ## [0.13.0] - 2026-10-11
 
 ### Summary
