@@ -90,7 +90,7 @@ allNew(model) = max(Pi.calculateCost(model, { input: I, output: O }).total,
 
 The maximum permits a catalog without separate cache-write pricing.
 Pi applies the highest matching request-wide input tier to each scenario. The scenarios still omit cache retention differences and changes in output length.
-They do not affect routing. Unknown tariffs remain unknown.
+These diagnostic all-read/all-new scenarios do not select routes. The current adaptive switch policy is described in the [user guide](user-guide.md#read-costs-and-cache-data); it uses catalog estimates, not experimentally verified savings. Unknown tariffs remain unknown. This historical usage snapshot does not validate the new policy's model quality, review cadence, horizon or cache assumptions.
 
 ## Scope and reproducibility
 

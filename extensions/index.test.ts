@@ -136,6 +136,163 @@ describe('index.ts (orchestrator)', () => {
     expect(ctx.ui.notify).toHaveBeenCalled();
   };
 
+  it('keeps an in-flight response and its cost when the selected model leaves the router', async () => {
+    routerExtension(mockPi);
+    const ctx = buildMockCtx();
+    const backend = createAssistantMessageEventStream();
+    const completed = message({ provider: 'openai', model: 'gpt-4o-mini' });
+    completed.usage.cost.total = 0.25;
+    const delegate = vi.fn<ExtensionContext['modelRegistry']['streamSimple']>(
+      () => backend,
+    );
+    Object.assign(ctx.modelRegistry, { streamSimple: delegate });
+    for (const handler of handlersFor('session_start'))
+      await handler({ reason: 'new' }, ctx);
+    const provider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+    const stream = provider?.streamSimple?.(
+      model('balanced', { provider: 'router' }),
+      normalizeContext({
+        messages: [{ role: 'user', content: 'Work', timestamp: 1 }],
+      }),
+    );
+    if (!stream) throw new Error('Missing registered stream');
+    const response = stream.result();
+    await vi.waitFor(() => expect(delegate).toHaveBeenCalledOnce());
+    const signal = delegate.mock.calls[0]?.[2]?.signal;
+    backend.push({ type: 'start', partial: completed });
+    backend.push({
+      type: 'text_delta',
+      contentIndex: 0,
+      delta: 'partial',
+      partial: completed,
+    });
+    for (const handler of handlersFor('model_select'))
+      await handler({ model: model('other', { provider: 'openai' }) }, ctx);
+    expect(signal?.aborted).not.toBe(true);
+    backend.push({ type: 'done', reason: 'stop', message: completed });
+    backend.end();
+    expect((await response).stopReason).toBe('stop');
+    expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+      enabled: false,
+      accumulatedCost: 0.25,
+    });
+  });
+
+  it.each([false, true])(
+    'activates route edits and refreshes logical capabilities unless conflict=%s',
+    async (conflict) => {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      Object.assign(ctx, { model: model('balanced', { provider: 'router' }) });
+      const large = model('large', {
+        provider: 'openai',
+        contextWindow: 1_000_000,
+        maxTokens: 16384,
+        thinkingLevelMap: { xhigh: 'xhigh' },
+      });
+      let visible = true;
+      Object.assign(ctx.modelRegistry, {
+        getModelsOfType: (type: string) =>
+          type === 'chat' && visible ? [large] : [],
+      });
+      ctx.modelRegistry.find.mockImplementation(
+        (provider: string, id: string) => {
+          if (provider !== 'router')
+            return id === 'large' ? large : model(id, { provider });
+          const config: Parameters<ExtensionAPI['registerProvider']>[1] =
+            mockPi.registerProvider.mock.calls.at(-1)?.[1];
+          const definition = config?.models?.find((entry) => entry.id === id);
+          if (
+            definition &&
+            (definition.type === undefined || definition.type === 'chat')
+          )
+            return model(id, {
+              provider,
+              contextWindow: definition.contextWindow ?? 8192,
+              maxTokens: definition.maxTokens ?? 1024,
+              reasoning: definition.reasoning ?? true,
+              ...(definition.thinkingLevelMap
+                ? { thinkingLevelMap: definition.thinkingLevelMap }
+                : {}),
+            });
+          return model(id, { provider });
+        },
+      );
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'new' }, ctx);
+      const inspector = vi
+        .spyOn(ui, 'openRouterInspector')
+        .mockImplementation(async (_context, adapters) => {
+          const cell = adapters
+            .getSnapshot()
+            .routeCells.find(
+              (c) => c.activity === 'code' && c.tier === 'medium',
+            );
+          if (!cell) throw new Error('Missing editable cell');
+          expect(
+            await adapters.applyRoutes({
+              profile: 'balanced',
+              changes: [
+                {
+                  activity: 'code',
+                  tier: 'medium',
+                  before: cell.current,
+                  after: { model: 'openai/large', thinking: 'high' },
+                },
+              ],
+            }),
+          ).toBe('applied');
+          return undefined;
+        });
+      try {
+        const command = mockPi.registerCommand.mock.calls.find(
+          ([name]) => name === 'router',
+        )?.[1];
+        if (!command) throw new Error('Missing router command');
+        await command.handler(
+          'settings',
+          ctx as unknown as ExtensionCommandContext,
+        );
+        const registrations = mockPi.registerProvider.mock.calls.length;
+        mockPi.setModel.mockClear();
+        if (conflict) visible = false;
+        mockPi.setModel.mockImplementation(async () => {
+          for (const handler of handlersFor('thinking_level_select'))
+            await handler({ previousLevel: 'high', level: 'off' }, ctx);
+          return true;
+        });
+        for (const handler of handlersFor('before_agent_start'))
+          await handler({}, ctx);
+        if (conflict) {
+          expect(mockPi.registerProvider.mock.calls).toHaveLength(
+            registrations,
+          );
+          expect(mockPi.setModel).not.toHaveBeenCalled();
+          expect(ctx.ui.notify).toHaveBeenCalledWith(
+            expect.stringContaining('discarded'),
+            'warning',
+          );
+        } else {
+          expect(mockPi.registerProvider.mock.calls).toHaveLength(
+            registrations + 1,
+          );
+          expect(mockPi.setModel).toHaveBeenCalledWith(
+            expect.objectContaining({
+              provider: 'router',
+              id: 'balanced',
+              contextWindow: 1_000_000,
+            }),
+          );
+          expect(
+            mockPi.appendEntry.mock.calls.at(-1)?.[1].thinkingByProfile,
+          ).toEqual({ balanced: {} });
+        }
+      } finally {
+        inspector.mockRestore();
+      }
+    },
+  );
+
   it('passes only public status fields across the UI boundary', async () => {
     stateMocks.advisors = {
       advisor: {

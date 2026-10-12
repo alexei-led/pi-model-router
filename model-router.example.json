@@ -1,24 +1,39 @@
 {
   "activityRouting": "on",
+  "switchPolicy": {
+    "horizonRequests": 5,
+    "costSensitivity": 0.5,
+    "strongAdviceConfidence": 0.9
+  },
   "debug": false,
   "advisor": {
     "enabled": false,
     "model": "openai/gpt-6-luna",
     "timeoutMs": 10000,
+    "reviewEveryRequests": 4,
     "confidenceThreshold": 0.65,
     "probabilityThreshold": 0.8,
     "maxStateTokens": 3000,
+    "context": {
+      "currentLoopMessages": 8,
+      "previousTurns": 2,
+      "maxHistoryTokens": 500,
+      "toolResults": "last-error",
+      "maxToolTokens": 250
+    },
     "maxRetries": 1
   },
   "maxSessionBudget": 1.0,
   "models": {
     "strong": {
       "model": "anthropic/claude-haiku-5-5",
-      "contextWindow": 200000
+      "contextWindow": 200000,
+      "effortCacheSharing": "unknown"
     },
     "fast": {
       "model": "anthropic/claude-haiku-5-5",
-      "contextWindow": 200000
+      "contextWindow": 200000,
+      "effortCacheSharing": "unknown"
     }
   },
   "profiles": {

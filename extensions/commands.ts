@@ -255,6 +255,7 @@ export const registerCommands = (
             config,
             (provider, id) => ctx.modelRegistry.find(provider, id),
             level,
+            state.currentConfig.activityRouting !== 'off',
           )
         : [];
     ctx.ui.notify(

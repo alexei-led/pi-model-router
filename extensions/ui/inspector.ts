@@ -3,6 +3,7 @@ import type { Component, TUI } from '@earendil-works/pi-tui';
 import {
   Input,
   matchesKey,
+  SelectList,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
@@ -12,10 +13,14 @@ import type {
   RouterUIControlChange,
   RouterUIControls,
   RouterUIHistoryEntry,
+  RouterUIRouteCell,
+  RouterUIRouteCellChange,
+  RouterUIRouteCellState,
+  RouterUIRouteSelection,
   RouterUISnapshot,
   RouterUIView,
 } from '../types';
-import { ROUTER_TIERS } from '../types';
+import { ROUTER_ACTIVITIES, ROUTER_TIERS } from '../types';
 import { validateRouterUIControls } from './controls';
 import {
   activityRouteLines,
@@ -26,6 +31,7 @@ import {
   routeMix,
   routeReason,
   routerTone,
+  textBar,
 } from './presentation';
 
 const keys = [
@@ -34,6 +40,10 @@ const keys = [
   'budget',
   'advisor',
   'timeout',
+  'reviewEveryRequests',
+  'costHorizon',
+  'costSensitivity',
+  'strongAdviceConfidence',
   'thinkingHigh',
   'thinkingMedium',
   'thinkingLow',
@@ -46,15 +56,93 @@ const fieldNames: Record<keyof RouterUIControls, string> = {
   budget: 'Soft budget ($)',
   advisor: 'Classifier model',
   timeout: 'Advisor deadline (ms)',
-  thinkingHigh: 'High effort',
-  thinkingMedium: 'Medium effort',
-  thinkingLow: 'Low effort',
-  thinkingMicro: 'Micro effort',
+  reviewEveryRequests: 'Classifier review interval',
+  costHorizon: 'Cost comparison horizon',
+  costSensitivity: 'Switch-cost sensitivity',
+  strongAdviceConfidence: 'Strong-advice override threshold',
+  thinkingHigh: 'High effort (all activities)',
+  thinkingMedium: 'Medium effort (all activities)',
+  thinkingLow: 'Low effort (all activities)',
+  thinkingMicro: 'Micro effort (all activities)',
 };
 const display = (value: unknown): string =>
   value === undefined ? 'default / unknown' : String(value);
 const money = (value: number | undefined): string =>
   value === undefined ? 'unknown (not free)' : `$${value.toFixed(4)}`;
+const controlDisplay = (key: keyof RouterUIControls, value: unknown): string =>
+  key === 'reviewEveryRequests' && value === 0
+    ? 'off'
+    : key === 'reviewEveryRequests' || key === 'costHorizon'
+      ? `${String(value)} requests`
+      : (key === 'costSensitivity' || key === 'strongAdviceConfidence') &&
+          typeof value === 'number'
+        ? `${Math.round(value * 100)}%`
+        : display(value);
+const controlChoices = (
+  field: keyof RouterUIControls,
+  snapshot: RouterUISnapshot,
+  draft: RouterUIControls,
+): (string | number | undefined)[] => {
+  const choices: (string | number | undefined)[] =
+    field === 'advisor'
+      ? [
+          ...new Set([
+            draft.advisor,
+            ...snapshot.classifiers.map((model) => model.model),
+          ]),
+        ]
+      : field.startsWith('thinking')
+        ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+        : field === 'reviewEveryRequests'
+          ? [0, 2, 4, 8]
+          : field === 'costHorizon'
+            ? [1, 3, 5, 10]
+            : field === 'costSensitivity' || field === 'strongAdviceConfidence'
+              ? [0, 0.25, 0.5, 0.75, 0.9, 0.95, 1]
+              : ['auto', ...ROUTER_TIERS];
+  return choices.includes(draft[field]) ? choices : [draft[field], ...choices];
+};
+
+const routeCellKey = (
+  activity: RouterUIRouteCell['activity'],
+  tier: RouterUIRouteCell['tier'],
+) => `${activity}/${tier}`;
+const cloneRouteState = (
+  route: RouterUIRouteCellState,
+): RouterUIRouteCellState => ({ ...route, fallbacks: [...route.fallbacks] });
+const routeStateEqual = (
+  left: RouterUIRouteCellState,
+  right: RouterUIRouteCellState,
+): boolean =>
+  left.state === right.state &&
+  left.model === right.model &&
+  left.thinking === right.thinking &&
+  left.fallbacks.length === right.fallbacks.length &&
+  left.fallbacks.every(
+    (fallback, index) => fallback === right.fallbacks[index],
+  );
+const routeTargetEqual = (
+  left: RouterUIRouteCellState,
+  right: RouterUIRouteCellState,
+): boolean =>
+  left.model === right.model &&
+  left.thinking === right.thinking &&
+  left.fallbacks.length === right.fallbacks.length &&
+  left.fallbacks.every(
+    (fallback, index) => fallback === right.fallbacks[index],
+  );
+const routeStateForChange = (
+  change: RouterUIRouteCellChange,
+  cell: RouterUIRouteCell,
+): RouterUIRouteCellState =>
+  change.after
+    ? {
+        state: 'override',
+        model: change.after.model,
+        thinking: change.after.thinking,
+        fallbacks: [...(change.after.fallbacks ?? change.before.fallbacks)],
+      }
+    : cloneRouteState(cell.generic);
 const changes = (
   before: Readonly<RouterUIControls>,
   after: Readonly<RouterUIControls>,
@@ -73,12 +161,13 @@ const changes = (
 export const formatRouterUIUsage = (
   history: readonly RouterUIHistoryEntry[],
 ): string[] => {
-  const retained = history.slice(-50);
+  const observations = history.slice(-50);
+  const retained = observations.filter((entry) => !entry.reviewOnly);
   const requests = new Map<
     string,
     NonNullable<RouterUIHistoryEntry['advice']>
   >();
-  for (const entry of retained)
+  for (const entry of observations)
     if (entry.advice?.requestId && !requests.has(entry.advice.requestId))
       requests.set(entry.advice.requestId, entry.advice);
   const samples = [...requests.values()];
@@ -94,6 +183,39 @@ export const formatRouterUIUsage = (
   const generationAttempts = retained.flatMap((entry) =>
     entry.generationAttempts === undefined ? [] : [entry.generationAttempts],
   );
+  const latestUsage = [...retained]
+    .reverse()
+    .find(
+      (entry) =>
+        entry.inputTokens !== undefined &&
+        entry.cacheReadTokens !== undefined &&
+        entry.cacheWriteTokens !== undefined,
+    );
+  const inputTotal = latestUsage
+    ? (latestUsage.inputTokens ?? 0) +
+      (latestUsage.cacheReadTokens ?? 0) +
+      (latestUsage.cacheWriteTokens ?? 0)
+    : 0;
+  const cacheReadShare =
+    latestUsage && inputTotal > 0
+      ? (latestUsage.cacheReadTokens ?? 0) / inputTotal
+      : undefined;
+  const costSamples = costs.slice(-12);
+  const maxCost = Math.max(...costSamples, 0);
+  const spark = costSamples.length
+    ? costSamples
+        .map(
+          (value) =>
+            '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor((value / (maxCost || 1)) * 7))],
+        )
+        .join('')
+    : 'unknown';
+  const activityCounts = ROUTER_ACTIVITIES.flatMap((activity) => {
+    const count = retained.filter(
+      (entry) => entry.actual?.activity === activity,
+    ).length;
+    return count ? [`${activity} ${count}`] : [];
+  });
   const latencies = samples
     .flatMap((entry) =>
       entry.latencyMs === undefined ? [] : [entry.latencyMs],
@@ -111,6 +233,9 @@ export const formatRouterUIUsage = (
     `Known generation cost: ${costs.length ? money(costs.reduce((sum, cost) => sum + cost, 0)) : 'unknown'} · coverage ${costs.length}/${retained.length}`,
     'Catalog only, not an invoice.',
     `Generation attempts: ${generationAttempts.length ? generationAttempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${generationAttempts.length}/${retained.length}`,
+    `Cache-read share, last observed request: ${cacheReadShare === undefined ? 'unknown' : `${Math.round(cacheReadShare * 100)}%`} · measured, not forecast ${cacheReadShare === undefined ? '' : textBar(cacheReadShare)}`,
+    `Catalog cost / request: ${spark} · ${costSamples.length} known samples · not a savings prediction`,
+    `Observed activity labels: ${activityCounts.join(' · ') || 'unknown'} · no inferred phase`,
     '',
     `Unique advice requests: ${samples.length}`,
     `HTTP attempts: ${attempts.length ? attempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${attempts.length}/${samples.length}`,
@@ -147,6 +272,7 @@ export const formatRouterUISnapshot = (
       : tab === 'settings'
         ? [
             activityRoutingSummary(snapshot),
+            'TUI Routes edits one activity/tier cell; session overrides queue next user turn.',
             'Configured activity overrides · not actual',
             ...activityRouteLines(snapshot),
             'Text eligibility only; generation rechecks input, context and authentication.',
@@ -173,6 +299,7 @@ export class RouterUIDraft {
   message = '';
   busy = false;
   private undoChanges: RouterUIControlChange[] = [];
+  private routeChanges = new Map<string, RouterUIRouteCellChange>();
   constructor(private readonly adapters: RouterUIAdapters) {
     const snapshot = adapters.getSnapshot();
     this.profile = snapshot.profile;
@@ -186,6 +313,139 @@ export class RouterUIDraft {
     this.message = 'Draft discarded. Actual route unchanged.';
   };
   dirty = (): RouterUIControlChange[] => changes(this.base, this.draft);
+  routeState = (
+    activity: RouterUIRouteCell['activity'],
+    tier: RouterUIRouteCell['tier'],
+  ): RouterUIRouteCellState => {
+    const cell = this.adapters
+      .getSnapshot()
+      .routeCells.find(
+        (entry) => entry.activity === activity && entry.tier === tier,
+      );
+    if (!cell) return { state: 'missing', fallbacks: [] };
+    const change = this.routeChanges.get(routeCellKey(activity, tier));
+    return change
+      ? routeStateForChange(change, cell)
+      : cloneRouteState(cell.pending ?? cell.current);
+  };
+  editRoute = (
+    activity: RouterUIRouteCell['activity'],
+    tier: RouterUIRouteCell['tier'],
+    selection: RouterUIRouteSelection,
+  ): void => {
+    const snapshot = this.adapters.getSnapshot();
+    const cell = snapshot.routeCells.find(
+      (entry) => entry.activity === activity && entry.tier === tier,
+    );
+    if (!cell) return;
+    const key = routeCellKey(activity, tier);
+    const existing = this.routeChanges.get(key);
+    const before = cloneRouteState(
+      existing?.before ?? cell.pending ?? cell.current,
+    );
+    const current = this.routeState(activity, tier);
+    const after: RouterUIRouteSelection = {
+      model: selection.model,
+      thinking: selection.thinking,
+      fallbacks: [...(selection.fallbacks ?? current.fallbacks)],
+    };
+    const nextState: RouterUIRouteCellState = {
+      state: 'override',
+      model: after.model,
+      thinking: after.thinking,
+      fallbacks: [...(after.fallbacks ?? [])],
+    };
+    if (routeStateEqual(nextState, before)) {
+      this.routeChanges.delete(key);
+      return;
+    }
+    if (routeTargetEqual(nextState, cell.generic)) {
+      if (routeStateEqual(cell.generic, before)) this.routeChanges.delete(key);
+      else
+        this.routeChanges.set(key, {
+          activity,
+          tier,
+          before,
+          after: undefined,
+        });
+      return;
+    }
+    this.routeChanges.set(key, { activity, tier, before, after });
+  };
+  resetRoute = (
+    activity: RouterUIRouteCell['activity'],
+    tier: RouterUIRouteCell['tier'],
+  ): void => {
+    const snapshot = this.adapters.getSnapshot();
+    const cell = snapshot.routeCells.find(
+      (entry) => entry.activity === activity && entry.tier === tier,
+    );
+    if (!cell) return;
+    const key = routeCellKey(activity, tier);
+    const existing = this.routeChanges.get(key);
+    const before = cloneRouteState(
+      existing?.before ?? cell.pending ?? cell.current,
+    );
+    if (before.state !== 'override') {
+      this.routeChanges.delete(key);
+      return;
+    }
+    if (routeStateEqual(before, cell.generic)) this.routeChanges.delete(key);
+    else
+      this.routeChanges.set(key, { activity, tier, before, after: undefined });
+  };
+  dirtyRoutes = (): RouterUIRouteCellChange[] =>
+    [...this.routeChanges.values()].filter((change) => {
+      const cell = this.adapters
+        .getSnapshot()
+        .routeCells.find(
+          (entry) =>
+            entry.activity === change.activity && entry.tier === change.tier,
+        );
+      return (
+        cell &&
+        !routeStateEqual(routeStateForChange(change, cell), change.before)
+      );
+    });
+  discardRoutes = (): void => {
+    this.routeChanges.clear();
+    this.message = 'Route draft discarded. Actual route unchanged.';
+  };
+  applyRoutes = async (): Promise<void> => {
+    if (this.busy) return;
+    const patch = this.dirtyRoutes();
+    if (!patch.length) {
+      this.message = 'No route changes.';
+      return;
+    }
+    if (this.adapters.getSnapshot().profile !== this.profile) {
+      this.message = 'Profile changed: reopen inspector.';
+      return;
+    }
+    this.busy = true;
+    try {
+      const result = await this.adapters.applyRoutes({
+        profile: this.profile,
+        changes: patch,
+      });
+      if (result === 'conflict') {
+        this.message = 'Routes changed outside editor. Discard and retry.';
+        return;
+      }
+      if (result === 'invalid') {
+        this.message =
+          'Route target is unknown/ineligible or would remove route coverage.';
+        return;
+      }
+      this.routeChanges.clear();
+      this.message =
+        'Routes queued for next user turn. Actual route unchanged.';
+    } catch {
+      this.message = 'Routes could not be applied.';
+    } finally {
+      this.busy = false;
+    }
+  };
   canUndo = (): boolean => this.undoChanges.length > 0;
   apply = async (): Promise<void> => {
     if (this.busy) return;
@@ -272,6 +532,17 @@ export class RouterUIInspector implements Component {
   private history: readonly RouterUIHistoryEntry[];
   private readonly budgetInput = new Input();
   private readonly timeoutInput = new Input();
+  private readonly routeSearchInput: Input;
+  private routesOpen = false;
+  private routeFocus = 0;
+  private routeSelectionInitialized = false;
+  private routeCellSelection: {
+    activity: RouterUIRouteCell['activity'];
+    tier: RouterUIRouteCell['tier'];
+  } = { activity: 'code', tier: 'medium' };
+  private routeModal: 'cells' | 'models' | 'efforts' | undefined;
+  private routeList: SelectList | undefined;
+  private routeSearchFocused = true;
   private readonly abort = (): void => this.close('close');
   constructor(
     private readonly tui: TUI,
@@ -286,12 +557,39 @@ export class RouterUIInspector implements Component {
     this.snapshot = adapters.getSnapshot();
     this.history = this.snapshot.history;
     this.usage = formatRouterUIUsage(this.history);
+    this.routeSearchInput = new Input({
+      placeholder: 'Search physical chat models',
+      placeholderStyle: (text) => this.theme.fg('dim', text),
+    });
+    const initialCell =
+      this.snapshot.routeCells.find(
+        (cell) => (cell.pending ?? cell.current).state === 'override',
+      ) ?? this.snapshot.routeCells[0];
+    if (initialCell) {
+      this.routeCellSelection = {
+        activity: initialCell.activity,
+        tier: initialCell.tier,
+      };
+      this.routeSelectionInitialized = true;
+    }
     this.syncInputs();
     this.unsubscribe = adapters.subscribe(this.refresh);
     adapters.signal?.addEventListener('abort', this.abort, { once: true });
     if (adapters.signal?.aborted) this.close('close');
   }
   currentTab = () => (['now', 'usage', 'settings'] as const)[this.tab] ?? 'now';
+  routeEditorState = () => ({
+    open: this.routesOpen,
+    cell: { ...this.routeCellSelection },
+  });
+  restoreRouteEditor = (
+    open: boolean,
+    cell: typeof this.routeCellSelection,
+  ): void => {
+    this.routesOpen = open;
+    this.routeCellSelection = { ...cell };
+    this.routeFocus = 0;
+  };
   selectTab = (name: string): void => {
     this.tab = Math.max(
       0,
@@ -303,6 +601,26 @@ export class RouterUIInspector implements Component {
   refresh = (): void => {
     if (this.disposed) return;
     this.snapshot = this.adapters.getSnapshot();
+    if (
+      !this.routeSelectionInitialized ||
+      !this.snapshot.routeCells.some(
+        (cell) =>
+          cell.activity === this.routeCellSelection.activity &&
+          cell.tier === this.routeCellSelection.tier,
+      )
+    ) {
+      const initialCell =
+        this.snapshot.routeCells.find(
+          (cell) => (cell.pending ?? cell.current).state === 'override',
+        ) ?? this.snapshot.routeCells[0];
+      if (initialCell) {
+        this.routeCellSelection = {
+          activity: initialCell.activity,
+          tier: initialCell.tier,
+        };
+        this.routeSelectionInitialized = true;
+      }
+    }
     if (this.snapshot.profile !== this.editor.profile) {
       this.close('close');
       return;
@@ -322,12 +640,19 @@ export class RouterUIInspector implements Component {
     this.timeoutInput.setValue(String(this.editor.draft.timeout));
   };
   private fields = (): readonly (keyof RouterUIControls)[] =>
-    this.tab === 2 ? (this.advanced ? keys : ['pin']) : [];
+    this.routesOpen
+      ? []
+      : this.tab === 2
+        ? this.advanced
+          ? keys
+          : ['pin']
+        : [];
   private actions = (): string[] => [
     ...(this.tab === 0 ? ['Why this route?'] : []),
     ...(this.tab === 2
       ? [
           this.advanced ? 'Less settings' : 'Advanced',
+          ...(this.advanced ? ['Routes'] : []),
           ...(this.editor.dirty().length ? ['Apply', 'Discard'] : []),
           ...(this.editor.canUndo() && !this.editor.dirty().length
             ? ['Undo']
@@ -336,6 +661,366 @@ export class RouterUIInspector implements Component {
       : []),
     'Done',
   ];
+  private selectedRouteCell = (): RouterUIRouteCell | undefined =>
+    this.snapshot.routeCells.find(
+      (cell) =>
+        cell.activity === this.routeCellSelection.activity &&
+        cell.tier === this.routeCellSelection.tier,
+    );
+  private routeSelectTheme = () => ({
+    selectedPrefix: (text: string) => this.theme.fg('accent', text),
+    selectedText: (text: string) => this.theme.fg('accent', text),
+    description: (text: string) => this.theme.fg('muted', text),
+    scrollInfo: (text: string) => this.theme.fg('dim', text),
+    noMatch: (text: string) => this.theme.fg('warning', text),
+  });
+  private closeRouteModal = (): void => {
+    this.routeModal = undefined;
+    this.routeList = undefined;
+    this.routeSearchFocused = true;
+    this.scroll = 0;
+  };
+  private openCellPicker = (): void => {
+    const cells = this.snapshot.routeCells;
+    this.routeModal = 'cells';
+    this.scroll = 0;
+    this.routeList = new SelectList(
+      cells.map((cell) => {
+        const state = this.editor.routeState(cell.activity, cell.tier);
+        return {
+          value: routeCellKey(cell.activity, cell.tier),
+          label: routeCellKey(cell.activity, cell.tier),
+          description: `${state.state} · ${state.model ?? 'not configured'} · effort ${state.thinking ?? '—'}`,
+        };
+      }),
+      8,
+      this.routeSelectTheme(),
+    );
+    const index = cells.findIndex(
+      (cell) =>
+        cell.activity === this.routeCellSelection.activity &&
+        cell.tier === this.routeCellSelection.tier,
+    );
+    if (index >= 0) this.routeList.setSelectedIndex(index);
+    this.routeList.onSelect = (item) => {
+      const selected = cells.find(
+        (cell) => routeCellKey(cell.activity, cell.tier) === item.value,
+      );
+      if (selected)
+        this.routeCellSelection = {
+          activity: selected.activity,
+          tier: selected.tier,
+        };
+      this.closeRouteModal();
+      this.routeFocus = 0;
+    };
+    this.routeList.onCancel = this.closeRouteModal;
+  };
+  private physicalChatModels = () =>
+    this.snapshot.chatModels.filter((model) => {
+      const provider = model.model.slice(0, model.model.indexOf('/'));
+      return provider.length > 0 && provider !== 'router';
+    });
+  private rebuildModelList = (): void => {
+    const query = this.routeSearchInput.getValue().trim().toLocaleLowerCase();
+    const models = this.physicalChatModels().filter(
+      (model) =>
+        !query ||
+        model.model.toLocaleLowerCase().includes(query) ||
+        model.name.toLocaleLowerCase().includes(query),
+    );
+    this.routeList = new SelectList(
+      models.map((model) => ({
+        value: model.model,
+        label: model.model,
+        description: model.name,
+      })),
+      8,
+      this.routeSelectTheme(),
+    );
+    const current = this.editor.routeState(
+      this.routeCellSelection.activity,
+      this.routeCellSelection.tier,
+    ).model;
+    const selected = models.findIndex((model) => model.model === current);
+    if (selected >= 0) this.routeList.setSelectedIndex(selected);
+    this.routeList.onSelect = (item) => {
+      const model = models.find((entry) => entry.model === item.value);
+      if (!model) return;
+      const currentState = this.editor.routeState(
+        this.routeCellSelection.activity,
+        this.routeCellSelection.tier,
+      );
+      const tierEffort =
+        this.routeCellSelection.tier === 'micro'
+          ? 'off'
+          : this.routeCellSelection.tier;
+      const thinking = model.efforts.includes(
+        currentState.thinking ?? tierEffort,
+      )
+        ? (currentState.thinking ?? tierEffort)
+        : model.efforts.includes(tierEffort)
+          ? tierEffort
+          : model.efforts[0];
+      if (!thinking) {
+        this.editor.message = 'Selected model has no supported effort levels.';
+        this.closeRouteModal();
+        return;
+      }
+      this.editor.editRoute(
+        this.routeCellSelection.activity,
+        this.routeCellSelection.tier,
+        {
+          model: model.model,
+          thinking,
+          fallbacks: currentState.fallbacks,
+        },
+      );
+      this.closeRouteModal();
+      this.routeFocus = 1;
+    };
+    this.routeList.onCancel = this.closeRouteModal;
+  };
+  private openModelPicker = (): void => {
+    this.routeModal = 'models';
+    this.scroll = 0;
+    this.routeSearchInput.setValue('');
+    this.routeSearchFocused = true;
+    this.rebuildModelList();
+  };
+  private openEffortPicker = (): void => {
+    const current = this.editor.routeState(
+      this.routeCellSelection.activity,
+      this.routeCellSelection.tier,
+    );
+    const model = this.physicalChatModels().find(
+      (entry) => entry.model === current.model,
+    );
+    if (!model) {
+      this.editor.message = 'Choose a registered physical chat model first.';
+      return;
+    }
+    this.routeModal = 'efforts';
+    this.scroll = 0;
+    this.routeList = new SelectList(
+      model.efforts.map((effort) => ({
+        value: effort,
+        label: effort,
+        description: `${model.model} supports ${effort}`,
+      })),
+      8,
+      this.routeSelectTheme(),
+    );
+    const selected = model.efforts.indexOf(current.thinking ?? 'off');
+    if (selected >= 0) this.routeList.setSelectedIndex(selected);
+    this.routeList.onSelect = (item) => {
+      const effort = model.efforts.find((entry) => entry === item.value);
+      if (effort)
+        this.editor.editRoute(
+          this.routeCellSelection.activity,
+          this.routeCellSelection.tier,
+          {
+            model: model.model,
+            thinking: effort,
+            fallbacks: current.fallbacks,
+          },
+        );
+      this.closeRouteModal();
+      this.routeFocus = 2;
+    };
+    this.routeList.onCancel = this.closeRouteModal;
+  };
+  private routeActions = (): string[] => [
+    'Cell',
+    'Model',
+    'Effort',
+    'Reset to generic',
+    'Apply routes',
+    'Discard routes',
+    'Back to Settings',
+  ];
+  private handleRouteInput = (data: string): void => {
+    if (matchesKey(data, 'escape')) {
+      if (this.routeModal) this.closeRouteModal();
+      else {
+        this.routesOpen = false;
+        this.focus =
+          this.actions().indexOf('Routes') + this.fields().length + 1;
+      }
+      this.tui.requestRender();
+      return;
+    }
+    if (this.interrupted(data)) {
+      this.close('close');
+      return;
+    }
+    if (this.routeModal) {
+      if (
+        this.routeModal === 'models' &&
+        (matchesKey(data, 'tab') || matchesKey(data, 'shift+tab'))
+      ) {
+        this.routeSearchFocused = !this.routeSearchFocused;
+      } else if (this.routeModal === 'models' && this.routeSearchFocused) {
+        if (matchesKey(data, 'return')) this.routeSearchFocused = false;
+        else {
+          const before = this.routeSearchInput.getValue();
+          this.routeSearchInput.handleInput(data);
+          if (before !== this.routeSearchInput.getValue())
+            this.rebuildModelList();
+        }
+      } else if (matchesKey(data, 'tab') || matchesKey(data, 'shift+tab')) {
+        if (this.routeModal === 'models') this.routeSearchFocused = true;
+      } else this.routeList?.handleInput(data);
+      this.tui.requestRender();
+      return;
+    }
+    if (
+      matchesKey(data, 'pageUp') ||
+      matchesKey(data, 'pageDown') ||
+      matchesKey(data, 'up') ||
+      matchesKey(data, 'down')
+    ) {
+      const upwards = matchesKey(data, 'pageUp') || matchesKey(data, 'up');
+      const page = matchesKey(data, 'pageUp') || matchesKey(data, 'pageDown');
+      this.scroll = Math.max(
+        0,
+        this.scroll + (upwards ? -1 : 1) * (page ? 5 : 1),
+      );
+    } else if (matchesKey(data, 'tab') || matchesKey(data, 'shift+tab')) {
+      const actions = this.routeActions();
+      this.routeFocus =
+        (this.routeFocus + (matchesKey(data, 'tab') ? 1 : actions.length - 1)) %
+        actions.length;
+    } else if (matchesKey(data, 'return')) {
+      switch (this.routeFocus) {
+        case 0:
+          this.openCellPicker();
+          break;
+        case 1:
+          this.openModelPicker();
+          break;
+        case 2:
+          this.openEffortPicker();
+          break;
+        case 3:
+          this.editor.resetRoute(
+            this.routeCellSelection.activity,
+            this.routeCellSelection.tier,
+          );
+          break;
+        case 4:
+          void this.editor.applyRoutes().then(() => {
+            if (!this.disposed) this.refresh();
+          });
+          break;
+        case 5:
+          this.editor.discardRoutes();
+          break;
+        case 6:
+          this.routesOpen = false;
+          this.routeFocus =
+            this.actions().indexOf('Routes') + this.fields().length + 1;
+          break;
+      }
+    }
+    this.tui.requestRender();
+  };
+  private routeContent = (width: number): string[] => {
+    if (this.routeModal === 'models') {
+      this.routeSearchInput.focused = this.focused && this.routeSearchFocused;
+      return [
+        this.theme.fg('accent', 'Select physical chat model · searchable'),
+        this.theme.fg('muted', 'Logical router models are excluded.'),
+        ...this.routeSearchInput.render(width),
+        ...(this.routeSearchFocused
+          ? [this.theme.fg('dim', 'Type to filter · Tab/Enter to results')]
+          : [this.theme.fg('dim', 'Tab to search · Enter selects · Esc back')]),
+        ...(this.routeList?.render(width) ?? []),
+      ];
+    }
+    if (this.routeModal === 'cells')
+      return [
+        this.theme.fg('accent', 'Choose activity / tier cell'),
+        this.theme.fg(
+          'dim',
+          'Sparse cells inherit the generic route until specialized.',
+        ),
+        ...(this.routeList?.render(width) ?? []),
+      ];
+    if (this.routeModal === 'efforts')
+      return [
+        this.theme.fg('accent', 'Choose an effort supported by this model'),
+        ...(this.routeList?.render(width) ?? []),
+      ];
+    const cell = this.selectedRouteCell();
+    const state = this.editor.routeState(
+      this.routeCellSelection.activity,
+      this.routeCellSelection.tier,
+    );
+    const current = cell?.current;
+    const effective = cell?.effectiveThinking;
+    const pending = cell?.pending;
+    const draft = this.editor
+      .dirtyRoutes()
+      .some(
+        (change) =>
+          change.activity === this.routeCellSelection.activity &&
+          change.tier === this.routeCellSelection.tier,
+      );
+    const tierOverride = cell?.tierEffortOverride;
+    const nextTierOverride = cell?.pendingTierEffortOverride;
+    const selected = (index: number, label: string) =>
+      this.theme.fg(
+        this.routeFocus === index ? 'accent' : 'muted',
+        `${this.routeFocus === index ? '›' : ' '} ${label}`,
+      );
+    return [
+      this.theme.fg('accent', 'Routes · sparse per-cell session overrides'),
+      this.theme.fg(
+        'muted',
+        'Actual generation is unchanged until the next user turn.',
+      ),
+      selected(
+        0,
+        `Cell: ${routeCellKey(this.routeCellSelection.activity, this.routeCellSelection.tier)}`,
+      ),
+      selected(1, `Model: ${state.model ?? 'not configured'}`),
+      selected(2, `Configured effort: ${state.thinking ?? 'not configured'}`),
+      `Cell state: ${state.state}${pending ? ' · queued' : ''}${draft ? ' · draft' : ''}`,
+      `Current configuration: ${current?.model ?? 'not configured'} · effort ${current?.thinking ?? '—'} · ${current?.state ?? 'missing'}`,
+      `Effective effort now: ${effective ?? 'unknown / unavailable'}`,
+      ...(tierOverride
+        ? [
+            this.theme.fg(
+              'warning',
+              `${this.routeCellSelection.tier} effort override ${tierOverride} applies to every activity; clear it to use this cell effort.`,
+            ),
+          ]
+        : []),
+      ...(nextTierOverride !== tierOverride
+        ? [
+            `After queued controls: tier-wide effort ${nextTierOverride ?? 'auto'}.`,
+          ]
+        : []),
+      ...(pending
+        ? [
+            `Next-user-boundary route: ${pending.model ?? 'not configured'} · effort ${pending.thinking ?? '—'} · ${pending.state}`,
+          ]
+        : []),
+      `Ordered fallbacks retained: ${state.fallbacks.join(' → ') || 'none'}`,
+      selected(3, 'Reset to generic / inherit'),
+      selected(4, 'Apply routes'),
+      selected(5, 'Discard route draft'),
+      selected(6, 'Back to Settings'),
+      ...(draft
+        ? [this.theme.fg('warning', 'Draft changes are not applied.')]
+        : []),
+      this.theme.fg(
+        'dim',
+        'Tab focus · Enter select · Esc back · model list excludes router recursion',
+      ),
+    ];
+  };
   private close = (result: 'close' | 'resize'): void => {
     if (this.disposed) return;
     this.dispose();
@@ -350,9 +1035,16 @@ export class RouterUIInspector implements Component {
   invalidate = (): void => {
     this.budgetInput.invalidate();
     this.timeoutInput.invalidate();
+    this.routeSearchInput.invalidate();
+    this.routeList?.invalidate();
   };
   handleInput = (data: string): void => {
     if (this.disposed) return;
+    if (this.routesOpen) {
+      if (this.editor.busy && !matchesKey(data, 'escape')) return;
+      this.handleRouteInput(data);
+      return;
+    }
     if (matchesKey(data, 'escape') || this.interrupted(data)) {
       this.close('close');
       return;
@@ -397,17 +1089,7 @@ export class RouterUIInspector implements Component {
         matchesKey(data, 'right') ||
         matchesKey(data, 'left'))
     ) {
-      const choices =
-        field === 'advisor'
-          ? [
-              ...new Set([
-                this.editor.draft.advisor,
-                ...this.snapshot.classifiers.map((model) => model.model),
-              ]),
-            ]
-          : field.startsWith('thinking')
-            ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
-            : ['auto', ...ROUTER_TIERS];
+      const choices = controlChoices(field, this.snapshot, this.editor.draft);
       const value =
         choices[
           (choices.indexOf(this.editor.draft[field]) +
@@ -421,6 +1103,11 @@ export class RouterUIInspector implements Component {
       if (action === 'Advanced' || action === 'Less settings') {
         this.advanced = !this.advanced;
         this.focus = this.advanced ? 2 : 1;
+        this.scroll = 0;
+      }
+      if (action === 'Routes') {
+        this.routesOpen = true;
+        this.routeFocus = 0;
         this.scroll = 0;
       }
       if (action === 'Apply')
@@ -459,15 +1146,34 @@ export class RouterUIInspector implements Component {
         (s.advised.model !== actual?.model ||
           s.advised.provider !== actual?.provider ||
           s.advised.thinking !== actual?.thinking ||
-          s.advised.tier !== actual?.tier);
+          s.advised.tier !== actual?.tier ||
+          s.advised.activity !== actual?.activity ||
+          s.advised.routeCell !== actual?.routeCell);
       return [
         muted(
           `${s.lifecycle === 'idle' ? 'Last generation' : 'Actual generation'} · ${s.lifecycle}`,
         ),
         heading(actual ? actual.model : 'unknown / no observed generation'),
-        ...(actual ? [`Tier ${actual.tier} · effort ${actual.thinking}`] : []),
+        ...(actual
+          ? [
+              this.theme.fg(
+                'success',
+                `${actual.activity ?? 'generic'} · ${actual.tier} · effort ${actual.thinking}`,
+              ),
+            ]
+          : []),
         this.theme.fg(routerTone(s), routeReason(s)),
-        ...(differs ? [`Advised (not actual): ${route(s.advised)}`] : []),
+        ...(differs
+          ? [this.theme.fg('warning', `Proposed · ${route(s.advised)}`)]
+          : []),
+        ...(s.pendingRoutes
+          ? [
+              this.theme.fg(
+                'warning',
+                'Next user turn: route edits queued (pending; actual unchanged)',
+              ),
+            ]
+          : []),
         ...(s.pendingControls
           ? [
               this.theme.fg(
@@ -512,14 +1218,26 @@ export class RouterUIInspector implements Component {
     if (this.tab === 1)
       return [
         heading('Observed routes · retained active branch'),
-        ...routeMix(s.history),
+        ...routeMix(s.history).map((line, index) =>
+          this.theme.fg(
+            (['dim', 'accent', 'success', 'warning'] as const)[index] ??
+              'muted',
+            line,
+          ),
+        ),
         '',
-        ...this.usage,
+        ...this.usage.map((line) =>
+          line.startsWith('Cache-read')
+            ? this.theme.fg('success', line)
+            : line.startsWith('Catalog cost')
+              ? this.theme.fg('accent', line)
+              : muted(line),
+        ),
       ];
     return [
       muted(activityRoutingSummary(s)),
       muted('Pin / effort / baseline: this profile.'),
-      muted('Advisor / deadline / budget: session-wide.'),
+      muted('Advisor / deadline / budget / switch policy: session-wide.'),
       muted('Apply queues the next user turn; not tool turns.'),
       ...(this.advanced
         ? [
@@ -557,6 +1275,19 @@ export class RouterUIInspector implements Component {
           ]),
     ];
   };
+  private statusMessage = (): string => {
+    if (this.routesOpen) {
+      if (this.editor.dirtyRoutes().length)
+        return 'Route draft pending · actual route unchanged';
+      return this.editor.message || 'Browse routes · no changes';
+    }
+    return (
+      validateRouterUIControls(this.editor.draft) ??
+      (this.editor.dirty().length
+        ? 'Draft pending · next user turn'
+        : this.editor.message || 'Browse only · no changes')
+    );
+  };
   render = (width: number): string[] => {
     if (this.tui.terminal.columns >= 100 !== this.wide) {
       queueMicrotask(() => this.close('resize'));
@@ -570,7 +1301,10 @@ export class RouterUIInspector implements Component {
       this.tui.terminal.rows - chromeRows - (framed ? 2 : 0),
     );
     const fields = this.fields();
-    this.focus = Math.min(this.focus, fields.length + this.actions().length);
+    const actions = this.routesOpen ? this.routeActions() : this.actions();
+    if (this.routesOpen)
+      this.routeFocus = Math.min(this.routeFocus, actions.length - 1);
+    else this.focus = Math.min(this.focus, fields.length + actions.length);
     const color = (selected: boolean, text: string): string =>
       this.theme.fg(selected ? 'accent' : 'muted', text);
     const header = [
@@ -579,44 +1313,63 @@ export class RouterUIInspector implements Component {
         .map((tab, i) =>
           color(
             i === this.tab,
-            `${this.focus === 0 && i === this.tab ? '›' : ''}${tab}`,
+            `${!this.routesOpen && this.focus === 0 && i === this.tab ? '›' : ''}${tab}`,
           ),
         )
         .join(' | '),
     ];
-    const status =
-      validateRouterUIControls(this.editor.draft) ??
-      (this.editor.dirty().length
-        ? 'Draft pending · next user turn'
-        : this.editor.message || 'Browse only · no changes');
+    const status = this.statusMessage();
     const footer = [
-      ...(this.tab === 2 &&
-      (this.editor.dirty().length || this.editor.message || this.editor.busy)
+      ...((
+        this.routesOpen
+          ? this.editor.dirtyRoutes().length ||
+            this.editor.message ||
+            this.editor.busy
+          : this.tab === 2 &&
+            (this.editor.dirty().length ||
+              this.editor.message ||
+              this.editor.busy)
+      )
         ? [
             this.theme.fg(
-              this.editor.dirty().length ? 'warning' : 'muted',
+              (
+                this.routesOpen
+                  ? this.editor.dirtyRoutes().length
+                  : this.editor.dirty().length
+              )
+                ? 'warning'
+                : 'muted',
               this.editor.busy ? 'Applying…' : status,
             ),
           ]
         : []),
-      this.actions()
-        .map((action, i) =>
-          color(
-            this.focus === fields.length + i + 1,
-            `${this.focus === fields.length + i + 1 ? '›' : ''}${action}`,
-          ),
-        )
+      actions
+        .map((action, i) => {
+          const selected = this.routesOpen
+            ? this.routeFocus === i
+            : this.focus === fields.length + i + 1;
+          return color(selected, `${selected ? '›' : ''}${action}`);
+        })
         .join(' | '),
-      this.theme.fg('dim', 'Esc close · Tab focus · ←→ tabs/value · PgUp/Dn'),
+      this.theme.fg(
+        'dim',
+        this.routesOpen
+          ? this.routeModal === 'models'
+            ? 'Tab search/results · Enter choose · Esc back'
+            : 'Esc back · Tab focus · Enter select · actual generation unchanged'
+          : 'Esc close · Tab focus · ←→ tabs/value · PgUp/Dn',
+      ),
     ];
-    const body = this.editor
-      .dirty()
-      .flatMap((change) =>
-        wrapTextWithAnsi(
-          `Draft ${change.key}: ${display(change.before)} → ${display(change.after)}`,
-          w,
-        ),
-      );
+    const body = this.routesOpen
+      ? this.routeContent(w).flatMap((line) => wrapTextWithAnsi(line, w))
+      : this.editor
+          .dirty()
+          .flatMap((change) =>
+            wrapTextWithAnsi(
+              `Draft ${change.key}: ${display(change.before)} → ${display(change.after)}`,
+              w,
+            ),
+          );
     let selectedStart = 0;
     let selectedHeight = 1;
     for (const [i, field] of fields.entries()) {
@@ -631,7 +1384,7 @@ export class RouterUIInspector implements Component {
           ...wrapTextWithAnsi(
             color(
               selected,
-              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'not configured') : display(this.editor.draft[field])}`,
+              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'not configured') : controlDisplay(field, this.editor.draft[field])}`,
             ),
             w,
           ),
@@ -642,10 +1395,14 @@ export class RouterUIInspector implements Component {
         selectedHeight = body.length - start;
       }
     }
-    body.push(...this.content().flatMap((line) => wrapTextWithAnsi(line, w)));
+    if (!this.routesOpen)
+      body.push(...this.content().flatMap((line) => wrapTextWithAnsi(line, w)));
     if (height < 7) {
       header.splice(0, header.length);
-      const action = this.actions()[this.focus - fields.length - 1];
+      const action =
+        actions[
+          this.routesOpen ? this.routeFocus : this.focus - fields.length - 1
+        ];
       footer.splice(
         0,
         footer.length,
@@ -653,7 +1410,7 @@ export class RouterUIInspector implements Component {
           action ? 'accent' : 'muted',
           action
             ? `›${action} · Enter · Tab · Esc`
-            : `Tab: ${this.actions().join('/')} · Esc`,
+            : `Tab: ${actions.join('/')} · Esc`,
         ),
       );
     }
@@ -662,7 +1419,7 @@ export class RouterUIInspector implements Component {
     const bodyHeight = Math.max(1, height - header.length - footer.length);
     this.scroll = Math.min(this.scroll, Math.max(0, body.length - bodyHeight));
     // Keep focused controls visible without resetting manually scrolled read-only content.
-    if (this.focus > 0 && this.focus <= fields.length) {
+    if (!this.routesOpen && this.focus > 0 && this.focus <= fields.length) {
       if (selectedStart < this.scroll) this.scroll = selectedStart;
       if (selectedStart + selectedHeight > this.scroll + bodyHeight)
         this.scroll = Math.max(0, selectedStart + selectedHeight - bodyHeight);
@@ -704,6 +1461,19 @@ export const openRouterInspector = async (
   let repeat = true;
   let advanced = false;
   let details = false;
+  const initialRouteCell =
+    adapters
+      .getSnapshot()
+      .routeCells.find(
+        (cell) => (cell.pending ?? cell.current).state === 'override',
+      ) ?? adapters.getSnapshot().routeCells[0];
+  let routeEditor = {
+    open: false,
+    cell: {
+      activity: initialRouteCell?.activity ?? ('code' as const),
+      tier: initialRouteCell?.tier ?? ('medium' as const),
+    },
+  };
   while (repeat && !adapters.signal?.aborted) {
     let component: RouterUIInspector | undefined;
     const wide = (terminal?.columns ?? process.stdout.columns ?? 80) >= 100;
@@ -723,6 +1493,7 @@ export const openRouterInspector = async (
           component.selectTab(initialTab);
           component.advanced = advanced;
           component.details = details;
+          component.restoreRouteEditor(routeEditor.open, routeEditor.cell);
           return component;
         },
         {
@@ -740,6 +1511,7 @@ export const openRouterInspector = async (
       initialTab = component?.currentTab() ?? initialTab;
       advanced = component?.advanced ?? advanced;
       details = component?.details ?? details;
+      routeEditor = component?.routeEditorState() ?? routeEditor;
     } finally {
       component?.dispose();
     }

@@ -32,11 +32,8 @@ const supportsReasoning = (
 ): boolean => {
   if (!modelRegistry) return false;
 
-  for (const tierConfig of [
-    profile,
-    ...Object.values(profile.activities ?? {}),
-  ].flatMap((cell) =>
-    ROUTER_TIERS.flatMap((tier) => (cell[tier] ? [cell[tier]] : [])),
+  for (const tierConfig of ROUTER_TIERS.flatMap((tier) =>
+    profile[tier] ? [profile[tier]] : [],
   )) {
     if (!tierConfig) continue;
     try {
@@ -53,6 +50,8 @@ export const registerRouterProvider = (
   pi: ExtensionAPI,
   state: {
     lastRegisteredModels: string;
+    disposeProvider?: (() => void) | undefined;
+    clearProviderReviews?: (() => void) | undefined;
     readonly requestEpoch?: number;
     readonly ownerSignal?: AbortSignal;
     readonly currentConfig: RouterConfig;
@@ -148,8 +147,21 @@ export const registerRouterProvider = (
   const modelsKey = JSON.stringify([state.requestEpoch, modelDefinitions]);
   if (state.lastRegisteredModels === modelsKey) return;
 
+  state.disposeProvider?.();
   const turnCache = createProviderTurnCache();
-  const registrationSignal = state.ownerSignal;
+  const registrationController = new AbortController();
+  const registrationSignal = state.ownerSignal
+    ? AbortSignal.any([state.ownerSignal, registrationController.signal])
+    : registrationController.signal;
+  registrationSignal.addEventListener('abort', turnCache.dispose, {
+    once: true,
+  });
+  state.clearProviderReviews = () => turnCache.clearReviewsExcept(undefined);
+  state.disposeProvider = () => {
+    registrationController.abort();
+    registrationSignal.removeEventListener('abort', turnCache.dispose);
+    turnCache.dispose();
+  };
   const registrationEpoch = state.requestEpoch;
   pi.registerProvider('router', {
     baseUrl: 'router://local',
@@ -163,6 +175,7 @@ export const registerRouterProvider = (
     ): AssistantMessageEventStream {
       const stream = createAssistantMessageEventStream();
       startRouterProviderStream({
+        registrationSignal,
         ...(registrationEpoch !== undefined ? { registrationEpoch } : {}),
         model,
         context,

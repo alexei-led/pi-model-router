@@ -60,6 +60,7 @@ interface ProviderStreamActions {
 }
 
 interface RouterStreamInput {
+  registrationSignal?: AbortSignal;
   registrationEpoch?: number;
   model: Model<Api>;
   context: Context;
@@ -158,6 +159,11 @@ const prepareStreamRequest = async (
     lastDecision: state.lastDecision,
     ...(options?.signal ? { signal: options.signal } : {}),
     cache,
+    onReview: (decision) => {
+      input.actions.recordDebugDecision(decision);
+      input.actions.persistState();
+      input.actions.updateStatus();
+    },
   });
   return { request, registry };
 };
@@ -313,7 +319,9 @@ export const startRouterProviderStream = (input: RouterStreamInput): void => {
   const epoch = input.registrationEpoch ?? input.state.requestEpoch;
   const ownerSignal = input.state.ownerSignal;
   const isCurrent = () =>
-    input.state.requestEpoch === epoch && !ownerSignal?.aborted;
+    input.state.requestEpoch === epoch &&
+    !ownerSignal?.aborted &&
+    !input.registrationSignal?.aborted;
   const signal =
     ownerSignal && input.options?.signal
       ? AbortSignal.any([ownerSignal, input.options.signal])
@@ -329,7 +337,12 @@ export const startRouterProviderStream = (input: RouterStreamInput): void => {
       if (isCurrent()) input.actions.updateStatus();
     },
     syncPiThinkingLevel: (level) => {
-      if (isCurrent()) input.actions.syncPiThinkingLevel(level);
+      if (
+        isCurrent() &&
+        input.state.routerEnabled &&
+        input.state.selectedProfile === input.model.id
+      )
+        input.actions.syncPiThinkingLevel(level);
     },
     beginRequest: (profile) => {
       const observe = isCurrent()

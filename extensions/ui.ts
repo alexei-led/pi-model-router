@@ -21,6 +21,7 @@ export { openRouterInspector } from './ui/inspector';
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
+  if (decision.reviewOnly) flags.push('review-only');
   if (decision.activity) flags.push(`activity=${decision.activity}`);
   else if (decision.routeCell)
     flags.push(`availability-cell=${decision.routeCell}`);
@@ -317,7 +318,10 @@ export const formatDecision = (decision: RoutingDecision): string => {
   const flagsStr = flags.length > 0 ? ` [${flags.join(',')}]` : '';
   const advisor = formatAdvisorDetail(decision);
   const generation = formatGenerationDetail(decision);
-  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}${generation ? ` [${generation}]` : ''}`;
+  const switchCost = decision.switchCost
+    ? `switch ${decision.switchCost.reason} · horizon ${decision.switchCost.horizonRequests} · stay ${decision.switchCost.stayUsd === undefined ? 'unknown' : `$${decision.switchCost.stayUsd.toFixed(4)}`} · target ${decision.switchCost.switchUsd === undefined ? 'unknown' : `$${decision.switchCost.switchUsd.toFixed(4)}`}${decision.proposedRoute ? ` · proposed ${decision.proposedRoute.tier}/${decision.proposedRoute.activity ?? 'generic'} ${decision.proposedRoute.model} [${decision.proposedRoute.thinking}]` : ''}`
+    : undefined;
+  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}${switchCost ? ` [${switchCost}]` : ''}${generation ? ` [${generation}]` : ''}`;
 };
 
 export const formatPinSummary = (
@@ -355,6 +359,7 @@ export const updateRouterUIStrip = (
   if (ctx.mode !== 'tui') return;
   const tone = routerTone(snapshot);
   const pending = snapshot.pendingControls;
+  const hasPending = pending !== undefined || snapshot.pendingRoutes === true;
   const reason = routeReason(snapshot);
   const state = snapshot.lifecycle === 'idle' ? 'last' : snapshot.lifecycle;
   const identity = (width: number): string => {
@@ -363,7 +368,11 @@ export const updateRouterUIStrip = (
     if (!route)
       return truncateToWidth(`Router / ${snapshot.profile} · ${state}`, width);
     const detail =
-      width >= 70 ? ` · ${route.tier} · effort ${route.thinking}` : '';
+      width >= 70
+        ? ` · ${route.activity ?? 'generic'} · ${route.tier} · effort ${route.thinking}`
+        : width >= 30
+          ? ` · ${route.activity ?? 'generic'}`
+          : '';
     const modelWidth = Math.max(1, width - visibleWidth(suffix + detail));
     const model =
       preferences.statusLine === 'detailed'
@@ -378,15 +387,22 @@ export const updateRouterUIStrip = (
   }
   if (!preferences.widgetEnabled) {
     ctx.ui.setWidget('router', undefined);
-    const suffix = pending ? ' · pending settings' : ` · ${reason}`;
+    const suffix = hasPending
+      ? ' · pending'
+      : snapshot.switchCost?.reason === 'cost-held'
+        ? ' · held'
+        : ['fallback', 'timeout', 'budget'].includes(snapshot.lifecycle)
+          ? ` · ${snapshot.lifecycle}`
+          : snapshot.advice?.outcome === 'selected'
+            ? ' · advised'
+            : '';
     const width = Math.max(1, process.stdout.columns ?? 80);
     ctx.ui.setStatus(
       'router',
       ctx.ui.theme.fg(
         tone,
         truncateToWidth(
-          identity(Math.max(1, width - (pending ? visibleWidth(suffix) : 0))) +
-            suffix,
+          identity(Math.max(1, width - visibleWidth(suffix))) + suffix,
           width,
         ),
       ),
@@ -400,10 +416,12 @@ export const updateRouterUIStrip = (
       const w = Math.max(1, width);
       const next = pending
         ? `Next user turn: ${pending.pin !== snapshot.controls.pin ? `pin ${pending.pin}` : 'settings changed'} (pending) · ${reason}`
-        : `${reason} · ${snapshot.profile}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
+        : snapshot.pendingRoutes
+          ? `Next user turn: route edits queued (pending) · ${reason}`
+          : `${reason} · ${snapshot.profile}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
       return [
         theme.fg(tone, truncateToWidth(identity(w), w)),
-        theme.fg(pending ? 'warning' : 'muted', truncateToWidth(next, w)),
+        theme.fg(hasPending ? 'warning' : 'muted', truncateToWidth(next, w)),
       ];
     },
   }));

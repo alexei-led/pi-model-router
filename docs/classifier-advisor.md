@@ -14,6 +14,7 @@ Enable the advisor in **user** `~/.pi/agent/model-router.json`, then approve tha
     "enabled": true,
     "model": "openai/gpt-6-luna",
     "timeoutMs": 10000,
+    "reviewEveryRequests": 4,
     "confidenceThreshold": 0.65,
     "probabilityThreshold": 0.8,
     "maxStateTokens": 3000,
@@ -47,7 +48,9 @@ Pi resolves credentials and executes the classifier API. This supports Pi classi
 
 The default deadline is 10 seconds and covers local context preparation plus classification. Caller cancellation aborts the operation and does not start generation. Pi retries according to `advisor.maxRetries` (default 1 retry), within the same total router deadline.
 
-The router makes one approved `modelRegistry.classify()` operation. Normally it
+An initial user request makes one approved `modelRegistry.classify()` operation and awaits it. On valid tool continuations, the router can make a separate background review every `advisor.reviewEveryRequests` requests (default 4; 0 disables). It never waits for that review before generation. A completed review is eligible only on the immediately following request; otherwise it expires. Session/branch/turn/config/policy/matrix changes invalidate it. Failed, uncertain or stale reviews keep the eligible incumbent instead of resetting a running task to the baseline. Initial new-user advice is not held by the previous task's cache economics; fresh in-loop proposals use the [switch policy](user-guide.md#read-costs-and-cache-data). Every completed review's allowlisted diagnostics can enter retained history, including reviews that never apply; unknown or late/unreported costs remain unknown, not free.
+
+Both initial choices and reviews use one approved `modelRegistry.classify()` operation. Normally it
 asks the existing typed `route` choice among eligible tier representatives and
 `uncertain`. With activity routing on and meaningful eligible specialization
 plans, it also asks a separate typed `activity` choice. These are independent
@@ -73,11 +76,11 @@ bypasses advice. Off/no meaningful overrides preserve the old route-only request
 and selection behavior. An effort override that erases activity differences also
 removes the activity question.
 
-A profile pin, the soft-budget policy, one effective plan, and tool continuations bypass advice. The advisor cannot introduce a route or change generation permissions.
+A profile pin and soft-budget policy bypass advice. One effective plan bypasses advice. Tool continuations reuse a valid route unless an eligible background review is ready at the next request. The advisor cannot introduce a route or change generation permissions.
 
 ## Privacy
 
-A classifier call sends bounded recent user/assistant text and permitted recent tool-result text. The extension excludes system prompts, tool definitions, thinking, tool arguments, image/binary blocks, and raw router configuration. Text filtering is **not redaction**; selected conversation text can contain private information.
+A classifier call sends the current user goal plus bounded recent assistant text and permitted text tool results, including the current tool loop, and configured previous dialogue. `advisor.context.currentLoopMessages` bounds current-loop messages (default 8). When loop messages exist, half the text budget is reserved for the goal so recent progress can remain visible. `toolResults` defaults to `last-error`: only the latest result when it failed. `last` sends one latest result, `none` excludes results, and opt-in `recent` sends bounded results from the current-loop window. Successful current-loop results do not revive a previous task's old error. History and tool token limits share the total text budget. The extension excludes system prompts, tool definitions, thinking, tool arguments, image/binary blocks, and raw router configuration. Text filtering is **not redaction**; selected conversation text can contain private information.
 
 Classifier models that accept images are supported by Pi, but the router does not attach transcript images to classification requests. Use explicit user/profile configuration to control whether the router sends text to an external classifier.
 

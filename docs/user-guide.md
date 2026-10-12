@@ -62,25 +62,24 @@ generation failure uses the error color. Colors always have text labels.
 
 Run **`/router`**, **`/router usage`** or **`/router settings`**.
 
-- **Now:** actual model and effort, routing explanation, recorded-cost budget
-  gauge and route-mix bars. Expand **Why this route?** for full model identities.
-- **Usage:** up to 50 retained decisions, unique advisor requests and cost
-  coverage. Bars show observed tiers, not answer quality.
-- **Settings:** pin first. **Advanced** exposes baseline, budget, per-tier effort
-  and registered Pi classifier selection with its deadline and read-only profile approvals.
+- **Now:** actual model, activity, tier and effort. A held proposal is labeled separately and explains its switch-cost estimate.
+- **Usage:** up to 50 retained decisions, route mix, observed activity labels, per-request catalog-cost sparkline and last measured cache-read share. These are observations, not quality or future-cache predictions.
+- **Settings:** pin first. **Advanced** exposes baseline, budget, all-activity per-tier effort, Pi classifier, deadline, review interval, switch horizon/sensitivity, strong-advice threshold and **Routes**.
   The separate Pi classifier path is shown when configured.
-  Settings also shows the read-only activity-routing mode and override count.
-  Advanced lists effective configured activity cells, their ordered fallback
-  declarations and first currently text-eligible attempt (or unavailable/unknown
-  state). Unlisted cells use generic tiers, if configured; mode off retains the
-  declarations but excludes them. These are not advised or actual routes, and
-  generation still rechecks request input, context fit and authentication.
+  Settings also shows the activity-routing mode and override count.
+  Adaptive switch controls queue until the next user turn. Changing review interval to 0 disables background reviews; it does not disable initial classifier advice.
+  **Routes** opens a native per-cell editor. Select an activity/tier, search registered physical chat models (logical `router/*` models are excluded), and choose an effort supported by that model. The editor labels inherited versus overridden cells and can reset a cell to generic inheritance. It retains the cell's ordered fallback chain. Edits use compare-and-set transactions and queue for the next user turn; browsing, drafting and applying pending settings do not change the actual route or write configuration files. The selector reads the public model registry only; it does not check credentials, call a classifier or change approval.
+  The read-only route summary lists effective configured activity cells, their ordered fallback declarations and first currently text-eligible attempt (or unavailable/unknown state). Unlisted cells use generic tiers, if configured; mode off retains the declarations but excludes them. These are not advised or actual routes, and generation still rechecks request input, context fit and authentication.
+  A per-tier effort override applies to every activity and takes precedence over a cell's configured effort. The editor shows both values; clear the tier override to use the cell effort.
 
 Use Left/Right on the tab row to change sections. Tab/Shift+Tab changes focus.
 On a selector, Left/Right or Enter changes the value. Numeric fields use normal
 text editing. Page Up/Down scrolls. Enter activates the focused action.
-Apply/Discard appear only with a changed draft. Undo appears after applying.
-Escape closes the inspector and discards unapplied edits.
+In Routes, Enter opens the native activity/tier, model or effort selector; model
+search uses the Input field, then Tab moves focus to the SelectList. Apply/Discard
+appear only with a changed draft. Undo appears after applying controls.
+Escape returns from a Routes selector to the editor, then from Routes to Settings;
+from the main inspector it closes and discards unapplied edits.
 
 The inspector is a content-sized right overlay at 100 columns or wider. It
 covers rather than reflows the transcript. Narrow terminals use a custom
@@ -99,11 +98,9 @@ request. It does not change the displayed actual route. Discard affects only
 the draft. Undo reverses only unchanged editor-owned fields. Conflicting edits
 are rejected rather than overwritten.
 
-Pin, effort and baseline are profile-scoped. Advisor, deadline and budget are
-session-wide and activate on the next user turn even after a profile switch.
+Pin, all-activity effort and baseline are profile-scoped. Per-cell activity route edits are session-only profile overrides. Advisor, deadline, budget, review cadence and switch-cost policy are session-wide and activate on the next user turn even after a profile switch.
 No configuration files are written. Activated pins/effort use branch-safe
-session persistence. Pending edits and baseline/advisor/deadline/budget
-overrides reset on reload, session replacement or restart. Use configuration
+session persistence. Pending route/control edits and baseline/advisor/deadline/budget/review/switch-policy session overrides reset on reload, session replacement or restart. Use configuration
 for durable settings.
 
 ![Queued controls in actual Pi](assets/router-ui/signal-settings-dark.png)
@@ -207,14 +204,18 @@ The [complete example](../model-router.example.json) shows aliases, all four tie
 | --- | --- |
 | `activityRouting` | `"on"` by default; `"off"` excludes activity overrides entirely. These are the only modes; there is no shadow mode. |
 | `maxSessionBudget` | Soft threshold for reported generation cost. Unpinned requests skip advisors and prefer eligible medium-or-lower tiers after this threshold. |
-| `advisor` | User-only Pi classifier model, enablement, bounded context, deadline and probability settings. See [classifier setup](classifier-advisor.md). |
-| `models` | Aliases with a `model` reference and optional `contextWindow` and `maxTokens`. |
+| `advisor` | User-only Pi classifier model, approval, bounded context, deadline, probability settings and in-loop review interval. See [classifier setup](classifier-advisor.md). |
+| `advisor.reviewEveryRequests` | Run a nonblocking classifier review every N valid tool-loop requests (default 4); 0 disables. A result applies only to the immediately following request. |
+| `switchPolicy.horizonRequests` | Cost-comparison horizon, 1–20 requests (default 5). |
+| `switchPolicy.costSensitivity` | 0 is opportunistic (accepts a larger estimated premium); 1 only accepts switches no more expensive than staying. Default 0.5. |
+| `switchPolicy.strongAdviceConfidence` | Minimum relevant classifier confidence that can override estimated switch cost. Default 0.9. Tier and activity confidence are independent. |
+| `models` | Aliases with a `model` reference, optional `contextWindow`/`maxTokens`, and exact `effortCacheSharing: shared\|separate\|unknown` metadata. Omitted metadata means unknown. |
 | `ui.statusLine` | `compact` by default. `detailed` adds the full provider/model reference and recorded catalog cost, still within two widget lines. |
 
 Budgets and model capacities must be positive, finite numbers. Invalid values are ignored with a warning.
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
 Without an eligible lower tier, the budget policy keeps an eligible baseline.
-The classifier deadline defaults to 10 seconds. An unavailable model, rejected answer, timeout or provider error selects the local baseline. Profile approval is required for the exact configured classifier model.
+The initial classifier deadline defaults to 10 seconds. An unavailable model, rejected answer, timeout or provider error on initial selection uses the local baseline; a failed background review keeps the eligible incumbent. Profile approval is required for the exact configured classifier model.
 
 ## Activity routes
 
@@ -262,11 +263,7 @@ first exclude high when any eligible medium-or-lower cell exists. Pins always
 use the generic tier and bypass activity advice; an unavailable generic pin
 errors even if a specialization could run.
 
-Each new task or user-role steering message can receive fresh advice; tool
-continuations never request it. Only a meaningful eligible override adds an
-activity question. See [independent classifier answers](classifier-advisor.md#bounds-and-selection).
-The selected cell's ordered fallback chain stays with the actual route through
-same-turn reuse and tool continuations. Logs/inspector routes distinguish
+Each new task or user-role steering message can receive initial advice. During a valid tool loop, periodic background reviews use the current task goal and bounded recent loop progress. They never delay the current generation; a completed result can change the route on the next request only, then expires. A held, failed or stale review keeps the eligible incumbent. Pins, budget limits, invalid continuations and Google thought-signature constraints retain their existing safeguards. Only a meaningful eligible override adds an activity question. See [independent classifier answers](classifier-advisor.md#bounds-and-selection). Each selected cell's ordered fallback chain remains immutable for that generation request. Logs/inspector routes distinguish
 `activity` (validated advice) from `availability cell` (local provenance, not
 an inferred activity). `/router status` reports the configuration mode.
 
@@ -283,15 +280,15 @@ An attempt without terminal usage makes the request total unknown. The session t
 Zero placeholder tariffs do not establish free generation.
 Catalog prices do not establish subscription charges.
 
-The shadow comparison does not control routes or predict savings.
-It assumes either all-cache-read input or all-new input, plus the same output tokens.
-Missing tariffs, an unknown previous model, and router-side truncation suppress the comparison.
+The diagnostics-only shadow comparison still does not predict savings. Fresh in-loop advice separately estimates stay versus switching over the configured horizon: the first target request is cold (using the greater of ordinary input/cache-write catalog cost, with request-wide output pricing); later target requests and staying use the same last-observed read-share scenario, or an explicit all-read scenario if no share is known. Output volume is reused from the latest request. Rebuild premium and steady generation-price difference are separate diagnostics. Initial new-user advice is not held by the previous task's estimate. This is an explicit catalog scenario, not a prediction, invoice, cache-hit promise, or quality score.
+
+Same-model effort changes have no estimated rebuild penalty only when the operator declares `effortCacheSharing: "shared"` for the exact model/backend currently configured. This is not provider verification and never means generation or extra reasoning tokens are free. `"separate"` prices the switch like a cold route change. Missing or conflicting metadata means `unknown`: the effort change is allowed, but the UI does not claim cache preservation. Cross-model switches with missing/placeholder rates also remain eligible and are marked cost-unknown; missing price is not treated as free evidence. Strong tier/activity evidence above `strongAdviceConfidence` can override a catalog cost hold.
 The [evaluation](evaluation.md) separates observed use from hypothetical cost.
 
 ## Sessions and history
 
-Pins, costs, display controls, and recent decisions follow the Pi session branch.
-Debug collection retains the last 50 decisions. Turning collection off preserves existing history and the latest decision.
+Pins, costs, display controls, and recent decisions follow the Pi session branch. Adaptive switch session overrides reset on reload or session replacement; put durable policy in configuration.
+Debug collection retains the last 50 generation/review observations. Usage separates generation decisions from terminal classifier diagnostics and deduplicates classifier IDs, including reviews that expired or did not apply. Turning collection off preserves existing history and the latest decision.
 
 An explicit startup `--model` takes priority.
 Otherwise, a resumed branch uses its saved state.

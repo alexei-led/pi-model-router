@@ -22,6 +22,10 @@ const controls: RouterUIControls = {
   budget: 5,
   advisor: undefined,
   timeout: 1500,
+  reviewEveryRequests: 4,
+  costHorizon: 5,
+  costSensitivity: 0.5,
+  strongAdviceConfidence: 0.9,
   thinkingHigh: undefined,
   thinkingMedium: undefined,
   thinkingLow: undefined,
@@ -41,8 +45,10 @@ const fixture = () => {
     eligible: {},
     activityRouting: 'on',
     activityCells: [],
+    routeCells: [],
     history: [],
     classifiers: [],
+    chatModels: [],
     privacy: {
       advisorEnabled: false,
       approvedModels: [],
@@ -60,6 +66,7 @@ const fixture = () => {
         unsubscribe();
       };
     },
+    applyRoutes: vi.fn(async () => 'applied' as const),
     applyControls: vi.fn(async (transaction: RouterUIControlTransaction) => {
       const current = snapshot.pendingControls ?? snapshot.controls;
       if (
@@ -132,6 +139,36 @@ describe('Signal Panel', () => {
     },
   );
 
+  it('keeps the framed route row and its padding on the panel background', () => {
+    const f = fixture();
+    Object.assign(f.theme, {
+      bg: (color: string, text: string) =>
+        `\x1b[${color === 'toolPendingBg' ? '47' : '42'}m${text}\x1b[49m`,
+    });
+    const row = f.panel.render(80).find((line) => line.includes('effort high'));
+    expect(row).toBeDefined();
+    let background = 'default';
+    const cells: string[] = [];
+    for (const chunk of (row ?? '').split('\x1b')) {
+      const sgr = /^\[(\d+)m/u.exec(chunk);
+      if (sgr) background = sgr[1] === '49' ? 'default' : (sgr[1] ?? 'default');
+      const text = sgr ? chunk.slice(sgr[0].length) : chunk;
+      cells.push(...Array.from(text, () => background));
+    }
+    expect(cells).toEqual(Array(cells.length).fill('47'));
+    f.panel.dispose();
+  });
+
+  it('shows queued route changes in Now without changing the actual model', () => {
+    const f = fixture();
+    f.update({ pendingRoutes: true });
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('route edits queued');
+    expect(text).toContain('actual unchanged');
+    expect(text).toContain('漢字');
+    f.panel.dispose();
+  });
+
   it('uses three sections with no edit actions while browsing', () => {
     const f = fixture();
     const text = f.panel.render(80).join('\n');
@@ -141,6 +178,17 @@ describe('Signal Panel', () => {
     expect(text).not.toContain('Classifier');
     expect(text).not.toContain('Apply');
     expect(text).not.toContain('Discard');
+    f.panel.dispose();
+  });
+  it('shows adaptive review and switch-policy controls in Advanced settings', () => {
+    const f = fixture();
+    f.panel.selectTab('settings');
+    f.panel.advanced = true;
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('Classifier review interval');
+    expect(text).toContain('Cost comparison horizon');
+    expect(text).toContain('Switch-cost sensitivity');
+    expect(text).toContain('Strong-advice override threshold');
     f.panel.dispose();
   });
   it('starts Settings with only pin visible until Advanced is opened', () => {
@@ -201,7 +249,7 @@ describe('ui/inspector.ts', () => {
       'Approved models: none',
     );
     expect(await openRouterInspector(ctx, f.adapters, 'settings')).toContain(
-      'High effort:',
+      'High effort (all activities):',
     );
     expect(await openRouterInspector(ctx, f.adapters, 'usage')).toContain(
       'Retained active-branch history:',
@@ -306,8 +354,8 @@ describe('ui/inspector.ts', () => {
     });
     const text = f.panel.render(80).join('\n');
     expect(text).toContain('Actual generation · fallback');
-    expect(text).toContain('Advised (not actual): high');
-    expect(text).toContain('Tier medium');
+    expect(text).toContain('Proposed · high');
+    expect(text).toContain('generic · medium · effort high');
     expect(f.draft.draft.pin).toBe('high');
     f.panel.dispose();
   });
@@ -337,7 +385,21 @@ describe('ui/inspector.ts', () => {
       httpAttempts: 2,
     };
     const history = [
-      { advice, generationCostUsd: 0.2 },
+      {
+        advice,
+        generationCostUsd: 0.2,
+        inputTokens: 20,
+        outputTokens: 5,
+        cacheReadTokens: 70,
+        cacheWriteTokens: 10,
+        actual: {
+          tier: 'medium' as const,
+          activity: 'code' as const,
+          provider: 'test',
+          model: 'm',
+          thinking: 'high' as const,
+        },
+      },
       { advice, reuse: 'continuation' as const },
       {
         advice: {
@@ -352,6 +414,9 @@ describe('ui/inspector.ts', () => {
     expect(text).toContain('Route reuses: 1');
     expect(text).toContain('coverage 1/3');
     expect(text).toContain('unknown (not free)');
+    expect(text).toContain('Cache-read share, last observed request: 70%');
+    expect(text).toContain('Catalog cost / request:');
+    expect(text).toContain('Observed activity labels: code 1');
     expect(
       formatRouterUIUsage(Array.from({ length: 70 }, () => ({}))).join('\n'),
     ).toContain('50 decisions');
@@ -459,6 +524,182 @@ describe('ui/inspector.ts', () => {
   });
 });
 
+describe('native editable route cells in Settings', () => {
+  const routeCells: RouterUISnapshot['routeCells'] = [
+    {
+      activity: 'code',
+      tier: 'medium',
+      current: {
+        state: 'inherited',
+        model: 'test/base',
+        thinking: 'medium',
+        fallbacks: ['test/backup', 'test/last'],
+      },
+      generic: {
+        state: 'inherited',
+        model: 'test/base',
+        thinking: 'medium',
+        fallbacks: ['test/backup', 'test/last'],
+      },
+      effectiveThinking: 'medium',
+    },
+    {
+      activity: 'debug',
+      tier: 'medium',
+      current: {
+        state: 'override',
+        model: 'test/debug',
+        thinking: 'low',
+        fallbacks: [],
+      },
+      generic: {
+        state: 'inherited',
+        model: 'test/base',
+        thinking: 'medium',
+        fallbacks: ['test/backup', 'test/last'],
+      },
+      effectiveThinking: 'high',
+      tierEffortOverride: 'high',
+    },
+  ];
+  const chatModels: RouterUISnapshot['chatModels'] = [
+    {
+      model: 'openai/physical-chat',
+      name: 'Physical chat',
+      efforts: ['off', 'low', 'medium', 'high'],
+    },
+    {
+      model: 'router/auto',
+      name: 'Virtual router',
+      efforts: ['off', 'medium'],
+    },
+  ];
+  const openRoutes = (panel: RouterUIInspector) => {
+    panel.selectTab('settings');
+    panel.advanced = true;
+    // Tab, 13 all-activity settings, Less settings, Routes.
+    for (let i = 0; i < 15; i++) panel.handleInput('\t');
+    panel.handleInput('\r');
+  };
+  const browseRoutePages = (
+    panel: RouterUIInspector,
+    width: number,
+  ): string => {
+    const pages: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const text = panel.render(width).join('\n');
+      if (text === pages.at(-1)) break;
+      pages.push(text);
+      panel.handleInput('\x1b[6~');
+    }
+    return pages.join('\n');
+  };
+
+  it('provides a searchable physical model picker and supported cell-effort selector', async () => {
+    const f = fixture();
+    f.update({ routeCells, chatModels });
+    openRoutes(f.panel);
+    const overview = browseRoutePages(f.panel, 56);
+    expect(overview).toContain('Routes · sparse per-cell session overrides');
+    expect(overview).toContain('Configured effort: low');
+    expect(overview).toContain('Effective effort now: high');
+    expect(overview).toContain('applies to every');
+    expect(overview).toContain('activity; clear it to use this cell effort.');
+    f.panel.handleInput('\t'); // Model
+    f.panel.handleInput('\r'); // native model selector
+    expect(f.panel.render(56).join('\n')).toContain('openai/physical-chat');
+    expect(f.panel.render(56).join('\n')).not.toContain('router/auto');
+    for (const key of 'physical-chat') f.panel.handleInput(key);
+    f.panel.handleInput('\t'); // native SelectList results
+    f.panel.handleInput('\r'); // select model, draft only
+    expect(f.draft.routeState('debug', 'medium')).toMatchObject({
+      state: 'override',
+      model: 'openai/physical-chat',
+    });
+    expect(f.adapters.applyRoutes).not.toHaveBeenCalled();
+    f.panel.handleInput('\t'); // Effort
+    f.panel.handleInput('\r'); // supported effort choices
+    expect(f.panel.render(56).join('\n')).toContain(
+      'Choose an effort supported by this model',
+    );
+    f.panel.handleInput('\r'); // keep the selected supported low effort
+    expect(f.draft.routeState('debug', 'medium').thinking).toBe('low');
+    f.panel.handleInput('\t'); // Reset
+    f.panel.handleInput('\t'); // Apply routes
+    f.panel.handleInput('\r');
+    await Promise.resolve();
+    expect(f.adapters.applyRoutes).toHaveBeenCalledOnce();
+    const transaction = vi.mocked(f.adapters.applyRoutes).mock.calls[0]?.[0];
+    expect(transaction?.changes[0]?.after).toMatchObject({
+      model: 'openai/physical-chat',
+      thinking: 'low',
+      fallbacks: [],
+    });
+    expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
+    f.panel.dispose();
+  });
+
+  it('clears an override back to generic inheritance without applying while browsing', async () => {
+    const f = fixture();
+    f.update({ routeCells, chatModels });
+    openRoutes(f.panel);
+    expect(f.panel.render(56).join('\n')).toContain('Cell: debug/medium');
+    f.panel.handleInput('\t'); // Model
+    f.panel.handleInput('\t'); // Effort
+    f.panel.handleInput('\t'); // Reset to generic
+    f.panel.handleInput('\r');
+    expect(f.draft.routeState('debug', 'medium')).toMatchObject({
+      state: 'inherited',
+      model: 'test/base',
+      thinking: 'medium',
+      fallbacks: ['test/backup', 'test/last'],
+    });
+    expect(f.adapters.applyRoutes).not.toHaveBeenCalled();
+    expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
+    f.panel.handleInput('\t'); // Apply routes
+    f.panel.handleInput('\r');
+    await Promise.resolve();
+    expect(
+      vi.mocked(f.adapters.applyRoutes).mock.calls[0]?.[0].changes[0]?.after,
+    ).toBeUndefined();
+    f.panel.dispose();
+  });
+
+  it.each([40, 60, 80, 120])(
+    'keeps native route controls within %i columns at short heights and uses theme colors',
+    (columns) => {
+      const f = fixture();
+      f.panel.dispose();
+      Object.assign(f.tui.terminal, { columns, rows: 11 });
+      f.update({ routeCells, chatModels });
+      const panel = new RouterUIInspector(
+        f.tui,
+        f.theme,
+        f.adapters,
+        f.draft,
+        f.done,
+        columns >= 100,
+      );
+      openRoutes(panel);
+      const fg = vi.spyOn(f.theme, 'fg');
+      const width = columns >= 100 ? 56 : columns;
+      const lines = panel.render(width);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(lines.length).toBeLessThanOrEqual(11);
+      expect(fg).toHaveBeenCalledWith(
+        'accent',
+        expect.stringContaining('Routes'),
+      );
+      panel.handleInput('\r'); // cell picker
+      expect(
+        panel.render(width).every((line) => visibleWidth(line) <= width),
+      ).toBe(true);
+      panel.handleInput('\x1b');
+      panel.handleInput('\x1b');
+    },
+  );
+});
+
 describe('read-only activity routes in Settings', () => {
   const cells: RouterUISnapshot['activityCells'] = [
     {
@@ -505,7 +746,7 @@ describe('read-only activity routes in Settings', () => {
     f.panel.selectTab('settings');
     const normal = f.panel.render(80).join('\n');
     expect(normal).toContain(
-      'Activity routing: on · 2 override cells · read-only',
+      'Activity routing: on · 2 override cells · session Routes editor',
     );
     expect(normal).not.toContain('code/medium');
     expect(normal).not.toContain(' | Apply');

@@ -27,6 +27,7 @@ const options = {
   maxHistoryTokens: 1500,
   toolResults: 'last' as const,
   maxToolTokens: 250,
+  currentLoopMessages: 8,
 };
 
 describe('buildClassifierContext', () => {
@@ -178,6 +179,178 @@ describe('buildClassifierContext', () => {
     expect(evidence.state.recentToolEvidence[0]?.text).toBe('evidence');
   });
 
+  it('includes bounded current-loop assistant and configured tool evidence', () => {
+    const context: Context = {
+      messages: [
+        user('Implement retry handling, then update docs.'),
+        message({
+          content: [
+            { type: 'text', text: 'I am tracing the request lifecycle.' },
+          ],
+        }),
+        tool('One transient failure', true),
+        message({
+          content: [
+            {
+              type: 'text',
+              text: 'The retry now passes; I am moving to documentation.',
+            },
+          ],
+        }),
+        message({
+          content: [
+            { type: 'thinking', thinking: 'PRIVATE_THINKING' },
+            {
+              type: 'toolCall',
+              id: 'edit',
+              name: 'edit',
+              arguments: { secret: 'PRIVATE_ARGUMENT' },
+            },
+          ],
+        }),
+        tool('Changed extensions/provider.ts', false),
+      ],
+    };
+    const result = buildClassifierContext(context, 2000, {
+      ...options,
+      toolResults: 'recent',
+    });
+    expect(result.state.currentRequest.text).toBe(
+      'Implement retry handling, then update docs.',
+    );
+    expect(result.state.recentDialogue.map((entry) => entry.text)).toEqual([
+      'I am tracing the request lifecycle.',
+      'The retry now passes; I am moving to documentation.',
+    ]);
+    expect(result.state.recentToolEvidence.map((entry) => entry.text)).toEqual([
+      'One transient failure',
+      'Changed extensions/provider.ts',
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(
+      /PRIVATE_THINKING|PRIVATE_ARGUMENT/,
+    );
+    expect(
+      result.metrics.historyTokens + result.metrics.toolTokens,
+    ).toBeLessThanOrEqual(2000);
+  });
+
+  it('bounds current-loop messages and keeps the newest evidence within the shared budget', () => {
+    const context: Context = {
+      messages: [
+        user('Fix the failure.'),
+        ...Array.from({ length: 12 }, (_, index) =>
+          message({
+            content: [
+              {
+                type: 'text',
+                text: `PROGRESS_${index} ${'x'.repeat(400)}`,
+              },
+            ],
+          }),
+        ),
+        tool(`LATEST_RESULT ${'y'.repeat(400)}`, true),
+      ],
+    };
+    const result = buildClassifierContext(context, 500, {
+      ...options,
+      maxHistoryTokens: 300,
+      maxToolTokens: 250,
+      currentLoopMessages: 4,
+    });
+    const visible = JSON.stringify(result.state);
+    expect(visible).toContain('PROGRESS_11');
+    expect(visible).toContain('LATEST_RESULT');
+    expect(visible).not.toContain('PROGRESS_0');
+    expect(
+      result.metrics.currentRequestTokens +
+        result.metrics.historyTokens +
+        result.metrics.toolTokens,
+    ).toBeLessThanOrEqual(500);
+  });
+
+  it('bounds multiple recent tool results and keeps the newest evidence', () => {
+    const result = buildClassifierContext(
+      {
+        messages: [
+          user('Check the current work.'),
+          ...Array.from({ length: 4 }, (_, index) =>
+            tool(`RESULT_${index} ${'x'.repeat(4000)}`),
+          ),
+        ],
+      },
+      500,
+      { ...options, toolResults: 'recent', maxToolTokens: 250 },
+    );
+    expect(result.metrics.toolTokens).toBeLessThanOrEqual(250);
+    expect(
+      result.metrics.currentRequestTokens +
+        result.metrics.historyTokens +
+        result.metrics.toolTokens,
+    ).toBeLessThanOrEqual(500);
+    expect(JSON.stringify(result.state)).toContain('RESULT_3');
+  });
+
+  it('does not revive prior-task errors after a successful current-loop result', () => {
+    const result = buildClassifierContext(
+      {
+        messages: [
+          user('Old task'),
+          tool('OLD_PRIVATE_FAILURE', true),
+          user('New task'),
+          message({ content: [{ type: 'text', text: 'Current work' }] }),
+          tool('Current success'),
+        ],
+      },
+      1000,
+    );
+    expect(result.state.recentToolEvidence).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('OLD_PRIVATE_FAILURE');
+  });
+
+  it.each([
+    ['none', 0],
+    ['last', 1],
+    ['last-error', 0],
+    ['recent', 2],
+  ] as const)('keeps the %s tool-evidence exposure contract', (mode, count) => {
+    const result = buildClassifierContext(
+      {
+        messages: [
+          user('Current task'),
+          tool('First error', true),
+          tool('Last success'),
+        ],
+      },
+      1000,
+      { ...options, toolResults: mode },
+    );
+    expect(result.state.recentToolEvidence).toHaveLength(count);
+  });
+
+  it('reserves bounded progress context when the original goal is long', () => {
+    const result = buildClassifierContext(
+      {
+        messages: [
+          user(`GOAL ${'x'.repeat(20000)}`),
+          message({
+            content: [{ type: 'text', text: 'CURRENT_PROGRESS' }],
+          }),
+          tool('CURRENT_RESULT'),
+        ],
+      },
+      500,
+      { ...options, toolResults: 'last' },
+    );
+    expect(result.state.currentRequest.truncated).toBe(true);
+    expect(JSON.stringify(result.state)).toContain('CURRENT_PROGRESS');
+    expect(JSON.stringify(result.state)).toContain('CURRENT_RESULT');
+    expect(
+      result.metrics.currentRequestTokens +
+        result.metrics.historyTokens +
+        result.metrics.toolTokens,
+    ).toBeLessThanOrEqual(500);
+  });
+
   it('never carries an old failed result into a later unrelated turn', () => {
     const result = buildClassifierContext(
       {
@@ -193,8 +366,10 @@ describe('buildClassifierContext', () => {
       12000,
       options,
     );
-    expect(result.state.recentToolEvidence).toEqual([]);
-    expect(JSON.stringify(result)).not.toMatch(/OLD_FAILURE|FUTURE_RESULT/);
+    expect(result.state.recentToolEvidence).toEqual([
+      { text: 'FUTURE_RESULT', isError: true, truncated: false },
+    ]);
+    expect(JSON.stringify(result)).not.toContain('OLD_FAILURE');
   });
 
   it('excludes system prompts, tool schemas, arguments, thinking and binary blocks', () => {

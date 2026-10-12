@@ -22,6 +22,10 @@ const snapshot: RouterUISnapshot = {
     budget: 2,
     advisor: undefined,
     timeout: 1500,
+    reviewEveryRequests: 4,
+    costHorizon: 5,
+    costSensitivity: 0.5,
+    strongAdviceConfidence: 0.9,
     thinkingHigh: undefined,
     thinkingMedium: undefined,
     thinkingLow: undefined,
@@ -30,8 +34,10 @@ const snapshot: RouterUISnapshot = {
   eligible: {},
   activityRouting: 'on',
   activityCells: [],
+  routeCells: [],
   history: [],
   classifiers: [],
+  chatModels: [],
   privacy: { advisorEnabled: false, approvedModels: [], auth: 'unknown' },
 };
 
@@ -46,6 +52,23 @@ describe('Signal Panel presentation', () => {
     expect(routerTone({ ...snapshot, lifecycle: 'failed' })).toBe('error');
     expect(routerTone({ ...snapshot, lifecycle: 'timeout' })).toBe('warning');
   });
+  it('distinguishes a consumed review failure from reused initial diagnostics', () => {
+    const state = {
+      ...snapshot,
+      lifecycle: 'continuation' as const,
+      reuse: 'continuation' as const,
+      advice: {
+        advisor: 'fixture',
+        outcome: 'deadline' as const,
+        source: 'initial' as const,
+      },
+    };
+    expect(routeReason(state)).toBe('Tool route reused · no new advice');
+    expect(
+      routeReason({ ...state, advice: { ...state.advice, source: 'review' } }),
+    ).toContain('Background review deadline · current route retained');
+  });
+
   it('marks reused advice without presenting its old latency as a new request', () => {
     expect(
       routeReason({
@@ -64,6 +87,50 @@ describe('Signal Panel presentation', () => {
     expect(routeReason({ ...state, bypassReason: 'pinned' })).toBe(
       'Pinned route · advice skipped',
     );
+  });
+  it('explains held model proposals and effort-cache compatibility', () => {
+    const held = routeReason({
+      ...snapshot,
+      advised: {
+        tier: 'medium',
+        activity: 'docs',
+        provider: 'test',
+        model: 'docs',
+        thinking: 'low',
+      },
+      switchCost: {
+        reason: 'cost-held',
+        horizonRequests: 5,
+        stayUsd: 0.02,
+        switchUsd: 0.08,
+        incrementalUsd: 0.06,
+        confidenceOverride: false,
+      },
+    });
+    expect(held).toContain('held: $0.0800 vs $0.0200 over 5 requests');
+    expect(
+      routerTone({
+        ...snapshot,
+        switchCost: {
+          reason: 'cost-held',
+          horizonRequests: 5,
+          confidenceOverride: false,
+        },
+      }),
+    ).toBe('warning');
+    expect(
+      routeReason({
+        ...snapshot,
+        switchCost: {
+          reason: 'effort-cache-shared',
+          horizonRequests: 5,
+          stayUsd: 0,
+          switchUsd: 0,
+          incrementalUsd: 0,
+          confidenceOverride: false,
+        },
+      }),
+    ).toContain('cache-compatible');
   });
   it.each([0, 0.5, 1, 1.08])(
     'bounds bar fill but preserves the true budget ratio %s',
@@ -129,7 +196,7 @@ it('distinguishes classified activity from local availability-cell provenance', 
 describe('activity override presentation', () => {
   it('shows mode, generic inheritance and an explicit empty state', () => {
     expect(activityRoutingSummary(snapshot)).toBe(
-      'Activity routing: on · 0 override cells · read-only',
+      'Activity routing: on · 0 override cells · session Routes editor',
     );
     expect(activityRouteLines(snapshot)).toEqual([
       'Unlisted cells use generic tiers, if configured.',

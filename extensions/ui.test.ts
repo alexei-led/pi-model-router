@@ -247,6 +247,7 @@ describe('ui.ts lifecycle strip', () => {
             provider: 'test',
             model: 'model-medium',
             tier: 'medium',
+            activity: 'code',
             thinking: 'medium',
           },
           advice: {
@@ -259,6 +260,7 @@ describe('ui.ts lifecycle strip', () => {
       );
       const text = vi.mocked(ctx.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
       expect(text).toContain('model-medium');
+      expect(text).toContain('code');
       expect(visibleWidth(text)).toBeLessThanOrEqual(40);
     } finally {
       if (previous) Object.defineProperty(process.stdout, 'columns', previous);
@@ -321,6 +323,47 @@ describe('ui.ts lifecycle strip', () => {
     expect(widget(ctx)[0]).toContain('actual-medium');
     expect(widget(ctx)[1]).toContain('Next user turn: pin high');
   });
+  it('preserves held and pending route indicators in a detailed narrow footer', () => {
+    const ctx = context();
+    Object.assign(ctx, { mode: 'tui' });
+    const prior = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+    Object.defineProperty(process.stdout, 'columns', {
+      configurable: true,
+      value: 80,
+    });
+    try {
+      for (const pendingRoutes of [false, true]) {
+        updateRouterUIStrip(
+          ctx,
+          {
+            ...snapshot,
+            lifecycle: 'generating',
+            pendingRoutes,
+            actual: {
+              tier: 'high',
+              activity: 'code',
+              provider: 'anthropic',
+              model: 'claude-sonnet-4-5-20250929',
+              thinking: 'high',
+            },
+            switchCost: {
+              reason: 'cost-held',
+              horizonRequests: 5,
+              confidenceOverride: false,
+            },
+          },
+          { widgetEnabled: false, statusLine: 'detailed' },
+        );
+        const value = vi.mocked(ctx.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
+        expect(value).toContain(pendingRoutes ? 'pending' : 'held');
+        expect(visibleWidth(value)).toBeLessThanOrEqual(80);
+      }
+    } finally {
+      if (prior) Object.defineProperty(process.stdout, 'columns', prior);
+      else Reflect.deleteProperty(process.stdout, 'columns');
+    }
+  });
+
   it('falls back to one footer status when the widget is hidden', () => {
     const ctx = context();
     Object.assign(ctx, { mode: 'tui' });
@@ -341,6 +384,10 @@ describe('ui.ts lifecycle strip', () => {
       budget: undefined,
       advisor: 'classifier',
       timeout: 1500,
+      reviewEveryRequests: 4,
+      costHorizon: 5,
+      costSensitivity: 0.5,
+      strongAdviceConfidence: 0.9,
       thinkingHigh: undefined,
       thinkingMedium: undefined,
       thinkingLow: undefined,
@@ -349,8 +396,10 @@ describe('ui.ts lifecycle strip', () => {
     eligible: {},
     activityRouting: 'on',
     activityCells: [],
+    routeCells: [],
     history: [],
     classifiers: [],
+    chatModels: [],
     privacy: {
       advisorEnabled: false,
       approvedModels: [],

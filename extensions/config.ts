@@ -28,6 +28,7 @@ import type {
   RoutedTierConfig,
   RouterConfig,
   RouterProfile,
+  RouterSwitchPolicy,
   RouterTier,
 } from './types';
 import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
@@ -154,6 +155,7 @@ export const mergeConfig = (
     : mergedAdvisor;
   return {
     activityRouting: override.activityRouting ?? base.activityRouting,
+    switchPolicy: mergeRawValue(base.switchPolicy, override.switchPolicy),
     ui: mergeRawValue(base.ui, override.ui),
     advisor,
     debug: override.debug ?? base.debug,
@@ -228,6 +230,19 @@ export const normalizeModelsMap = (
 
     const reasoning =
       typeof entry.reasoning === 'boolean' ? entry.reasoning : undefined;
+    const effortCacheSharing =
+      entry.effortCacheSharing === 'shared' ||
+      entry.effortCacheSharing === 'separate' ||
+      entry.effortCacheSharing === 'unknown'
+        ? entry.effortCacheSharing
+        : undefined;
+    if (
+      entry.effortCacheSharing !== undefined &&
+      effortCacheSharing === undefined
+    )
+      warnings.push(
+        `Model definition "${alias}" has invalid effortCacheSharing. Ignored.`,
+      );
 
     let thinkingLevels: ThinkingLevel[] | undefined;
     if (Array.isArray(entry.thinkingLevels)) {
@@ -239,6 +254,7 @@ export const normalizeModelsMap = (
 
     result[alias] = {
       model,
+      effortCacheSharing,
       contextWindow,
       maxTokens,
       reasoning,
@@ -453,6 +469,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export const DEFAULT_ADVISOR_CONFIG = {
   timeoutMs: DEFAULT_CLASSIFIER_TIMEOUT_MS,
+  reviewEveryRequests: 4,
   confidenceThreshold: 0.65,
   probabilityThreshold: 0.8,
   maxStateTokens: 3000,
@@ -495,7 +512,11 @@ const normalizeClassifierContext = (
     !Number.isInteger(context.maxToolTokens) ||
     context.maxToolTokens < 0 ||
     context.maxToolTokens > MAX_CLASSIFIER_STATE_TOKENS ||
-    !['none', 'last', 'last-error'].includes(context.toolResults)
+    typeof context.currentLoopMessages !== 'number' ||
+    !Number.isSafeInteger(context.currentLoopMessages) ||
+    context.currentLoopMessages < 0 ||
+    context.currentLoopMessages > MAX_CLASSIFIER_CONTEXT_TURNS * 2 ||
+    !['none', 'last', 'last-error', 'recent'].includes(context.toolResults)
   )
     return undefined;
   return context;
@@ -516,6 +537,7 @@ export const normalizeAdvisorConfig = (
     'enabled',
     'model',
     'timeoutMs',
+    'reviewEveryRequests',
     'confidenceThreshold',
     'probabilityThreshold',
     'maxStateTokens',
@@ -539,6 +561,10 @@ export const normalizeAdvisorConfig = (
     !Number.isFinite(value.timeoutMs) ||
     value.timeoutMs <= 0 ||
     value.timeoutMs > MAX_TIMER_DELAY_MS ||
+    typeof value.reviewEveryRequests !== 'number' ||
+    !Number.isSafeInteger(value.reviewEveryRequests) ||
+    value.reviewEveryRequests < 0 ||
+    value.reviewEveryRequests > 1000 ||
     typeof value.confidenceThreshold !== 'number' ||
     !Number.isFinite(value.confidenceThreshold) ||
     value.confidenceThreshold < 0 ||
@@ -565,6 +591,7 @@ export const normalizeAdvisorConfig = (
     enabled: value.enabled === true,
     model,
     timeoutMs: value.timeoutMs,
+    reviewEveryRequests: value.reviewEveryRequests,
     confidenceThreshold: value.confidenceThreshold,
     probabilityThreshold: value.probabilityThreshold,
     maxStateTokens: value.maxStateTokens,
@@ -598,6 +625,54 @@ export const stripProjectAdvisorConfig = (
       'Ignored project advisor settings: classifier selection, tuning and profile approvals belong only in user config.',
     );
   return project;
+};
+
+const normalizeSwitchPolicy = (
+  raw: unknown,
+  warnings: string[],
+): RouterSwitchPolicy => {
+  const rawSwitchPolicy = isObjectRecord(raw) ? raw : {};
+  const horizonRequests =
+    rawSwitchPolicy.horizonRequests === undefined
+      ? 5
+      : typeof rawSwitchPolicy.horizonRequests === 'number'
+        ? rawSwitchPolicy.horizonRequests
+        : Number.NaN;
+  const costSensitivity =
+    rawSwitchPolicy.costSensitivity === undefined
+      ? 0.5
+      : typeof rawSwitchPolicy.costSensitivity === 'number'
+        ? rawSwitchPolicy.costSensitivity
+        : Number.NaN;
+  const strongAdviceConfidence =
+    rawSwitchPolicy.strongAdviceConfidence === undefined
+      ? 0.9
+      : typeof rawSwitchPolicy.strongAdviceConfidence === 'number'
+        ? rawSwitchPolicy.strongAdviceConfidence
+        : Number.NaN;
+  const validSwitchPolicy =
+    (raw === undefined || isObjectRecord(raw)) &&
+    Object.keys(rawSwitchPolicy).every((key) =>
+      ['horizonRequests', 'costSensitivity', 'strongAdviceConfidence'].includes(
+        key,
+      ),
+    ) &&
+    Number.isSafeInteger(horizonRequests) &&
+    horizonRequests >= 1 &&
+    horizonRequests <= 20 &&
+    Number.isFinite(costSensitivity) &&
+    costSensitivity >= 0 &&
+    costSensitivity <= 1 &&
+    Number.isFinite(strongAdviceConfidence) &&
+    strongAdviceConfidence >= 0 &&
+    strongAdviceConfidence <= 1;
+  if (raw !== undefined && !validSwitchPolicy)
+    warnings.push('Invalid switchPolicy; using defaults.');
+  const effectiveSwitchPolicy = validSwitchPolicy
+    ? { horizonRequests, costSensitivity, strongAdviceConfidence }
+    : { horizonRequests: 5, costSensitivity: 0.5, strongAdviceConfidence: 0.9 };
+
+  return effectiveSwitchPolicy;
 };
 
 export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
@@ -728,6 +803,11 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   if (raw.maxSessionBudget !== undefined && maxSessionBudget === undefined)
     warnings.push('Invalid maxSessionBudget. Ignored.');
 
+  const effectiveSwitchPolicy = normalizeSwitchPolicy(
+    raw.switchPolicy,
+    warnings,
+  );
+
   const statusLine = isObjectRecord(raw.ui) ? raw.ui.statusLine : undefined;
   if (
     raw.ui !== undefined &&
@@ -747,6 +827,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   return {
     config: {
       activityRouting: raw.activityRouting === 'off' ? 'off' : 'on',
+      switchPolicy: effectiveSwitchPolicy,
       ui: { statusLine: statusLine === 'detailed' ? 'detailed' : 'compact' },
       advisor: normalizeAdvisorConfig(raw.advisor, warnings),
       debug: typeof raw.debug === 'boolean' ? raw.debug : false,

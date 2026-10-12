@@ -2,6 +2,7 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { normalizeConfig } from '../config';
 import { model, required } from '../test/fixtures';
+import type { RouterThinkingByProfile } from '../types';
 import { createRouterUIRuntime } from './runtime';
 
 const setup = () => {
@@ -17,7 +18,7 @@ const setup = () => {
     selectedProfile: 'auto',
     routerEnabled: true,
     pinnedTierByProfile: {},
-    thinkingByProfile: {},
+    thinkingByProfile: {} as RouterThinkingByProfile,
     lastDecision: undefined,
     debugHistory: [],
     currentModelRegistry: {
@@ -26,19 +27,22 @@ const setup = () => {
         id: string,
       ): ReturnType<ExtensionContext['modelRegistry']['find']> =>
         model(id, { provider }),
-      getModelsOfType: (() => [
-        {
-          type: 'classifier',
-          provider: 'typesafe',
-          id: 'jev-latest',
-          name: 'Jev',
-          api: 'typesafe-system-one',
-          baseUrl: 'https://fixture.invalid',
-          input: ['text'],
-          contextWindow: 64000,
-          cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
-        },
-      ]) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'],
+      getModelsOfType: ((type: string) =>
+        type === 'classifier'
+          ? [
+              {
+                type: 'classifier',
+                provider: 'typesafe',
+                id: 'jev-latest',
+                name: 'Jev',
+                api: 'typesafe-system-one',
+                baseUrl: 'https://fixture.invalid',
+                input: ['text'],
+                contextWindow: 64000,
+                cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+              },
+            ]
+          : []) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'],
     },
   };
   const runtime = createRouterUIRuntime(state, () => undefined);
@@ -251,6 +255,39 @@ describe('router UI runtime boundary', () => {
   });
 });
 
+it('queues adaptive-review and switch-policy controls until the next user boundary', async () => {
+  const { state, runtime } = setup();
+  const before = runtime.adapters.getSnapshot().controls;
+  expect(
+    await runtime.adapters.applyControls({
+      profile: 'auto',
+      action: 'apply',
+      changes: [
+        {
+          key: 'advisor',
+          before: before.advisor,
+          after: 'typesafe/jev-latest',
+        },
+        { key: 'reviewEveryRequests', before: 4, after: 2 },
+        { key: 'costHorizon', before: 5, after: 10 },
+        { key: 'costSensitivity', before: 0.5, after: 0.25 },
+        { key: 'strongAdviceConfidence', before: 0.9, after: 0.95 },
+      ],
+    }),
+  ).toBe('applied');
+  expect(state.currentConfig.switchPolicy).toMatchObject({
+    horizonRequests: 5,
+    costSensitivity: 0.5,
+  });
+  expect(runtime.activatePending()).toBe(true);
+  expect(state.currentConfig.advisor?.reviewEveryRequests).toBe(2);
+  expect(state.currentConfig.switchPolicy).toMatchObject({
+    horizonRequests: 10,
+    costSensitivity: 0.25,
+    strongAdviceConfidence: 0.95,
+  });
+});
+
 describe('configured activity-cell presentation boundary', () => {
   it('projects normalized sparse overrides in fixed order, including inherited/replaced fallbacks and mapped effort', () => {
     const { state, runtime } = setup();
@@ -419,6 +456,376 @@ describe('configured activity-cell presentation boundary', () => {
     expect(JSON.stringify(snapshot.activityCells)).not.toMatch(
       /baseUrl|resolvedFallbacks|contextWindow|apiKey/,
     );
+  });
+});
+
+describe('native per-cell route transactions', () => {
+  const target = model('chat', { provider: 'openai', name: 'Physical chat' });
+  const getCell = (
+    runtime: ReturnType<typeof createRouterUIRuntime>,
+    activity: 'code' | 'debug' | 'explore' | 'plan' | 'review' | 'ops' | 'docs',
+    tier: 'high' | 'medium' | 'low' | 'micro',
+  ) =>
+    required(
+      runtime.adapters
+        .getSnapshot()
+        .routeCells.find(
+          (cell) => cell.activity === activity && cell.tier === tier,
+        ),
+      `${activity}/${tier}`,
+    );
+
+  it('queues a valid cell edit until the next user boundary without changing actual generation', async () => {
+    const { state, runtime } = setup();
+    state.currentModelRegistry.getModelsOfType = ((type: string) =>
+      type === 'chat'
+        ? [target, model('auto', { provider: 'router' })]
+        : []) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'];
+    state.currentConfig.profiles.auto = {
+      ...state.currentConfig.profiles.auto,
+      medium: {
+        ...required(state.currentConfig.profiles.auto?.medium),
+        reasoning: false,
+        thinkingLevels: ['off'],
+      },
+    };
+    state.currentConfig.models = {
+      'openai/chat': {
+        model: 'evil/redirected-chat',
+        reasoning: false,
+        thinkingLevels: ['off'],
+      },
+      'openai/medium': { model: 'evil/redirected-generic' },
+    };
+    expect(
+      runtime.adapters.getSnapshot().chatModels.map((entry) => entry.model),
+    ).toEqual(['openai/chat']);
+    runtime.beginRequest()({
+      stage: 'generating',
+      decision: {
+        profile: 'auto',
+        tier: 'medium',
+        targetProvider: 'openai',
+        targetModelId: 'medium',
+        targetLabel: 'openai/medium',
+        thinking: 'medium',
+        reasonCode: 'baseline',
+        timestamp: 1,
+      },
+    });
+    const actual = runtime.adapters.getSnapshot().actual;
+    const cell = getCell(runtime, 'code', 'medium');
+    expect(cell.current.state).toBe('inherited');
+    expect(cell.current.model).toBe('openai/medium');
+    expect(runtime.adapters.applyRoutes).toBeDefined();
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: cell.current,
+            after: { model: 'openai/chat', thinking: 'low' },
+          },
+        ],
+      }),
+    ).toBe('applied');
+    expect(state.currentConfig.profiles.auto?.activities?.code).toBeUndefined();
+    expect(runtime.adapters.getSnapshot().actual).toEqual(actual);
+    expect(getCell(runtime, 'code', 'medium').pending).toMatchObject({
+      state: 'override',
+      model: 'openai/chat',
+      thinking: 'low',
+    });
+    expect(runtime.activatePending()).toBe(true);
+    expect(
+      state.currentConfig.profiles.auto?.activities?.code?.medium,
+    ).toMatchObject({
+      model: 'openai/chat',
+      thinking: 'low',
+      reasoning: true,
+    });
+    expect(
+      state.currentConfig.profiles.auto?.activities?.code?.medium
+        ?.thinkingLevels,
+    ).toBeUndefined();
+    expect(getCell(runtime, 'code', 'medium')).toMatchObject({
+      current: { model: 'openai/chat', thinking: 'low' },
+      effectiveThinking: 'low',
+    });
+    expect(state.currentConfig.profiles.auto?.medium?.model).toBe(
+      'openai/medium',
+    );
+    const snapshot = runtime.adapters.getSnapshot();
+    expect(snapshot.actual).toEqual(actual);
+    expect(JSON.stringify(snapshot.routeCells)).not.toMatch(
+      /baseUrl|resolvedFallbacks|contextWindow|apiKey|transcript/,
+    );
+    expect(JSON.stringify(snapshot.chatModels)).not.toMatch(
+      /baseUrl|apiKey|contextWindow|transcript/,
+    );
+  });
+
+  it('resets an override to generic inheritance and rejects clearing the only route', async () => {
+    const { state, runtime } = setup();
+    state.currentModelRegistry.getModelsOfType = ((type: string) =>
+      type === 'chat'
+        ? [target]
+        : []) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'];
+    state.currentConfig.profiles.auto = {
+      ...state.currentConfig.profiles.auto,
+      activities: {
+        code: { medium: { model: 'openai/chat', thinking: 'low' } },
+      },
+    };
+    const cell = getCell(runtime, 'code', 'medium');
+    expect(cell.current.state).toBe('override');
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: cell.current,
+            after: undefined,
+          },
+        ],
+      }),
+    ).toBe('applied');
+    expect(runtime.activatePending()).toBe(true);
+    expect(state.currentConfig.profiles.auto?.activities?.code).toBeUndefined();
+    expect(getCell(runtime, 'code', 'medium').current).toMatchObject({
+      state: 'inherited',
+      model: 'openai/medium',
+    });
+
+    state.currentConfig.profiles.auto = {
+      activities: { code: { medium: { model: 'openai/chat' } } },
+    };
+    const onlyCell = getCell(runtime, 'code', 'medium');
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: onlyCell.current,
+            after: undefined,
+          },
+        ],
+      }),
+    ).toBe('invalid');
+    expect(
+      state.currentConfig.profiles.auto?.activities?.code?.medium?.model,
+    ).toBe('openai/chat');
+  });
+
+  it('rejects stale transactions, recursive/unknown/ineligible targets and unsupported effort', async () => {
+    const { state, runtime } = setup();
+    state.currentModelRegistry.getModelsOfType = ((type: string) =>
+      type === 'chat'
+        ? [
+            target,
+            model('images', { provider: 'openai', input: ['image'] }),
+            model('off-only', {
+              provider: 'openai',
+              reasoning: false,
+              thinkingLevelMap: { off: 'none' },
+            }),
+          ]
+        : []) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'];
+    const cell = getCell(runtime, 'code', 'medium');
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: { ...cell.current, model: 'openai/stale' },
+            after: { model: 'openai/chat', thinking: 'low' },
+          },
+        ],
+      }),
+    ).toBe('conflict');
+    state.currentConfig.profiles.auto = {
+      ...state.currentConfig.profiles.auto,
+      medium: {
+        ...required(state.currentConfig.profiles.auto?.medium),
+        reasoning: false,
+        thinkingLevels: ['off'],
+      },
+    };
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: cell.current,
+            after: { model: 'openai/chat', thinking: 'low' },
+          },
+        ],
+      }),
+    ).toBe('conflict');
+    const currentCell = getCell(runtime, 'code', 'medium');
+    for (const modelRef of ['router/auto', 'missing/model', 'openai/images'])
+      expect(
+        await runtime.adapters.applyRoutes({
+          profile: 'auto',
+          changes: [
+            {
+              activity: 'code',
+              tier: 'medium',
+              before: currentCell.current,
+              after: { model: modelRef, thinking: 'low' },
+            },
+          ],
+        }),
+      ).toBe('invalid');
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: currentCell.current,
+            after: { model: 'openai/off-only', thinking: 'high' },
+          },
+        ],
+      }),
+    ).toBe('invalid');
+    expect(
+      runtime.adapters
+        .getSnapshot()
+        .routeCells.find(
+          (item) => item.activity === 'code' && item.tier === 'medium',
+        )?.pending,
+    ).toBeUndefined();
+  });
+
+  it('preserves tier-wide effort precedence and exposes configured versus effective effort', async () => {
+    const { state, runtime } = setup();
+    state.currentModelRegistry.getModelsOfType = ((type: string) =>
+      type === 'chat'
+        ? [target]
+        : []) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'];
+    state.thinkingByProfile.auto = { medium: 'high' };
+    runtime.beginRequest()({
+      stage: 'generating',
+      decision: {
+        profile: 'auto',
+        tier: 'medium',
+        targetProvider: 'openai',
+        targetModelId: 'medium',
+        targetLabel: 'openai/medium',
+        thinking: 'high',
+        reasonCode: 'baseline',
+        timestamp: 1,
+      },
+    });
+    const actual = runtime.adapters.getSnapshot().actual;
+    const cell = getCell(runtime, 'code', 'medium');
+    expect(cell.effectiveThinking).toBe('high');
+    expect(cell.tierEffortOverride).toBe('high');
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: cell.current,
+            after: { model: 'openai/chat', thinking: 'low' },
+          },
+        ],
+      }),
+    ).toBe('applied');
+    expect(getCell(runtime, 'code', 'medium').pending).toMatchObject({
+      state: 'override',
+      thinking: 'low',
+    });
+    expect(getCell(runtime, 'code', 'medium').pendingEffectiveThinking).toBe(
+      'high',
+    );
+    expect(state.thinkingByProfile.auto?.medium).toBe('high');
+    expect(runtime.adapters.getSnapshot().actual).toEqual(actual);
+    expect(runtime.activatePending()).toBe(true);
+    expect(runtime.adapters.getSnapshot().actual).toEqual(actual);
+    expect(getCell(runtime, 'code', 'medium')).toMatchObject({
+      current: { thinking: 'low' },
+      effectiveThinking: 'high',
+      tierEffortOverride: 'high',
+    });
+    const controls = runtime.adapters.getSnapshot().controls;
+    expect(
+      await runtime.adapters.applyControls({
+        profile: 'auto',
+        action: 'apply',
+        changes: [{ key: 'thinkingMedium', before: 'high', after: undefined }],
+      }),
+    ).toBe('applied');
+    expect(getCell(runtime, 'code', 'medium').effectiveThinking).toBe('high');
+    expect(getCell(runtime, 'code', 'medium').pendingEffectiveThinking).toBe(
+      'low',
+    );
+    expect(runtime.adapters.getSnapshot().actual).toEqual(actual);
+    expect(runtime.activatePending()).toBe(true);
+    expect(state.thinkingByProfile.auto?.medium).toBeUndefined();
+    expect(getCell(runtime, 'code', 'medium').effectiveThinking).toBe('low');
+    expect(controls.thinkingMedium).toBe('high');
+  });
+
+  it('drops pending routes on reset and route conflicts at activation', async () => {
+    const { state, runtime } = setup();
+    state.currentModelRegistry.getModelsOfType = ((type: string) =>
+      type === 'chat'
+        ? [target]
+        : []) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'];
+    const cell = getCell(runtime, 'code', 'medium');
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: cell.current,
+            after: { model: 'openai/chat', thinking: 'low' },
+          },
+        ],
+      }),
+    ).toBe('applied');
+    runtime.reset();
+    expect(getCell(runtime, 'code', 'medium').pending).toBeUndefined();
+
+    const next = getCell(runtime, 'code', 'medium');
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'medium',
+            before: next.current,
+            after: { model: 'openai/chat', thinking: 'low' },
+          },
+        ],
+      }),
+    ).toBe('applied');
+    state.currentConfig.profiles.auto = {
+      ...state.currentConfig.profiles.auto,
+      activities: { code: { medium: { model: 'openai/external' } } },
+    };
+    expect(runtime.activatePending()).toBe(false);
+    expect(
+      state.currentConfig.profiles.auto?.activities?.code?.medium?.model,
+    ).toBe('openai/external');
   });
 });
 

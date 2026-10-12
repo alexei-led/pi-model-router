@@ -7,7 +7,7 @@
 **Stop changing models by hand.**
 
 Keep one profile in [Pi](https://github.com/earendil-works/pi/tree/main/packages/coding-agent).
-`pi-model-router` can select a different model and reasoning effort for each new turn.
+`pi-model-router` can select a different model and reasoning effort as the task changes, including between tool-loop requests.
 Optional advice uses any text-capable classifier registered in Pi. The router uses Pi’s typed classifier API and requires explicit per-profile approval for the exact model.
 
 ## Why use it?
@@ -15,8 +15,8 @@ Optional advice uses any text-capable classifier registered in Pi. The router us
 - **Fewer manual changes.** One profile can combine fast, low-cost routes with stronger models.
 - **Control over cost and quality.** You choose the models, effort levels, fallback order, and baseline. You can pin a route at any time.
 - **Activity-specific routes.** Optional sparse code/debug/explore/plan/review/ops/docs overrides share one consent-gated classifier operation. [Configure activity routes](docs/user-guide.md#activity-routes).
-- **Stable tool calls.** A valid tool continuation keeps its route. The router does not ask an advisor for each tool result.
-- **Visible decisions.** A compact Signal Panel shows the actual model, effort and routing reason. Open `/router` for visual usage and session controls.
+- **Adaptive tool loops.** Periodic background reviews assess current work without delaying generation. Eligible recommendations can change tier, activity and effort between requests, with explicit switch-cost controls.
+- **Visible decisions.** A compact Signal Panel shows actual activity, model and effort. Held proposals stay distinct. Open `/router` for native bars/sparklines, observed usage and session controls.
 
 The aim is selective use of expensive models, not the cheapest answer at any cost.
 Savings depend on your profiles, task mix, output size, and cache reuse.
@@ -56,7 +56,7 @@ The two-line strip is on in new sessions. `/router widget` switches to a quiet f
 ![Native Pi router inspector with an above-editor route strip](docs/assets/router-ui/signal-now-dark.png)
 
 Captured from the local dev extension in Pi inside agterm, using synthetic fixture data.
-[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md)
+[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md) · [Adaptive routing acceptance and limits](docs/testing/adaptive-router-acceptance.md)
 
 ## A turn in Pi
 
@@ -67,14 +67,21 @@ gpt-6-luna · low · effort off · last
 Classifier advice accepted · 807 ms · auto (illustrative historical capture)
 ```
 
-The model answers and calls tools. Valid tool continuations keep that route without another advisor call.
-For the next user turn, the router can select a different route.
+The model answers and calls tools. Periodic background reviews use bounded current-loop progress; a fresh recommendation may apply at the next request. Cost sensitivity and a short horizon can hold a costly switch, while strong capability advice can override the estimate. Pins, consent and generation safeguards still apply.
+[Adaptive routing and switch policy →](docs/user-guide.md#activity-routes)
 [Read the status and take control →](docs/user-guide.md#understand-the-result)
 
 Recent records cover 1,967 Pi responses across 25 sessions. They show route use, not guaranteed savings.
 [See the chart, cost calculations, and limits →](docs/evaluation.md)
 
-## Upgrading to 0.12.0
+## Upgrading to 0.14.0
+
+Restart Pi after updating. No configuration migration is required.
+For an enabled, approved classifier, background reviews default to every four requests.
+Set `advisor.reviewEveryRequests: 0` to keep advice at new user-task boundaries only.
+Reviews send bounded recent text and add advisor requests; existing consent requirements still apply.
+
+### From versions before 0.12.0
 
 After updating, restart Pi. Replace `/router-ui` with `/router`, and
 `/router <profile>` with `/router profile <name>`. Classifier advice now uses any Pi-registered classifier. Replace provider-specific configuration with the generic advisor model and exact per-profile approvals.

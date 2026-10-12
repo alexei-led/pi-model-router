@@ -25,8 +25,11 @@ export type RouterPinByProfile = Partial<Record<string, RouterTier>>;
 export type RouterThinkingByTier = Partial<Record<RouterTier, ThinkingLevel>>;
 export type RouterThinkingByProfile = Record<string, RouterThinkingByTier>;
 
+export type EffortCacheSharing = 'shared' | 'separate' | 'unknown';
+
 export interface ModelDefinition {
   model: string;
+  effortCacheSharing?: EffortCacheSharing | undefined;
   contextWindow?: number | undefined;
   maxTokens?: number | undefined;
   reasoning?: boolean | undefined;
@@ -52,8 +55,9 @@ export interface RoutedTierConfig {
 export interface ClassifierContextConfig {
   previousTurns: number;
   maxHistoryTokens: number;
-  toolResults: 'none' | 'last' | 'last-error';
+  toolResults: 'none' | 'last' | 'last-error' | 'recent';
   maxToolTokens: number;
+  currentLoopMessages: number;
 }
 export interface ClassifierTextExcerpt {
   text: string;
@@ -77,6 +81,7 @@ export interface AdvisorConfig {
   enabled: boolean;
   model: string;
   timeoutMs: number;
+  reviewEveryRequests: number;
   confidenceThreshold: number;
   probabilityThreshold: number;
   maxStateTokens: number;
@@ -122,8 +127,15 @@ export interface RouterProfile {
 
 export type StatusLineMode = 'compact' | 'detailed';
 
+export interface RouterSwitchPolicy {
+  horizonRequests: number;
+  costSensitivity: number;
+  strongAdviceConfidence: number;
+}
+
 export interface RouterConfig {
   activityRouting?: ActivityRouting | undefined;
+  switchPolicy?: RouterSwitchPolicy | undefined;
   ui?: { statusLine: StatusLineMode } | undefined;
   advisor?: AdvisorConfig | undefined;
   debug?: boolean | undefined;
@@ -136,6 +148,10 @@ export interface RoutePair {
   tier: RouterTier;
   model: string;
   thinking: ThinkingLevel;
+}
+
+export interface RouteRecommendation extends RoutePair {
+  activity?: RouterActivity | undefined;
 }
 
 export interface RouteCandidate extends RoutePair {
@@ -317,7 +333,34 @@ export interface GenerationDiagnostics {
   shadow?: CacheCostShadow | undefined;
 }
 
+export const SWITCH_COST_REASONS = [
+  'same-route',
+  'effort-cache-shared',
+  'effort-cache-unknown',
+  'within-policy',
+  'strong-advice',
+  'cost-held',
+  'cost-unknown',
+] as const;
+export const ADVICE_SOURCES = ['initial', 'review'] as const;
+export type AdviceSource = (typeof ADVICE_SOURCES)[number];
+
+export interface SwitchCostDiagnostic {
+  reason: (typeof SWITCH_COST_REASONS)[number];
+  horizonRequests: number;
+  stayUsd?: number | undefined;
+  switchUsd?: number | undefined;
+  incrementalUsd?: number | undefined;
+  /** Estimated first-request premium, separate from generation totals. */
+  rebuildUsd?: number | undefined;
+  steadyDeltaUsd?: number | undefined;
+  confidenceOverride: boolean;
+}
+
 export interface RoutingDecision {
+  /** Classifier terminal observation only; never an observed generation. */
+  reviewOnly?: boolean | undefined;
+  adviceSource?: AdviceSource | undefined;
   /** Validated semantic answer, independent of the local cell used for availability. */
   activity?: RouterActivity | undefined;
   /** Local cell provenance, not an inferred activity. Omitted means generic. */
@@ -334,6 +377,8 @@ export interface RoutingDecision {
   bypassReason?: BypassReason | undefined;
   classification?: ClassifierDiagnostics | undefined;
   generation?: GenerationDiagnostics | undefined;
+  proposedRoute?: RouteRecommendation | undefined;
+  switchCost?: SwitchCostDiagnostic | undefined;
   reuse?: 'same-turn' | 'shared' | 'continuation' | undefined;
   thinking: ThinkingLevel;
   timestamp: number;
@@ -380,6 +425,7 @@ export interface RouterPersistedState {
 
 export interface RawRouterConfig {
   activityRouting?: unknown;
+  switchPolicy?: unknown;
   ui?: unknown;
   advisor?: unknown;
   debug?: unknown;
@@ -421,6 +467,10 @@ export interface RouterUIControls {
   budget: number | undefined;
   advisor: RouterUIAdvisorId | undefined;
   timeout: number;
+  reviewEveryRequests: number;
+  costHorizon: number;
+  costSensitivity: number;
+  strongAdviceConfidence: number;
   thinkingHigh: ThinkingLevel | undefined;
   thinkingMedium: ThinkingLevel | undefined;
   thinkingLow: ThinkingLevel | undefined;
@@ -462,7 +512,57 @@ export type RouterUIActivityCell = {
       eligible?: undefined;
     }
 );
+export interface RouterUIChatModel {
+  /** Canonical physical chat target; logical router models are excluded. */
+  model: string;
+  name: string;
+  efforts: readonly ThinkingLevel[];
+}
+export interface RouterUIRouteCellState {
+  state: 'inherited' | 'override' | 'missing';
+  /** Opaque CAS token for normalized capability metadata; never rendered. */
+  revision?: string | undefined;
+  model?: string | undefined;
+  thinking?: ThinkingLevel | undefined;
+  fallbacks: readonly string[];
+}
+export interface RouterUIRouteCell {
+  activity: RouterActivity;
+  tier: RouterTier;
+  /** Current effective profile configuration, before queued UI changes. */
+  current: RouterUIRouteCellState;
+  /** Next-user-boundary route value, when a transaction is already queued. */
+  pending?: RouterUIRouteCellState | undefined;
+  /** Configured generic route used by reset-to-generic. */
+  generic: RouterUIRouteCellState;
+  /** Effective mapped effort under the active all-activity tier override. */
+  effectiveThinking?: ThinkingLevel | undefined;
+  /** Effective effort after any queued control changes are activated. */
+  pendingEffectiveThinking?: ThinkingLevel | undefined;
+  /** Tier-wide session override, if one currently applies to this cell. */
+  tierEffortOverride?: ThinkingLevel | undefined;
+  /** Tier-wide override that will apply after queued controls activate. */
+  pendingTierEffortOverride?: ThinkingLevel | undefined;
+}
+export interface RouterUIRouteSelection {
+  model: string;
+  thinking: ThinkingLevel;
+  /** Ordered target fallback chain retained by the editor. */
+  fallbacks?: readonly string[] | undefined;
+}
+export interface RouterUIRouteCellChange {
+  activity: RouterActivity;
+  tier: RouterTier;
+  before: RouterUIRouteCellState;
+  /** Undefined removes the sparse cell override and restores generic inheritance. */
+  after: RouterUIRouteSelection | undefined;
+}
+export interface RouterUIRouteTransaction {
+  profile: string;
+  changes: readonly RouterUIRouteCellChange[];
+}
 export interface RouterUIAdviceObservation {
+  source?: AdviceSource | undefined;
   advisor: RouterUIAdvisorId;
   requestId?: string | undefined;
   outcome: ClassifierOutcome;
@@ -471,12 +571,19 @@ export interface RouterUIAdviceObservation {
   costUsd?: number | undefined;
 }
 export interface RouterUIHistoryEntry {
+  reviewOnly?: boolean | undefined;
   actual?: RouterUIRoute | undefined;
+  proposed?: RouterUIRoute | undefined;
+  switchCost?: SwitchCostDiagnostic | undefined;
   advice?: RouterUIAdviceObservation | undefined;
   reuse?: RoutingDecision['reuse'];
   /** Cost for this observation only; reuses must not repeat an earlier cost. */
   generationCostUsd?: number | undefined;
   generationAttempts?: number | undefined;
+  inputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+  cacheReadTokens?: number | undefined;
+  cacheWriteTokens?: number | undefined;
 }
 /** Presentation only: no credentials, transcript text or remote explanations. */
 export interface RouterUISnapshot {
@@ -485,18 +592,23 @@ export interface RouterUISnapshot {
   /** Recorded catalog costs only, not a complete billing ledger. */
   accumulatedCost?: number | undefined;
   classifiers: readonly { model: string; name: string }[];
+  /** Physical chat targets only; excludes logical router recursion and auth data. */
+  chatModels: readonly RouterUIChatModel[];
   reuse?: RoutingDecision['reuse'];
   bypassReason?: BypassReason | undefined;
   reason?: RoutingReasonCode | undefined;
   failure?: 'request-failed' | undefined;
   actual?: RouterUIRoute | undefined;
   advised?: RouterUIRoute | undefined;
+  switchCost?: SwitchCostDiagnostic | undefined;
   advice?: RouterUIAdviceObservation | undefined;
   controls: Readonly<RouterUIControls>;
   pendingControls?: Readonly<RouterUIControls> | undefined;
+  pendingRoutes?: boolean | undefined;
   eligible: Readonly<Partial<Record<RouterTier, RouterUIRoute>>>;
   activityRouting: ActivityRouting;
   activityCells: readonly RouterUIActivityCell[];
+  routeCells: readonly RouterUIRouteCell[];
   privacy: {
     advisorEnabled: boolean;
     approvedModels: readonly string[];
@@ -513,6 +625,10 @@ export interface RouterUIAdapters {
   applyControls: (
     transaction: RouterUIControlTransaction,
   ) => Promise<'applied' | 'conflict'>;
+  /** Compare-and-set sparse per-cell route edits; changes stay pending until a user boundary. */
+  applyRoutes: (
+    transaction: RouterUIRouteTransaction,
+  ) => Promise<'applied' | 'conflict' | 'invalid'>;
   subscribe: (refresh: () => void) => () => void;
   /** Abort on session replacement/reload/shutdown to complete and dispose the inspector. */
   signal?: AbortSignal | undefined;
