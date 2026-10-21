@@ -56,7 +56,7 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 3. **Failure escalation in every mode, balanced included:** **yes**, for parity with codex/claude and the design formula `T = classified + boost`. This changes balanced behaviour; the release notes call it out. Alternative: cost and quality only.
 4. **Escalation detection source:** **scan the request's context messages** (current user turn) instead of a `tool_result` hook. Same data, branch-correct, no event-ordering state. Only the hold `{signature, floorTier, untilUserTurn}` is runtime state.
 5. **Project-file allowlist:** **routes + display + `mode`.** Allowed: `profiles.<n>.{high,medium,low,micro,activities,baselineTier}`, `models`, `activityRouting`, `ui`, top-level `mode`. Rejected with a value-free warning: `advisor`, `profiles.<n>.{advisor,mode}`, `switchPolicy`, `modes`, `maxSessionBudget`, `debug`, `rules`, `phaseBias`, unknown keys. The design says mode-only; that would remove a documented feature.
-6. **Validation:** explicit `thinking: off|minimal` on `low`/`medium`/`high` (generic or activity cell) **disables that tier with a warning** (existing invalid-tier pattern). Routes limited by capability (`reasoning: false`, `thinkingLevels`) stay valid; the transform never moves them below `low`.
+6. **Validation:** explicit `thinking: off|minimal` on `low`/`medium`/`high` (generic or activity cell) **disables that tier with a warning** (existing invalid-tier pattern). A route declared `reasoning: false` may still say `off`; routes limited by capability stay valid; the transform never moves them below `low`.
 7. **Effort override** (`/router thinking`, Shift+Tab) is a manual choice: **mode is bypassed for overridden tiers.** Status shows `mode cost (session) · bypassed by effort override`.
 8. **Budget exceeded:** **quality's model lever never targets `high`.** Otherwise a medium cell would generate the high model and slip past the budget pool (`routing.ts:481-486`).
 9. **Settings-tab cost sensitivity vs mode patch (manager decision):** an explicit Settings-tab edit is runtime user intent and wins over the mode patch for that session; the Settings tab shows that it overrides the mode. Config-file `switchPolicy` still loses to the mode patch. Mode is changed by command only in 0.16.0.
@@ -80,10 +80,10 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 
 - [x] C1 `escalation.ts`: `detectEscalation` (signature, edit-in-between, current user turn only, latest pair) and hold logic.
 - [x] C2 Wire escalation into `prepareRouterRequest` (floor after advice and continuation; reason code `escalation`; pins, Google continuation and budget rules).
-- [ ] C3 Types: `RouterMode`, `ModeSource`, `modes` config, `RoutePlan` provenance, decision fields, reason code.
-- [ ] C4 Config: normalize `profiles.<n>.mode`, `modes`, `switchPolicy.escalationHoldTurns`; merge rules; effective policy `{...switchPolicy, ...modes[mode].policy}`.
-- [ ] C5 Config: project allowlist replaces `stripProjectAdvisorConfig`; extract project `mode`.
-- [ ] C6 Config: off/minimal validation at `low`+.
+- [x] C3 Types: `RouterMode`, `ModeSource`, `modes` config, `RoutePlan` provenance, decision fields, reason code.
+- [x] C4 Config: normalize `profiles.<n>.mode`, `modes`, `switchPolicy.escalationHoldTurns`; merge rules; effective policy `{...switchPolicy, ...modes[mode].policy}`.
+- [x] C5 Config: project allowlist replaces `stripProjectAdvisorConfig`; extract project `mode`.
+- [x] C6 Config: off/minimal validation at `low`+.
 - [ ] C7 `modes.ts`: `resolveMode` and `transformRoute`.
 - [ ] C8 `routing.ts`: apply the transform in `buildRouteMatrix`; budget cap for quality.
 - [ ] C9 `provider-request.ts`: mode in the `policy` fence; live-mode check after classification; mode-specific switch policy into `evaluateSwitch`.
@@ -99,9 +99,9 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [ ] T2 Quality table: effort lever first; model lever at max effort; `high` at max unchanged; budget cap.
 - [ ] T3 Micro unchanged in every mode; cost never produces micro; unknown price → effort lever.
 - [ ] T4 Precedence: session > project > profile > default; `default` clears the override.
-- [ ] T5 Effective policy merge: built-in modes deep-merged with user edits; mode patch beats `switchPolicy`; invalid `modes` keys warn.
-- [ ] T6 Project allowlist: each rejected key warns and has no effect; allowed keys work; `mode` accepted. Security regression test for `switchPolicy`, `maxSessionBudget`, `debug`.
-- [ ] T7 Validation: explicit off/minimal at `low`+ disables the tier (generic and activity); `micro: off` stays valid; non-reasoning routes stay valid.
+- [x] T5 Effective policy merge: built-in modes deep-merged with user edits; mode patch beats `switchPolicy`; invalid `modes` keys warn.
+- [x] T6 Project allowlist: each rejected key warns and has no effect; allowed keys work; `mode` accepted. Security regression test for `switchPolicy`, `maxSessionBudget`, `debug`.
+- [x] T7 Validation: explicit off/minimal at `low`+ disables the tier (generic and activity); `micro: off` stays valid; non-reasoning routes stay valid.
 - [ ] T8 **Key regression:** advice started under balanced, mode changed, old result delivered → rejected; generation uses the current transformed matrix. Same for a background review.
 - [ ] T9 Generation revalidation succeeds for model-lever and effort-lever plans, fallbacks included.
 - [ ] T10 Pin and effort override bypass the mode.

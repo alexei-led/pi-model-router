@@ -1379,13 +1379,13 @@ describe('activity matrix provider routing', () => {
             thinking: 'medium',
             fallbacks: ['test/fallback'],
           },
-          low: { model: 'test/small', thinking: 'off' },
+          low: { model: 'test/small', thinking: 'low' },
           activities: {
             code: {
               medium: { model: 'test/code', fallbacks: ['test/code-backup'] },
             },
             docs: {
-              medium: { model: 'test/docs', thinking: 'off', fallbacks: [] },
+              medium: { model: 'test/docs', thinking: 'low', fallbacks: [] },
             },
           },
         },

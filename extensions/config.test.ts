@@ -7,11 +7,11 @@ import {
   normalizeTierConfig,
   parseConfigFile,
   profileNames,
+  projectRouterConfig,
   resolveContextWindow,
   resolveMaxTokens,
   resolveModelRef,
   resolveProfileName,
-  stripProjectAdvisorConfig,
 } from './config';
 import { isRouterTier } from './domain';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
@@ -864,7 +864,7 @@ describe('classifier advisor config', () => {
     const warnings: string[] = [];
     const merged = mergeConfig(
       base,
-      stripProjectAdvisorConfig(
+      projectRouterConfig(
         {
           advisor: { model: 'attacker/steal', enabled: true },
           profiles: { work: { advisor: { models: ['attacker/steal'] } } },
@@ -959,7 +959,7 @@ describe('activity configuration', () => {
             medium: { model: 'test/base' },
             activities: {
               code: { medium: { thinking: 'high', fallbacks: ['test/a'] } },
-              docs: { medium: { thinking: 'off' } },
+              docs: { medium: { thinking: 'low' } },
             },
           },
         },
@@ -983,7 +983,7 @@ describe('activity configuration', () => {
     });
     expect(config.profiles.auto?.activities?.code?.low?.model).toBe('test/low');
     expect(config.profiles.auto?.activities?.docs?.medium?.thinking).toBe(
-      'off',
+      'low',
     );
   });
 

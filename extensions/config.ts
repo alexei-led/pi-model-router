@@ -27,11 +27,12 @@ import type {
   RawRouterConfig,
   RoutedTierConfig,
   RouterConfig,
+  RouterMode,
   RouterProfile,
   RouterSwitchPolicy,
   RouterTier,
 } from './types';
-import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
+import { ROUTER_ACTIVITIES, ROUTER_MODES, ROUTER_TIERS } from './types';
 
 export const parseConfigFile = (path: string): ParsedConfigFile => {
   if (!existsSync(path)) {
@@ -127,6 +128,7 @@ export const mergeConfig = (
       ? mergedProfiles[name]
       : {};
     mergedProfiles[name] = {
+      mode: mergeRawValue(existing.mode, profile.mode),
       activities: mergeActivities(existing.activities, profile.activities),
       baselineTier: mergeRawValue(existing.baselineTier, profile.baselineTier),
       high: mergeRawValue(existing.high, profile.high),
@@ -155,6 +157,8 @@ export const mergeConfig = (
     : mergedAdvisor;
   return {
     activityRouting: override.activityRouting ?? base.activityRouting,
+    mode: override.mode ?? base.mode,
+    modes: override.modes ?? base.modes,
     switchPolicy: mergeRawValue(base.switchPolicy, override.switchPolicy),
     ui: mergeRawValue(base.ui, override.ui),
     advisor,
@@ -310,6 +314,17 @@ export const normalizeTierConfig = (
     warnings.push(
       `Profile "${profileName}" ${tier} tier has invalid thinking level. Defaulting to ${defaultThinking}.`,
     );
+  }
+  // Only micro, or a declared non-reasoning model, may skip thinking.
+  if (
+    tier !== 'micro' &&
+    effectiveReasoning !== false &&
+    (value.thinking === 'off' || value.thinking === 'minimal')
+  ) {
+    warnings.push(
+      `Profile "${profileName}" ${tier} tier sets thinking ${value.thinking}; tiers at low and above need thinking. Tier disabled.`,
+    );
+    return undefined;
   }
 
   let fallbacks: string[] | undefined;
@@ -603,28 +618,102 @@ export const normalizeAdvisorConfig = (
   };
 };
 
-/** Project configuration cannot select a destination or authorize advisor text. */
-export const stripProjectAdvisorConfig = (
-  raw: RawRouterConfig,
+const PROJECT_KEYS = ['profiles', 'models', 'activityRouting', 'ui', 'mode'];
+const PROJECT_PROFILE_KEYS = [
+  'high',
+  'medium',
+  'low',
+  'micro',
+  'activities',
+  'baselineTier',
+];
+
+/**
+ * A repository controls its project file, so it may only choose among routes,
+ * display and mode. Policy, budget, debug and classifier settings stay user-owned.
+ */
+export const projectRouterConfig = (
+  raw: object,
   warnings: string[],
 ): RawRouterConfig => {
-  const { advisor, ...project } = raw;
-  let found = advisor !== undefined;
-  if (isObjectRecord(project.profiles)) {
-    project.profiles = Object.fromEntries(
-      Object.entries(project.profiles).map(([name, profile]) => {
-        if (!isObjectRecord(profile)) return [name, profile];
-        const { advisor, ...tiers } = profile;
-        if (advisor !== undefined) found = true;
-        return [name, tiers];
+  let advisorFound = false;
+  let otherFound = false;
+  const keep = (
+    record: object,
+    allowed: readonly string[],
+  ): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.entries(record).filter(([key]) => {
+        if (allowed.includes(key)) return true;
+        if (key === 'advisor') advisorFound = true;
+        else otherFound = true;
+        return false;
       }),
     );
-  }
-  if (found)
+  const project = keep(raw, PROJECT_KEYS);
+  if (isObjectRecord(project.profiles))
+    project.profiles = Object.fromEntries(
+      Object.entries(project.profiles).map(([name, profile]) => [
+        name,
+        isObjectRecord(profile) ? keep(profile, PROJECT_PROFILE_KEYS) : profile,
+      ]),
+    );
+  if (advisorFound)
     warnings.push(
       'Ignored project advisor settings: classifier selection, tuning and profile approvals belong only in user config.',
     );
+  if (otherFound)
+    warnings.push(
+      'Ignored project router settings: a project file may set only routes, display and mode.',
+    );
   return project;
+};
+
+const isRouterMode = (value: unknown): value is RouterMode =>
+  ROUTER_MODES.some((mode) => mode === value);
+
+/** Untuned starting points; replay data should tune them. */
+export const DEFAULT_MODES: Readonly<
+  Record<RouterMode, { policy: Partial<RouterSwitchPolicy> }>
+> = {
+  cost: { policy: { costSensitivity: 0.8, escalationHoldTurns: 1 } },
+  balanced: { policy: {} },
+  quality: { policy: { costSensitivity: 0.2, escalationHoldTurns: 4 } },
+};
+
+const normalizeModes = (
+  raw: unknown,
+  warnings: string[],
+): Record<RouterMode, { policy: Partial<RouterSwitchPolicy> }> => {
+  const defaults = (): Record<
+    RouterMode,
+    { policy: Partial<RouterSwitchPolicy> }
+  > => structuredClone(DEFAULT_MODES);
+  if (raw === undefined) return defaults();
+  const result = defaults();
+  const valid =
+    isObjectRecord(raw) &&
+    Object.entries(raw).every(([name, entry]) => {
+      if (
+        !isRouterMode(name) ||
+        !isObjectRecord(entry) ||
+        Object.keys(entry).some((key) => key !== 'policy') ||
+        !isObjectRecord(entry.policy)
+      )
+        return false;
+      const policy = { ...result[name].policy, ...entry.policy };
+      const policyWarnings: string[] = [];
+      normalizeSwitchPolicy(
+        { ...DEFAULT_SWITCH_POLICY, ...policy },
+        policyWarnings,
+      );
+      if (policyWarnings.length) return false;
+      result[name] = { policy: policy as Partial<RouterSwitchPolicy> };
+      return true;
+    });
+  if (valid) return result;
+  warnings.push('Invalid modes; using built-in mode policies.');
+  return defaults();
 };
 
 export const DEFAULT_SWITCH_POLICY: Readonly<RouterSwitchPolicy> = {
@@ -797,7 +886,12 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
           'Ignored invalid profile advisor approval. List exact Pi classifier references in advisor.models.',
         );
     }
+    if (profileRecord.mode !== undefined && !isRouterMode(profileRecord.mode))
+      warnings.push(
+        `Profile "${name}" mode must be cost, balanced or quality. Ignored.`,
+      );
     normalizedProfiles[name] = {
+      ...(isRouterMode(profileRecord.mode) ? { mode: profileRecord.mode } : {}),
       ...(activities ? { activities } : {}),
       ...(baselineTier ? { baselineTier } : {}),
       high,
@@ -843,8 +937,12 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
     raw.activityRouting !== 'off'
   )
     warnings.push('Invalid activityRouting; using on.');
+  if (raw.mode !== undefined && !isRouterMode(raw.mode))
+    warnings.push('Project mode must be cost, balanced or quality. Ignored.');
   return {
     config: {
+      ...(isRouterMode(raw.mode) ? { projectMode: raw.mode } : {}),
+      modes: normalizeModes(raw.modes, warnings),
       activityRouting: raw.activityRouting === 'off' ? 'off' : 'on',
       switchPolicy: effectiveSwitchPolicy,
       ui: { statusLine: statusLine === 'detailed' ? 'detailed' : 'compact' },
@@ -865,9 +963,15 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
   const projectResult = parseConfigFile(projectPath);
   const baseConfig: RawRouterConfig = { profiles: {} };
   const mergeWarnings: string[] = [];
+  // Precedence is session > project > profile; a user-wide mode has no layer.
+  const { mode: userMode, ...userConfig } = globalResult.config;
+  if (userMode !== undefined)
+    globalResult.warnings.push(
+      'Ignored top-level mode in user config: set mode on each profile.',
+    );
   const merged = mergeConfig(
-    mergeConfig(baseConfig, globalResult.config, mergeWarnings),
-    stripProjectAdvisorConfig(projectResult.config, projectResult.warnings),
+    mergeConfig(baseConfig, userConfig, mergeWarnings),
+    projectRouterConfig(projectResult.config, projectResult.warnings),
     mergeWarnings,
   );
   const normalized = normalizeConfig(merged);

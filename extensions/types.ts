@@ -110,7 +110,30 @@ export interface AdvisorProfileConfig {
   models: string[];
 }
 
+export const ROUTER_MODES = ['cost', 'balanced', 'quality'] as const;
+export type RouterMode = (typeof ROUTER_MODES)[number];
+export const MODE_SOURCES = [
+  'session',
+  'project',
+  'profile',
+  'default',
+] as const;
+export type ModeSource = (typeof MODE_SOURCES)[number];
+export interface ResolvedMode {
+  mode: RouterMode;
+  source: ModeSource;
+}
+/** Which lever a mode moved for one cell; `none` keeps the configured pair. */
+export type ModeLever = 'model' | 'effort' | 'none';
+export interface ModeProvenance {
+  readonly mode: RouterMode;
+  readonly lever: ModeLever;
+  /** Tier whose configured route the cell uses after the transform. */
+  readonly sourceTier: RouterTier;
+}
+
 export interface RouterProfile {
+  mode?: RouterMode | undefined;
   /** Effective, re-normalized sparse overrides; omitted tiers use the generic cell. */
   activities?:
     | Partial<
@@ -144,6 +167,14 @@ export interface RouterConfig {
   maxSessionBudget?: number | undefined;
   profiles: Record<string, RouterProfile>;
   models?: Record<string, ModelDefinition> | undefined;
+  /** Built-in mode policy patches deep-merged with user edits. */
+  modes?:
+    | Record<RouterMode, { policy: Partial<RouterSwitchPolicy> }>
+    | undefined;
+  /** Top-level `mode` from the project file only. */
+  projectMode?: RouterMode | undefined;
+  /** Settings-tab policy edits; runtime intent that beats the mode patch. */
+  sessionPolicy?: Partial<RouterSwitchPolicy> | undefined;
 }
 
 export interface RoutePair {
@@ -168,6 +199,7 @@ export interface RoutePlan {
   readonly config: Readonly<RoutedTierConfig>;
   readonly attempts: readonly [Readonly<RoutePair>, ...Readonly<RoutePair>[]];
   readonly thinkingOverrides: Readonly<RouterThinkingByTier> | undefined;
+  readonly mode?: ModeProvenance | undefined;
 }
 export interface ActivityCandidate {
   activity: RouterActivity;
@@ -376,6 +408,11 @@ export interface RoutingDecision {
   reasonCode: RoutingReasonCode;
   /** Tier selected before a repeated-failure escalation raised it. */
   escalatedFrom?: RouterTier | undefined;
+  mode?: RouterMode | undefined;
+  modeSource?: ModeSource | undefined;
+  modeLever?: ModeLever | undefined;
+  /** Configured tier whose route a mode lever used. */
+  modeSourceTier?: RouterTier | undefined;
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
   advisor?: AdvisorOutcome | undefined;
@@ -439,6 +476,8 @@ export interface RawRouterConfig {
   rules?: unknown;
   profiles?: unknown;
   models?: unknown;
+  mode?: unknown;
+  modes?: unknown;
 }
 
 export interface ConfigLoadResult {
