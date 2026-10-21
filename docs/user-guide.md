@@ -236,6 +236,26 @@ lasts for `escalationHoldTurns` more user turns. It applies in every mode,
 thought-signature continuation. The log shows reason `escalation` and
 `escalated from <tier>`.
 
+The hold belongs to the failing turn's user message. It ends early if
+compaction removes that message, and it does not apply on another branch.
+The hold is not saved, so reload and resume end it.
+The match ignores tool arguments and digits. Two unrelated failures of the same
+tool with the same message, with an edit between, also escalate.
+
+Escalation cannot be turned off. To limit it to the rest of the failing turn
+in every mode, set the hold to 0 in the switch policy and in both mode patches.
+The other mode values stay:
+
+```json
+{
+  "switchPolicy": { "escalationHoldTurns": 0 },
+  "modes": {
+    "cost": { "policy": { "escalationHoldTurns": 0 } },
+    "quality": { "policy": { "escalationHoldTurns": 0 } }
+  }
+}
+```
+
 ## Take control
 
 ```mermaid
@@ -305,7 +325,7 @@ explicit `profile <name>`, including profiles whose names match commands.
 | File | Purpose |
 | --- | --- |
 | `~/.pi/agent/model-router.json` | User configuration and external-advisor approval. A custom Pi agent directory changes this location. |
-| `.pi/model-router.json` | Project routes (`profiles.<name>` tier and activity cells, `baselineTier`), `activityRouting`, `ui` and `mode`. Other keys are ignored with a warning, including model aliases, `switchPolicy`, `modes`, `maxSessionBudget`, `debug` and all advisor settings. You can keep this file out of Git. |
+| `.pi/model-router.json` | Project routes (`profiles.<name>` tier and activity cells, `baselineTier`), `activityRouting`, `ui` and `mode`. Other keys are ignored with a warning, including model aliases, `switchPolicy`, `modes`, `maxSessionBudget`, `debug` and all advisor settings. Project routes can still name any registered model, replace a same-named user profile's routes and set route capabilities; use project files only from repositories you trust. You can keep this file out of Git. |
 | `~/.pi/agent/models.json` | Pi-owned model and credential configuration, not router aliases or classifier approval. |
 | `~/.pi/agent/extensions/` | Optional Pi provider/catalog extensions. Changes require `/reload`. |
 | `~/.pi/agent/model-router-state.json` | Last selected profile. The extension manages this file. |
@@ -328,7 +348,7 @@ The [complete example](../model-router.example.json) shows aliases, tier/activit
 | `advisor.reviewEveryRequests` | Run a nonblocking classifier review every N valid tool-loop requests (default 4); 0 disables. A result applies only to the immediately following request. |
 | `switchPolicy.horizonRequests` | Cost-comparison horizon, 1–20 requests (default 5). |
 | `switchPolicy.costSensitivity` | 0 is opportunistic (accepts a larger estimated premium); 1 only accepts switches no more expensive than staying. Default 0.5. |
-| `switchPolicy.escalationHoldTurns` | User turns after the failing turn that keep a [repeated-failure escalation](#repeated-tool-failures), 0–20 (default 2). 0 limits it to the failing turn. |
+| `switchPolicy.escalationHoldTurns` | User turns after the failing turn that keep a [repeated-failure escalation](#repeated-tool-failures), 0–20 (default 2). 0 limits it to the failing turn. `cost` and `quality` replace it unless `modes.<mode>.policy` sets it. |
 | `profiles.<name>.mode` | Routing mode for the profile: `cost`, `balanced` or `quality`. See [routing modes](#choose-a-routing-mode). |
 | `modes.<mode>.policy` | Switch-policy values for one mode, which replace the built-in mode values. |
 | `switchPolicy.strongAdviceConfidence` | Minimum relevant classifier confidence that can override estimated switch cost. Default 0.9. Tier and activity confidence are independent. |
@@ -437,14 +457,16 @@ Restart Pi after upgrading. Configuration without `mode` routes as before
    routes, `activityRouting`, `ui` and `mode`. Model aliases, `switchPolicy`,
    `modes`, `maxSessionBudget`, `debug` and other keys are ignored with a
    warning. Move them to the user file if you need them. Before 0.16.0, a
-   cloned repository could change these settings.
+   cloned repository could change these settings. Project routes can still
+   name any registered model and set route capabilities such as
+   `reasoning: false`. Open project files only from repositories you trust.
 2. **Thinking floor.** `off` or `minimal` at `low`, `medium` or `high` now
    disables that tier with a warning, unless the model is declared
    `reasoning: false`. Use `low` or higher, or move the route to `micro`.
 3. **Escalation in `balanced`.** A [repeated tool failure](#repeated-tool-failures)
    now raises the route one tier for two more user turns. To limit it to the
-   rest of the failing turn, set `switchPolicy.escalationHoldTurns` to `0`.
-   It cannot be turned off.
+   rest of the failing turn, [set the hold to 0](#repeated-tool-failures) in
+   `switchPolicy` and in the `cost` and `quality` mode patches.
 4. **Saved sessions.** A session saved by 0.15 restores without a mode override.
 
 ### From 0.14.x to 0.15.0

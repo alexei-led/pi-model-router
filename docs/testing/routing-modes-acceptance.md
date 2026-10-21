@@ -49,4 +49,4 @@ Captured with `screencapture`, cropped to the terminal pane with `sips`.
 Only fixture data is shown.
 
 - [Cost mode, session source](../assets/router-ui/modes-widget-cost.png): the route strip shows
-  `cost (session)` and the low model under `medium` advice; the Usage tab is open.
+  `cost (session)` and the low model under `medium` advice.

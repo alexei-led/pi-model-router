@@ -43,9 +43,9 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - The classifier sees transformed routes in its criteria (`choice.ts:409-423`). This can bias its tier choice. Prompts and labels stay unchanged.
 - In cost mode two tiers can resolve to the same model and effort. The classifier still runs, because `oneEffectivePlan` is checked only with meaningful activities (`provider-request.ts:409-411`). Extra advisor cost, same route. Not fixed here (scope).
 - Effort-only moves with `unknown` cache sharing pass the switch-cost check free (`switch-policy.ts:126-127`). Both levers' effort steps move without a tax.
-- Subscription prices (checked 2026-10-21, read-only): the user's `anthropic-*` and `openai-codex-*` providers are `pi-sub-aliases` clones of built-in Pi 1.3.0 models (`cloneAliasModel` is a `structuredClone`, cost included); `models.json` overrides only `contextWindow`. Catalog input prices: `gpt-6.1-sol` 2, `gpt-6-luna` 0.1, `claude-opus-5-5` 4, `claude-sonnet-5-5` 2, `claude-haiku-4-5` 1. None is zero, so the cost model lever can fire for every routed profile. No fix needed. Not checked through a live registry.
+- Subscription prices (checked 2026-10-21, read-only): subscription providers that clone built-in Pi 1.3.0 models keep the catalog prices. Catalog input prices: `gpt-6.1-sol` 2, `gpt-6-luna` 0.1, `claude-opus-5-5` 4, `claude-sonnet-5-5` 2, `claude-haiku-4-5` 1. None is zero, so the cost model lever can fire. Not checked through a live registry.
 - Escalation hold state is runtime-only. Reload or resume drops it (codex does the same).
-- The project-file allowlist is a breaking change for repos that set other keys. No `.pi/model-router.json` found under `~/Workspace` (depth 4).
+- The project-file allowlist is a breaking change for repos that set other keys; they get a value-free warning.
 - Coverage gate: 90% branches on `routing.ts` and `state.ts`.
 - Sandbox: the worktree is outside the sandbox write scope, so builds and tests in it need a sandbox bypass. `screencapture` is likely blocked by the sandbox. Screenshots may need user-run commands.
 
@@ -54,14 +54,14 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 1. **Transform the baseline** (no classifier, uncertain or failed advice): **yes.** Otherwise modes do nothing without a classifier. Alternative: transform only accepted advice.
 2. **Mode change mid tool loop:** **apply at once through the existing fence** (like pin/thinking). The continuation becomes invalid and the compatible-route rule keeps the prior model when its tier still offers it (`provider-request.ts:666-717`). New turns classify on the new matrix. Alternative: queue the change to the next user turn like the Settings tab.
 3. **Failure escalation in every mode, balanced included:** **yes**, for parity with codex/claude and the design formula `T = classified + boost`. This changes balanced behaviour; the release notes call it out. Alternative: cost and quality only.
-4. **Escalation detection source:** **scan the request's context messages** (current user turn) instead of a `tool_result` hook. Same data, branch-correct, no event-ordering state. Only the hold `{signature, floorTier, untilUserTurn}` is runtime state.
+4. **Escalation detection source:** **scan the request's context messages** (current user turn) instead of a `tool_result` hook. Same data, branch-correct, no event-ordering state. Only the hold `{signature, floor, anchor, holdTurns}`, anchored to the failing user message (PR #21 review) is runtime state.
 5. **Project-file allowlist:** **routes + display + `mode`.** Allowed: `profiles.<n>.{high,medium,low,micro,activities,baselineTier}`, `activityRouting`, `ui`, top-level `mode`. Rejected with a value-free warning: `models` (alias metadata such as `effortCacheSharing` is policy; corrected after the Q5 note, `30b40c31`), `advisor`, `profiles.<n>.{advisor,mode}`, `switchPolicy`, `modes`, `maxSessionBudget`, `debug`, `rules`, `phaseBias`, unknown keys. The design says mode-only; that would remove a documented feature.
 6. **Validation:** explicit `thinking: off|minimal` on `low`/`medium`/`high` (generic or activity cell) **disables that tier with a warning** (existing invalid-tier pattern). A route declared `reasoning: false` may still say `off`; routes limited by capability stay valid; the transform never moves them below `low`.
 7. **Effort override** (`/router thinking`, Shift+Tab) is a manual choice: **mode is bypassed for overridden tiers.** Status shows `mode cost (session) · bypassed by effort override`.
 8. **Budget exceeded:** **quality's model lever never targets `high`.** Otherwise a medium cell would generate the high model and slip past the budget pool (`routing.ts:481-486`).
 9. **Settings-tab cost sensitivity vs mode patch (manager decision):** an explicit Settings-tab edit is runtime user intent and wins over the mode patch for that session; the Settings tab shows that it overrides the mode. Config-file `switchPolicy` still loses to the mode patch. Mode is changed by command only in 0.16.0.
 10. **Session override scope:** **one value per session**, not per profile.
-11. **User profile defaults:** work profiles `cost`, personal profiles `balanced`. The user decides.
+11. **Profile defaults on user machines:** out of scope for the repo; the user decides at release.
 
 ## Design for Pi
 
@@ -129,14 +129,10 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [x] M1 Existing configs load unchanged; no `mode` means `balanced`.
 - [x] M2 Stored `router-state` without `modeOverride` restores as before.
 - [x] M3 Upgrade notes: project allowlist (security), off/minimal validation, escalation in balanced.
-- User machine changes (listed, **not applied**):
-  - `~/.pi/agent/model-router.json`: add `"mode": "cost"` to `openai-work` and `claude-work`; `"mode": "balanced"` (or omit) for `openai-personal` and `claude-personal`. No current tier at `low`+ uses `off`/`minimal`, so validation does not affect it.
-  - `~/.pi/agent/model-router-state.json`: no change.
-  - Installed package `npm:@alexeiled/pi-model-router`: update to 0.16.0 after publish.
 
 ### Live agterm verification
 
-Isolated: `PI_CODING_AGENT_DIR` and `HOME` under the scratchpad, `pi install --local <worktree>`, `--approve --offline --no-mcp --no-skills --no-context-files --session-dir <scratch>`, fixture extension, `--model router/auto`.
+Isolated: `PI_CODING_AGENT_DIR` and `HOME` in a scratch directory, `pi install --local <worktree>`, `--approve --offline --no-mcp --no-skills --no-context-files --session-dir <scratch>`, fixture extension, `--model router/auto`.
 
 - [x] L1 Each mode: `/router mode cost|balanced|quality`; capture the route per tier (`agtermctl session text`, `/router log`).
 - [x] L2 Mode change mid tool loop: route follows open choice 2; next turn uses the new matrix.
@@ -147,9 +143,20 @@ Isolated: `PI_CODING_AGENT_DIR` and `HOME` under the scratchpad, `pi install --l
 - [x] L7 Log records carry `mode`, `modeSource`, classified tier, route in use.
 - [x] L8 Escalation via the fixture failure scenario.
 - [x] L10 **Impact, offline** (manager request): replay a fixed prompt set and recorded traces (`docs/assets/usage-data.json` where usable) through the matrix per mode; report estimated catalog cost per mode and the model/effort mix per profile. Any mode or profile without a real difference (for example zero prices or same-model tiers) is reported as a finding. Result: `docs/research/2026-10-21-routing-modes-impact.md`.
-- [ ] L11 **Impact, live** (manager request): one representative multi-turn task per mode in an isolated agterm session, on one subscription-billed and one API-billed profile, classifier Jev (`typesafe/jev-1.14.0`, enabled and approved in the user's config). Capture models used, switches, tokens and estimated cost from `/router log` and `/router usage`. Blocker: an isolated agent dir has no provider login. Needs the user to log in inside it (`! PI_CODING_AGENT_DIR=… pi` then `/login`) or to approve another way. I will not copy `auth.json`. Approved 2026-10-21: profiles `claude` (route shape of claude-work/claude-personal, built-in `anthropic`) and `openai-work` (built-in `openai-codex`, which is subscription OAuth). Task: fix two failing median tests in a disposable Node project, add a function with tests, summarize; fresh copy per run.
+- [ ] L11 **Impact, live** (manager request): one representative multi-turn task per mode in an isolated agterm session, on one subscription-billed and one API-billed profile, classifier Jev (`typesafe/jev-1.14.0`). Capture models used, switches, tokens and estimated cost from `/router log` and `/router usage`. The user logs in inside the isolated agent dir; credentials are never copied. Profiles: a Claude shape (opus/high, sonnet/medium, sonnet/low, haiku/off) on built-in `anthropic` with an API key, and an OpenAI shape on built-in `openai-codex` (subscription OAuth). Task: fix two failing median tests in a disposable Node project, add a function with tests, summarize; fresh copy per run.
 - [ ] L12 **Live classifier run** (extra task item 2): a fixed set of 20 prompts covering every tier × activity combination that can realistically trigger, with expected tier and activity. Run through real Jev; record the classified tier and activity; map each to the routed pair under each mode for the user-like profiles. Report classification mismatches separately from routing bugs. Generation uses the fixture provider, so only Jev calls are live. Blocker: Jev needs a TypeSafe login in the isolated agent dir (same question as L11). Approved 2026-10-21; harness running, waiting for the user\'s TypeSafe login.
 - [ ] L9 Screenshots; close the test sessions.
+
+### PR #21 review fixes
+
+- [x] F1 Escalation hold anchored to the failing user message; tests for compaction, a branch switch and a fresh runtime.
+- [x] F2 Docs: limiting escalation needs `escalationHoldTurns: 0` in `switchPolicy` and both mode patches; test covers all modes.
+- [x] F3 A zero lower-tier price no longer fires the cost model lever.
+- [x] F4 Trust note for project routes. `reasoning: false` stays allowed: blocking it needs nested tier and activity filtering, not a one-line allowlist change.
+- [x] F5 Lever sources use configured routes, not other tiers' effort overrides.
+- [x] F6 Private profile, provider and path details removed from this plan; screenshot cropped to the route strip.
+- [x] F7 AGENTS.md and README list `activityRouting` among project keys.
+- [x] F8 Escalation false positives documented.
 
 ### Release
 

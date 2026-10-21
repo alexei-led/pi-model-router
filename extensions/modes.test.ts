@@ -1,6 +1,10 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MODES, DEFAULT_SWITCH_POLICY } from './config';
+import {
+  DEFAULT_MODES,
+  DEFAULT_SWITCH_POLICY,
+  normalizeConfig,
+} from './config';
 import { effectivePolicy, resolveMode, transformRoute } from './modes';
 import { clampEffort } from './routing';
 import { required } from './test/fixtures';
@@ -198,6 +202,18 @@ describe('effective switch policy', () => {
         'cost',
       ),
     ).toMatchObject({ costSensitivity: 0.1, escalationHoldTurns: 1 });
+  });
+
+  it('limits escalation to the failing turn in every mode when configured', () => {
+    const { config: limited } = normalizeConfig({
+      switchPolicy: { escalationHoldTurns: 0 },
+      modes: {
+        cost: { policy: { escalationHoldTurns: 0 } },
+        quality: { policy: { escalationHoldTurns: 0 } },
+      },
+    });
+    for (const mode of ['cost', 'balanced', 'quality'] as const)
+      expect(effectivePolicy(limited, mode).escalationHoldTurns).toBe(0);
   });
 
   it('falls back to defaults without configured policy', () => {

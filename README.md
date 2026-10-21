@@ -83,8 +83,8 @@ Recent records cover 1,967 Pi responses across 25 sessions. They show route use,
 ## Upgrading to 0.16.0
 
 Restart Pi after updating. Configuration without `mode` routes as before.
-Project `.pi/model-router.json` files can now set only routes, display and
-`mode` (security fix). `off`/`minimal` effort at `low` and above disables that
+Project `.pi/model-router.json` files can now set only routes, `activityRouting`,
+display and `mode` (security fix). `off`/`minimal` effort at `low` and above disables that
 tier. Repeated tool failures now escalate one tier in every mode.
 [Upgrade details →](docs/user-guide.md#from-015x-to-0160)
 

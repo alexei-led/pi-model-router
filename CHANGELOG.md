@@ -8,7 +8,7 @@ Choose a routing mode, `cost`, `balanced` or `quality`, per profile, project or 
 
 ### Security
 
-- `.pi/model-router.json` can now set only routes, `activityRouting`, `ui` and `mode`. Before 0.16.0, a cloned repository's file could set model aliases (including `effortCacheSharing`), `switchPolicy`, `maxSessionBudget`, `debug` and other keys. Those keys are now ignored with a warning that shows no values. Advisor settings remain user-only.
+- `.pi/model-router.json` can now set only routes, `activityRouting`, `ui` and `mode`. Before 0.16.0, a cloned repository's file could set model aliases (including `effortCacheSharing`), `switchPolicy`, `maxSessionBudget`, `debug` and other keys. Those keys are now ignored with a warning that shows no values. Advisor settings remain user-only. Project routes can still name any registered model and set route capabilities, so open project files only from repositories you trust.
 
 ### Changes
 
@@ -24,7 +24,7 @@ Choose a routing mode, `cost`, `balanced` or `quality`, per profile, project or 
 
 1. Before upgrading, move any `models`, `switchPolicy`, `modes`, `maxSessionBudget` or `debug` settings from `.pi/model-router.json` to the user file. Otherwise 0.16.0 ignores them.
 2. Change `off` or `minimal` effort at `low`, `medium` or `high` to `low` or higher. Otherwise that tier is disabled.
-3. Restart Pi after upgrading. Configuration without `mode` routes as before (`balanced`), except that repeated tool failures now escalate. Set `switchPolicy.escalationHoldTurns` to `0` to limit escalation to the rest of the failing turn.
+3. Restart Pi after upgrading. Configuration without `mode` routes as before (`balanced`), except that repeated tool failures now escalate. To limit escalation to the rest of the failing turn, set `escalationHoldTurns` to `0` in `switchPolicy` and in `modes.cost.policy` and `modes.quality.policy`.
 
 See [upgrade details](docs/user-guide.md#from-015x-to-0160).
 

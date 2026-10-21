@@ -112,7 +112,10 @@ only the current mode's cells generate. [Mode behavior](user-guide.md#choose-a-r
 
 `escalation.ts` hashes a failing tool's name and normalized output. A repeated
 signature with a successful `edit`/`write` between, in one user turn, sets a
-floor one tier above the incumbent until a later user turn. The provider turn
+floor one tier above the incumbent. The floor is anchored to a hash of the
+failing turn's user message (timestamp and content) and holds while that message
+is in the context and no more than `escalationHoldTurns` user messages follow it,
+so compaction and branch switches cannot stretch or move it. The provider turn
 cache holds this state, and it is not persisted. Request preparation raises an
 unpinned selection to the floor after continuation handling. A signature
 escalates only once.
