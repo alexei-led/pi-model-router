@@ -12,6 +12,16 @@ const SIGNATURE_TEXT_CHARS = 2000;
 
 type ToolResult = Extract<Message, { role: 'toolResult' }>;
 
+const hash = (text: string): string =>
+  createHash('sha256').update(text).digest('hex').slice(0, 16);
+
+/**
+ * A user message keeps its timestamp and content across compaction, resume
+ * and branch switches; a turn count or prefix hash does not.
+ */
+const userKey = (message: Message): string =>
+  hash(JSON.stringify([message.timestamp, message.content]));
+
 /** Only a hash leaves this module; tool output is never stored. */
 const signatureOf = (message: ToolResult): string => {
   const text = message.content
@@ -22,10 +32,7 @@ const signatureOf = (message: ToolResult): string => {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, SIGNATURE_TEXT_CHARS);
-  return createHash('sha256')
-    .update(`${message.toolName}\0${text}`)
-    .digest('hex')
-    .slice(0, 16);
+  return hash(`${message.toolName}\0${text}`);
 };
 
 /**
@@ -65,7 +72,9 @@ export const repeatedFailure = (
 export interface EscalationState {
   readonly signature?: string;
   readonly floor?: RouterTier;
-  readonly untilUserTurn?: number;
+  /** The user message that started the failing turn. */
+  readonly anchor?: string;
+  readonly holdTurns?: number;
 }
 
 const tierAbove = (tier: RouterTier): RouterTier | undefined => {
@@ -75,7 +84,9 @@ const tierAbove = (tier: RouterTier): RouterTier | undefined => {
 
 /**
  * Codex-router parity: a repeated failure moves one tier above the incumbent
- * and holds that floor for `holdTurns` further user turns. A signature
+ * and holds that floor for `holdTurns` further user turns. The hold applies
+ * only while the failing turn's user message is in the context, so another
+ * branch or a compaction that drops it releases the floor. A signature
  * escalates once; at the top tier it stays unconsumed.
  */
 export const updateEscalation = (
@@ -86,22 +97,30 @@ export const updateEscalation = (
     holdTurns: number;
   },
 ): { state: EscalationState; floor: RouterTier | undefined } => {
-  const userTurn = input.messages.filter(
-    (message) => message.role === 'user',
-  ).length;
+  const users = input.messages.filter((message) => message.role === 'user');
   const signature = repeatedFailure(input.messages);
   const floor =
     signature && signature !== state.signature && input.incumbent
       ? tierAbove(input.incumbent)
       : undefined;
+  const current = users.at(-1);
   const next =
-    signature && floor
-      ? { signature, floor, untilUserTurn: userTurn + input.holdTurns }
+    signature && floor && current
+      ? {
+          signature,
+          floor,
+          anchor: userKey(current),
+          holdTurns: input.holdTurns,
+        }
       : state;
+  const anchorIndex = users.findLastIndex(
+    (message) => userKey(message) === next.anchor,
+  );
+  const turnsAfter = users.length - 1 - anchorIndex;
   return {
     state: next,
     floor:
-      next.untilUserTurn !== undefined && userTurn <= next.untilUserTurn
+      anchorIndex >= 0 && turnsAfter <= (next.holdTurns ?? 0)
         ? next.floor
         : undefined,
   };

@@ -145,6 +145,41 @@ describe('escalation hold', () => {
     expect(again.state).toBe(first.state);
   });
 
+  it('counts turns after the failing turn when compaction rewrites history', () => {
+    const history = [user('old 1'), user('old 2'), ...failing];
+    const first = update({}, history, 'low');
+    const compacted = [user('summary'), ...failing];
+    expect(update(first.state, [...compacted, user('2')], 'medium').floor).toBe(
+      'medium',
+    );
+    expect(
+      update(
+        first.state,
+        [...compacted, user('2'), user('3'), user('4')],
+        'medium',
+      ).floor,
+    ).toBeUndefined();
+  });
+
+  it('releases the floor when compaction removes the failing turn', () => {
+    const first = update({}, failing, 'low');
+    expect(
+      update(first.state, [user('summary'), user('2')], 'medium').floor,
+    ).toBeUndefined();
+  });
+
+  it('does not apply the floor on another branch', () => {
+    const first = update({}, [user('shared'), ...failing], 'low');
+    expect(
+      update(first.state, [user('shared'), user('other task')], 'medium')
+        .floor,
+    ).toBeUndefined();
+  });
+
+  it('does not restore the hold in a fresh runtime', () => {
+    expect(update({}, [...failing, user('2')], 'medium').floor).toBeUndefined();
+  });
+
   it('escalates again for a new signature during a hold', () => {
     const first = update({}, failing, 'low');
     const other = [user(), fail('B'), edit(), fail('B')];
