@@ -19,7 +19,7 @@ This example uses illustrative model references. Replace them with models and ef
     "auto": {
       "baselineTier": "high",
       "high": { "model": "openai/gpt-6-astra", "thinking": "high" },
-      "low": { "model": "openai/gpt-6-luna", "thinking": "off" }
+      "low": { "model": "openai/gpt-6-luna", "thinking": "low" }
     }
   }
 }
@@ -205,6 +205,8 @@ The router uses the first mode that is set:
 A top-level `mode` in the user file is ignored with a warning. Set it per profile.
 
 - Run `/router mode` to show the mode and its source, for example `cost (session)`.
+  A pin adds `bypassed by pin`. An effort override names its tiers, for
+  example `bypassed at high by effort override`.
 - Run `/router mode default` to clear the session override.
 - A mode change applies from the next request. A running request keeps its
   route, and advice made for the previous mode is not used.
