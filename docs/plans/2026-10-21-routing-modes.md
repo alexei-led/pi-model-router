@@ -90,8 +90,8 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [x] C10 State: `modeOverride` in `router-state`; restore; decision allowlist.
 - [x] C11 Commands: `/router mode`, completions, help text, `ROUTER_COMMANDS`.
 - [x] C12 UI: widget, `/router status`, inspector Now/Settings, log formatting.
-- [ ] C13 Fixture: per-tier prices; a failing-tool scenario for escalation.
-- [ ] C14 `AGENTS.md` module list: `modes.ts`, `escalation.ts`.
+- [x] C13 Fixture: per-tier prices; a failing-tool scenario for escalation.
+- [x] C14 `AGENTS.md` module list: `modes.ts`, `escalation.ts`.
 
 ### Tests
 
