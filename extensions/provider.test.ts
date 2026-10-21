@@ -2576,3 +2576,53 @@ describe('routing mode changes while advice is in flight', () => {
     });
   });
 });
+
+describe('routing mode on an unchanged tool route', () => {
+  it('records the new mode when a mode change leaves the route unchanged', async () => {
+    const s = setup();
+    s.state.pinnedTierByProfile = {};
+    s.state.currentConfig = normalizeConfig({
+      profiles: {
+        balanced: {
+          baselineTier: 'low',
+          low: { model: 'test/small', thinking: 'low' },
+        },
+      },
+    }).config;
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            { type: 'toolCall', name: 'read', id: 'call-1', arguments: {} },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      { role: 'user', content: 'Read the file.', timestamp: 20 },
+    ];
+    const { result } = await consume(s.stream({ messages }));
+    expect(s.state.lastDecision?.mode).toBe('balanced');
+    messages.push(result, {
+      role: 'toolResult',
+      toolCallId: 'call-1',
+      toolName: 'read',
+      content: [{ type: 'text', text: 'contents' }],
+      isError: false,
+      timestamp: 22,
+    });
+    s.state.modeOverride = 'cost';
+    await consume(s.stream({ messages }));
+    expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('small');
+    expect(s.state.lastDecision).toMatchObject({
+      mode: 'cost',
+      modeSource: 'session',
+      modeLever: 'none',
+      thinking: 'low',
+    });
+  });
+});

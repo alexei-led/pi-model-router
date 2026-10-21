@@ -506,7 +506,6 @@ const chooseAdvisorRoute = async (
   const activeConfig = input.getCurrentConfig();
   const authorized =
     activeConfig === input.config &&
-    input.getCurrentMode().mode === input.mode.mode &&
     authorization ===
       JSON.stringify([activeConfig.advisor, input.profile.advisor]) &&
     (reviewResult !== undefined || performance.now() < routingDeadline);

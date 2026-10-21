@@ -67,7 +67,7 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 
 - **Transform:** new `extensions/modes.ts`, one pure function `transformRoute({mode, tier, pairAt, supportedLevels, inputPrice, budgetExceeded})` returning `{sourceTier, thinking, lever: 'model'|'effort'|'none'}`. `pairAt(t)` resolves the activity cell's tier `t`, else the generic tier `t` (sparse cells inherit). Steps use `THINKING_LEVELS`; `proj` is the existing `clampEffort` over registry levels narrowed by declared `thinkingLevels` (same as `routeThinking`). Minimum for `low`+ is `low`. Price = registry `model.cost.input`; unknown or zero price means "not cheaper".
 - **Matrix:** `buildRouteMatrix` applies the transform per cell after eligibility, before context fit. Each plan keeps `tier = T` (classified tier) and carries `mode` provenance `{mode, lever, sourceTier}`. Model lever: `config` and attempts come from the source cell (with its fallbacks). Effort lever: same config, the transformed effort as `thinkingOverrides[T]`, so `currentPlanPairs` reproduces it. Plan ids change with the mode, so stale advice and reviews no longer match. Pins skip the transform (`pinnedTier` already selects generic plans). Micro is never transformed. Cost never yields micro.
-- **Gate:** no new gate. Effective mode and the effective policy go into the `policy` fence (`provider-request.ts:748`). `chooseAdvisorRoute` re-reads the live mode after classification; on a change it rejects the advice and selects from a matrix rebuilt with the current mode.
+- **Gate:** no new gate. The effective mode goes into the `policy` fence, so a reused continuation or advised decision never logs a stale mode. Plan ids encode the transformed pair, so advice or a review computed for another mode fails the existing id checks; a separate live-mode authorization check was redundant (mutation-tested) and is not added. After classification the matrix is rebuilt from the live mode, so a rejected answer falls back to the current transformed matrix.
 - **Escalation:** new `extensions/escalation.ts`, pure `detectEscalation(messages)` plus a small runtime hold. During a hold, a selected plan below the floor tier moves to the floor tier in the same cell (else generic) of the current matrix; reason code `escalation`. Skipped for pins, Google continuation, and above `medium` when the budget is exceeded.
 - **Persistence:** `router-state` gains `modeOverride?`. Restored only through the existing owner match. Never written to `model-router-state.json`. Decisions gain `mode`, `modeSource`, `modeLever`, `modeSourceTier`; `snapshotDecision` and `isDecision` allowlist them. The route in use stays `targetLabel` + `thinking`.
 - **Config:** `profiles.<n>.mode`; top-level `modes.{cost,balanced,quality}.policy` with keys from `switchPolicy` (built-in cost `{costSensitivity: 0.8, escalationHoldTurns: 1}`, quality `{costSensitivity: 0.2, escalationHoldTurns: 4}`, deep-merged, documented as untuned); `switchPolicy.escalationHoldTurns` (default 2); project top-level `mode`. A user-level top-level `mode` is ignored with a warning (set it per profile).
@@ -84,9 +84,9 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [x] C4 Config: normalize `profiles.<n>.mode`, `modes`, `switchPolicy.escalationHoldTurns`; merge rules; effective policy `{...switchPolicy, ...modes[mode].policy}`.
 - [x] C5 Config: project allowlist replaces `stripProjectAdvisorConfig`; extract project `mode`.
 - [x] C6 Config: off/minimal validation at `low`+.
-- [ ] C7 `modes.ts`: `resolveMode` and `transformRoute`.
-- [ ] C8 `routing.ts`: apply the transform in `buildRouteMatrix`; budget cap for quality.
-- [ ] C9 `provider-request.ts`: mode in the `policy` fence; live-mode check after classification; mode-specific switch policy into `evaluateSwitch`.
+- [x] C7 `modes.ts`: `resolveMode` and `transformRoute`.
+- [x] C8 `routing.ts`: apply the transform in `buildRouteMatrix`; budget cap for quality.
+- [x] C9 `provider-request.ts`: mode in the `policy` fence; live-mode check after classification; mode-specific switch policy into `evaluateSwitch`.
 - [ ] C10 State: `modeOverride` in `router-state`; restore; decision allowlist.
 - [ ] C11 Commands: `/router mode`, completions, help text, `ROUTER_COMMANDS`.
 - [ ] C12 UI: widget, `/router status`, inspector Now/Settings, log formatting.
@@ -95,18 +95,18 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 
 ### Tests
 
-- [ ] T1 Table test: mode × tier × activity × supported efforts → pair, including the design §2 cases and the Claude-like expectations (same-model high drops effort; medium takes the cheaper low model; low drops one effort step; low cannot go below `low`).
-- [ ] T2 Quality table: effort lever first; model lever at max effort; `high` at max unchanged; budget cap.
-- [ ] T3 Micro unchanged in every mode; cost never produces micro; unknown price → effort lever.
-- [ ] T4 Precedence: session > project > profile > default; `default` clears the override.
+- [x] T1 Table test: mode × tier × activity × supported efforts → pair, including the design §2 cases and the Claude-like expectations (same-model high drops effort; medium takes the cheaper low model; low drops one effort step; low cannot go below `low`).
+- [x] T2 Quality table: effort lever first; model lever at max effort; `high` at max unchanged; budget cap.
+- [x] T3 Micro unchanged in every mode; cost never produces micro; unknown price → effort lever.
+- [x] T4 Precedence: session > project > profile > default; `default` clears the override.
 - [x] T5 Effective policy merge: built-in modes deep-merged with user edits; mode patch beats `switchPolicy`; invalid `modes` keys warn.
 - [x] T6 Project allowlist: each rejected key warns and has no effect; allowed keys work; `mode` accepted. Security regression test for `switchPolicy`, `maxSessionBudget`, `debug`.
 - [x] T7 Validation: explicit off/minimal at `low`+ disables the tier (generic and activity); `micro: off` stays valid; non-reasoning routes stay valid.
-- [ ] T8 **Key regression:** advice started under balanced, mode changed, old result delivered → rejected; generation uses the current transformed matrix. Same for a background review.
-- [ ] T9 Generation revalidation succeeds for model-lever and effort-lever plans, fallbacks included.
-- [ ] T10 Pin and effort override bypass the mode.
+- [x] T8 **Key regression:** advice started under balanced, mode changed, old result delivered → rejected; generation uses the current transformed matrix. Same for a background review.
+- [x] T9 Generation revalidation succeeds for model-lever and effort-lever plans, fallbacks included.
+- [x] T10 Pin and effort override bypass the mode.
 - [ ] T11 Persistence: override survives resume (same owner); not inherited by new or fork sessions; absent from `model-router-state.json`.
-- [ ] T12 Escalation: two same-signature failures with an edit between → one tier up for N user turns; no edit → none; different signatures; already `high`; same signature cannot re-escalate; pin and Google continuation skip; budget cap.
+- [x] T12 Escalation: two same-signature failures with an edit between → one tier up for N user turns; no edit → none; different signatures; already `high`; same signature cannot re-escalate; pin and Google continuation skip; budget cap.
 - [ ] T13 Decisions carry `mode`, `modeSource`, classified tier and route in use; snapshot round-trip.
 - [ ] T14 Commands: usage errors, no-profile error, completions.
 - [ ] T16 **Golden decision matrix** (manager request, 2026-10-21): one table-driven test over every classifier outcome (`micro`, `low`, `medium`, `high`, `uncertain`, invalid/failed advice, and the no-classifier baseline path) × mode × activity cell × pin × effort override × budget × escalation hold → expected `{tier, model, thinking, lever, reasonCode}`. Built on a realistic profile (Claude-like and Codex-like shapes from the user's config, catalog prices). Golden output is checked in and reviewed by hand.
