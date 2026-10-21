@@ -409,6 +409,7 @@ const applyModeToCell = (
   thinkingOverrides: RouterThinkingByTier | undefined,
   mode: RouterMode,
   budgetExceeded: boolean,
+  contextTokens: number,
 ): ModeCell => {
   const configAt = (tier: RouterTier) => cellProfile[tier] ?? generic[tier];
   const resolved = { ...generic, ...cellProfile };
@@ -419,8 +420,12 @@ const applyModeToCell = (
     thinkingOverrides,
   );
   const primaries = primaryRoutePairs(resolved, pairs);
-  const routeAt = (tier: RouterTier) =>
-    primaries.find((pair) => pair.tier === tier);
+  // Another tier's route is a lever only if its model holds the request.
+  const fits = (pair: RoutePair) => {
+    const { provider, modelId } = parseCanonicalModelRef(pair.model);
+    const window = findModel(provider, modelId)?.contextWindow;
+    return window === undefined || contextTokens <= window * CONTEXT_FILL;
+  };
   const next: RouterProfile = { ...cellProfile };
   const overrides: RouterThinkingByTier = { ...thinkingOverrides };
   const provenance: ModeCell['provenance'] = {};
@@ -430,7 +435,10 @@ const applyModeToCell = (
     const result = transformRoute({
       mode,
       tier,
-      routeAt,
+      routeAt: (target) => {
+        const pair = primaries.find((entry) => entry.tier === target);
+        return pair && (target === tier || fits(pair)) ? pair : undefined;
+      },
       project: (pair, level) => {
         const config = configAt(pair.tier);
         return config
@@ -496,6 +504,7 @@ export const buildRouteMatrix = (
             thinkingOverrides,
             mode.mode,
             mode.budgetExceeded,
+            contextTokens,
           )
         : { profile: cell.profile, thinkingOverrides, provenance: {} };
     return {

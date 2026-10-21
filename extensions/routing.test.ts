@@ -867,3 +867,96 @@ describe('mode transform in the route matrix', () => {
     ).toEqual(['test/haiku/high']);
   });
 });
+
+describe('mode transform regressions from past routing fixes', () => {
+  const priced = (
+    id: string,
+    input: number,
+    overrides: Parameters<typeof model>[1] = {},
+  ) =>
+    model(id, {
+      cost: {
+        input,
+        output: input * 5,
+        cacheRead: input / 10,
+        cacheWrite: input,
+      },
+      ...overrides,
+    });
+  const twoTier = (low: string) =>
+    required(
+      normalizeConfig({
+        profiles: {
+          auto: {
+            high: { model: 'test/big', thinking: 'high' },
+            medium: { model: 'test/big', thinking: 'medium' },
+            low: { model: `test/${low}`, thinking: 'medium' },
+          },
+        },
+      }).config.profiles.auto,
+    );
+  const routeOf = (
+    catalog: ReturnType<typeof model>[],
+    profile: RouterProfile,
+    options: { image?: boolean; tokens?: number } = {},
+  ) => {
+    const find = (provider: string, id: string) =>
+      provider === 'test'
+        ? catalog.find((entry) => entry.id === id)
+        : undefined;
+    const built = buildRouteMatrix(
+      profile,
+      find,
+      options.image ?? false,
+      options.tokens ?? 1,
+      undefined,
+      true,
+      undefined,
+      { mode: 'cost', budgetExceeded: false },
+    );
+    const plan = selectBaselinePlan('auto', profile, built).plan;
+    return `${plan.tier} ${plan.attempts[0].model}/${plan.attempts[0].thinking}`;
+  };
+
+  // 0a9fcd5b: context windows are per model, not ordered by tier.
+  it('keeps the effort lever when the cheaper model cannot hold the context', () => {
+    const catalog = [
+      priced('big', 2, { contextWindow: 200_000 }),
+      priced('small', 1, { contextWindow: 8_000 }),
+    ];
+    expect(routeOf(catalog, twoTier('small'))).toBe('medium test/small/medium');
+    expect(routeOf(catalog, twoTier('small'), { tokens: 50_000 })).toBe(
+      'medium test/big/low',
+    );
+  });
+
+  // Image input: a text-only lower model is not a candidate for the model lever.
+  it('keeps the effort lever when the cheaper model cannot read an image', () => {
+    const catalog = [priced('big', 2), priced('text', 1, { input: ['text'] })];
+    expect(routeOf(catalog, twoTier('text'))).toBe('medium test/text/medium');
+    expect(routeOf(catalog, twoTier('text'), { image: true })).toBe(
+      'medium test/big/low',
+    );
+  });
+
+  // 788b28f8: an ineligible primary still offers its first eligible fallback.
+  it('transforms a tier served by its fallback', () => {
+    const profile = required(
+      normalizeConfig({
+        profiles: {
+          auto: {
+            medium: {
+              model: 'test/missing',
+              thinking: 'medium',
+              fallbacks: ['test/big'],
+            },
+            low: { model: 'test/small', thinking: 'medium' },
+          },
+        },
+      }).config.profiles.auto,
+    );
+    expect(routeOf([priced('big', 2), priced('small', 1)], profile)).toBe(
+      'medium test/small/medium',
+    );
+  });
+});
