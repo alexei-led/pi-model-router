@@ -304,7 +304,7 @@ An initial user request makes one approved `modelRegistry.classify()` operation 
 
 Both initial choices and reviews use one approved `modelRegistry.classify()` operation. Normally it
 asks the existing typed `route` choice among eligible tier representatives and
-`uncertain`. With activity routing on and meaningful eligible specialization
+`uncertain`. Candidates show the routes after the [routing mode](user-guide.md#choose-a-routing-mode) is applied. With activity routing on and meaningful eligible specialization
 plans, it also asks a separate typed `activity` choice. These are independent
 answers in the same operation, not a multiplied joint distribution or a second
 advisor call. Pi may implement the operation using several bounded HTTP requests.

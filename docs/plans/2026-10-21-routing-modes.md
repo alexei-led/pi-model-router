@@ -55,7 +55,7 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 2. **Mode change mid tool loop:** **apply at once through the existing fence** (like pin/thinking). The continuation becomes invalid and the compatible-route rule keeps the prior model when its tier still offers it (`provider-request.ts:666-717`). New turns classify on the new matrix. Alternative: queue the change to the next user turn like the Settings tab.
 3. **Failure escalation in every mode, balanced included:** **yes**, for parity with codex/claude and the design formula `T = classified + boost`. This changes balanced behaviour; the release notes call it out. Alternative: cost and quality only.
 4. **Escalation detection source:** **scan the request's context messages** (current user turn) instead of a `tool_result` hook. Same data, branch-correct, no event-ordering state. Only the hold `{signature, floorTier, untilUserTurn}` is runtime state.
-5. **Project-file allowlist:** **routes + display + `mode`.** Allowed: `profiles.<n>.{high,medium,low,micro,activities,baselineTier}`, `models`, `activityRouting`, `ui`, top-level `mode`. Rejected with a value-free warning: `advisor`, `profiles.<n>.{advisor,mode}`, `switchPolicy`, `modes`, `maxSessionBudget`, `debug`, `rules`, `phaseBias`, unknown keys. The design says mode-only; that would remove a documented feature.
+5. **Project-file allowlist:** **routes + display + `mode`.** Allowed: `profiles.<n>.{high,medium,low,micro,activities,baselineTier}`, `activityRouting`, `ui`, top-level `mode`. Rejected with a value-free warning: `models` (alias metadata such as `effortCacheSharing` is policy; corrected after the Q5 note, `30b40c31`), `advisor`, `profiles.<n>.{advisor,mode}`, `switchPolicy`, `modes`, `maxSessionBudget`, `debug`, `rules`, `phaseBias`, unknown keys. The design says mode-only; that would remove a documented feature.
 6. **Validation:** explicit `thinking: off|minimal` on `low`/`medium`/`high` (generic or activity cell) **disables that tier with a warning** (existing invalid-tier pattern). A route declared `reasoning: false` may still say `off`; routes limited by capability stay valid; the transform never moves them below `low`.
 7. **Effort override** (`/router thinking`, Shift+Tab) is a manual choice: **mode is bypassed for overridden tiers.** Status shows `mode cost (session) · bypassed by effort override`.
 8. **Budget exceeded:** **quality's model lever never targets `high`.** Otherwise a medium cell would generate the high model and slip past the budget pool (`routing.ts:481-486`).
@@ -115,19 +115,19 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 
 ### Docs
 
-- [ ] D1 `README.md`: one front-page line on modes; "Upgrading to 0.16.0".
-- [ ] D2 `docs/user-guide.md`: modes section (meaning, levers, precedence, command, pending behaviour, pins/overrides bypass), project-file allowlist (can be gitignored), escalation, config table rows, upgrade notes.
-- [ ] D3 `model-router.example.json`: `mode` per profile, `modes`, `escalationHoldTurns`.
-- [ ] D4 `docs/architecture.md`: transform location, matrix provenance, fence, escalation, module list.
-- [ ] D5 `docs/classifier-advisor.md`: candidates show transformed routes (one fact, one line).
-- [ ] D6 Mode policy values documented as untuned in one place (user guide).
-- [ ] D7 Screenshots: existing method (`docs/testing/router-ui-agterm-acceptance.md:39-65, 202-206`): agterm window, `screencapture -l <window>`, `sips` crop, fixture extension. New: widget with `cost (session)`, `/router status`, Settings/Now tab with mode. Add an acceptance report `docs/testing/routing-modes-acceptance.md`.
+- [x] D1 `README.md`: one front-page line on modes; "Upgrading to 0.16.0".
+- [x] D2 `docs/user-guide.md`: modes section (meaning, levers, precedence, command, pending behaviour, pins/overrides bypass), project-file allowlist (can be gitignored), escalation, config table rows, upgrade notes.
+- [x] D3 `model-router.example.json`: `mode` per profile, `modes`, `escalationHoldTurns`.
+- [x] D4 `docs/architecture.md`: transform location, matrix provenance, fence, escalation, module list.
+- [x] D5 `docs/classifier-advisor.md`: candidates show transformed routes (one fact, one line).
+- [x] D6 Mode policy values documented as untuned in one place (user guide).
+- [ ] D7 Screenshots: existing method (`docs/testing/router-ui-agterm-acceptance.md:39-65, 202-206`): agterm window, `screencapture -l <window>`, `sips` crop, fixture extension. New: widget with `cost (session)`, `/router status`, Settings/Now tab with mode. Add an acceptance report `docs/testing/routing-modes-acceptance.md`. Status: acceptance report written (`docs/testing/routing-modes-acceptance.md`, L1–L8 evidence); screenshots pending from the manager.
 
 ### Config and migration
 
-- [ ] M1 Existing configs load unchanged; no `mode` means `balanced`.
-- [ ] M2 Stored `router-state` without `modeOverride` restores as before.
-- [ ] M3 Upgrade notes: project allowlist (security), off/minimal validation, escalation in balanced.
+- [x] M1 Existing configs load unchanged; no `mode` means `balanced`.
+- [x] M2 Stored `router-state` without `modeOverride` restores as before.
+- [x] M3 Upgrade notes: project allowlist (security), off/minimal validation, escalation in balanced.
 - User machine changes (listed, **not applied**):
   - `~/.pi/agent/model-router.json`: add `"mode": "cost"` to `openai-work` and `claude-work`; `"mode": "balanced"` (or omit) for `openai-personal` and `claude-personal`. No current tier at `low`+ uses `off`/`minimal`, so validation does not affect it.
   - `~/.pi/agent/model-router-state.json`: no change.
@@ -137,14 +137,14 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 
 Isolated: `PI_CODING_AGENT_DIR` and `HOME` under the scratchpad, `pi install --local <worktree>`, `--approve --offline --no-mcp --no-skills --no-context-files --session-dir <scratch>`, fixture extension, `--model router/auto`.
 
-- [ ] L1 Each mode: `/router mode cost|balanced|quality`; capture the route per tier (`agtermctl session text`, `/router log`).
-- [ ] L2 Mode change mid tool loop: route follows open choice 2; next turn uses the new matrix.
-- [ ] L3 Session vs project vs profile; `default` clears the override.
-- [ ] L4 Resume keeps the override; `/new` does not.
-- [ ] L5 Pin bypasses the mode.
-- [ ] L6 Status shows mode and source.
-- [ ] L7 Log records carry `mode`, `modeSource`, classified tier, route in use.
-- [ ] L8 Escalation via the fixture failure scenario.
+- [x] L1 Each mode: `/router mode cost|balanced|quality`; capture the route per tier (`agtermctl session text`, `/router log`).
+- [x] L2 Mode change mid tool loop: route follows open choice 2; next turn uses the new matrix.
+- [x] L3 Session vs project vs profile; `default` clears the override.
+- [x] L4 Resume keeps the override; `/new` does not.
+- [x] L5 Pin bypasses the mode.
+- [x] L6 Status shows mode and source.
+- [x] L7 Log records carry `mode`, `modeSource`, classified tier, route in use.
+- [x] L8 Escalation via the fixture failure scenario.
 - [x] L10 **Impact, offline** (manager request): replay a fixed prompt set and recorded traces (`docs/assets/usage-data.json` where usable) through the matrix per mode; report estimated catalog cost per mode and the model/effort mix per profile. Any mode or profile without a real difference (for example zero prices or same-model tiers) is reported as a finding. Result: `docs/research/2026-10-21-routing-modes-impact.md`.
 - [ ] L11 **Impact, live** (manager request): one representative multi-turn task per mode in an isolated agterm session, on one subscription-billed and one API-billed profile, classifier Jev (`typesafe/jev-1.14.0`, enabled and approved in the user's config). Capture models used, switches, tokens and estimated cost from `/router log` and `/router usage`. Blocker: an isolated agent dir has no provider login. Needs the user to log in inside it (`! PI_CODING_AGENT_DIR=… pi` then `/login`) or to approve another way. I will not copy `auth.json`.
 - [ ] L12 **Live classifier run** (extra task item 2): a fixed set of 20 prompts covering every tier × activity combination that can realistically trigger, with expected tier and activity. Run through real Jev; record the classified tier and activity; map each to the routed pair under each mode for the user-like profiles. Report classification mismatches separately from routing bugs. Generation uses the fixture provider, so only Jev calls are live. Blocker: Jev needs a TypeSafe login in the isolated agent dir (same question as L11).

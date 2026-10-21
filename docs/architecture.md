@@ -99,6 +99,24 @@ budget-applicable pool. See [configuration and baseline details](user-guide.md#a
 Explicit fallback models retain their configured order. They are not extra classifier candidates.
 Prompt words, language, length, and inferred task phase never select a local tier.
 
+The routing mode is applied while the matrix is built, before advice and
+baseline selection. `modes.ts` holds the pure transform: for each generic or
+activity cell it returns the source tier, the effort and the lever (`model`,
+`effort` or `none`). `routing.ts` checks the lever's source route for
+availability and context fit, and stores the result in the plan's attempts,
+`thinkingOverrides` and `mode` provenance. Pins skip the transform. `micro` and
+an effort override keep the configured pair. Plan IDs contain the transformed
+pairs, and the advice fence contains the mode, so advice made under another
+mode cannot match. After advice, the matrix is rebuilt from the live mode, so
+only the current mode's cells generate. [Mode behavior](user-guide.md#choose-a-routing-mode).
+
+`escalation.ts` hashes a failing tool's name and normalized output. A repeated
+signature with a successful `edit`/`write` between, in one user turn, sets a
+floor one tier above the incumbent until a later user turn. The provider turn
+cache holds this state, and it is not persisted. Request preparation raises an
+unpinned selection to the floor after continuation handling. A signature
+escalates only once.
+
 ## Advisor contract
 
 The selected Pi classifier receives bounded current text,
@@ -229,6 +247,8 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 | `config.ts` | Load, merge, validate, and normalize configuration. |
 | `domain.ts` | Parse canonical model references and validate pure tier, effort, and pin values; no config I/O. |
 | `routing.ts` | Build immutable eligible cell plans and apply baseline, pin, budget, input, context-fit, and effort policy. |
+| `modes.ts` | Resolve the routing mode and effective switch policy; transform a route pair for cost or quality. |
+| `escalation.ts` | Detect repeated tool failures and hold the escalation floor. |
 | `provider.ts` | Register logical profile models from live capabilities, create the provider-scoped turn cache, and adapt Pi's stream API. |
 | `provider-request.ts` | Build turn identity, validate continuation reuse, resolve a current matrix cell, and coordinate classifier advice. |
 | `provider-turns.ts` | Keep bounded continuation/advice caches and retain selected plans and reference-count shared classifier flights for one session-owned provider registration. |
