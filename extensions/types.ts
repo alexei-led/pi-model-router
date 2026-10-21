@@ -643,6 +643,15 @@ export interface RouterUIHistoryEntry {
   cacheWriteTokens?: number | undefined;
 }
 /** Presentation only: no credentials, transcript text or remote explanations. */
+export const ROUTER_UI_POLICY_CONTROLS = {
+  costHorizon: 'horizonRequests',
+  costSensitivity: 'costSensitivity',
+  strongAdviceConfidence: 'strongAdviceConfidence',
+} as const satisfies Partial<
+  Record<keyof RouterUIControls, keyof RouterSwitchPolicy>
+>;
+export type RouterUIPolicyControl = keyof typeof ROUTER_UI_POLICY_CONTROLS;
+export type RouterUIPolicySource = 'config' | 'mode' | 'session';
 export interface RouterUISnapshot {
   profile: string;
   lifecycle: RouterUILifecycle;
@@ -661,6 +670,11 @@ export interface RouterUISnapshot {
   advice?: RouterUIAdviceObservation | undefined;
   lastAdvice?: RouterUIAdviceObservation | undefined;
   loggingEnabled: boolean;
+  mode: ResolvedMode;
+  /** A pin or effort override on the active profile bypasses the mode. */
+  modeBypass?: 'pin' | 'effort' | undefined;
+  /** Where each shown switch-policy control value comes from. */
+  policySources: Readonly<Record<RouterUIPolicyControl, RouterUIPolicySource>>;
   controls: Readonly<RouterUIControls>;
   pendingControls?: Readonly<RouterUIControls> | undefined;
   pendingRoutes?: boolean | undefined;
@@ -714,6 +728,7 @@ export interface RouterUIRuntimeState {
   readonly routerEnabled: boolean;
   readonly pinnedTierByProfile: RouterPinByProfile;
   readonly thinkingByProfile: RouterThinkingByProfile;
+  readonly modeOverride?: RouterMode | undefined;
   readonly lastDecision: RoutingDecision | undefined;
   readonly debugHistory: readonly RoutingDecision[];
   readonly debugEnabled?: boolean;

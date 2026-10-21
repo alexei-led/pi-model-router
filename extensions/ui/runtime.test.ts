@@ -281,10 +281,70 @@ it('queues adaptive-review and switch-policy controls until the next user bounda
   });
   expect(runtime.activatePending()).toBe(true);
   expect(state.currentConfig.advisor?.reviewEveryRequests).toBe(2);
-  expect(state.currentConfig.switchPolicy).toMatchObject({
+  expect(state.currentConfig.sessionPolicy).toEqual({
     horizonRequests: 10,
     costSensitivity: 0.25,
     strongAdviceConfidence: 0.95,
+  });
+  expect(state.currentConfig.switchPolicy).toMatchObject({
+    horizonRequests: 5,
+    costSensitivity: 0.5,
+  });
+  expect(runtime.adapters.getSnapshot().controls).toMatchObject({
+    costHorizon: 10,
+    costSensitivity: 0.25,
+    strongAdviceConfidence: 0.95,
+  });
+});
+
+describe('mode and Settings-tab policy precedence', () => {
+  const moded = () => {
+    const ui = setup();
+    const state: typeof ui.state & { modeOverride?: 'cost' | 'quality' } =
+      ui.state;
+    state.modeOverride = 'cost';
+    return { ...ui, state };
+  };
+
+  it('shows the mode patch as the effective value and its source', () => {
+    const { runtime } = moded();
+    const snapshot = runtime.adapters.getSnapshot();
+    expect(snapshot.mode).toEqual({ mode: 'cost', source: 'session' });
+    expect(snapshot.controls.costSensitivity).toBe(0.8);
+    expect(snapshot.policySources).toEqual({
+      costHorizon: 'config',
+      costSensitivity: 'mode',
+      strongAdviceConfidence: 'config',
+    });
+  });
+
+  it('lets an explicit Settings-tab edit override the mode for the session', async () => {
+    const { state, runtime } = moded();
+    expect(
+      await runtime.adapters.applyControls({
+        profile: 'auto',
+        action: 'apply',
+        changes: [{ key: 'costSensitivity', before: 0.8, after: 0.3 }],
+      }),
+    ).toBe('applied');
+    expect(runtime.activatePending()).toBe(true);
+    expect(state.currentConfig.sessionPolicy).toEqual({ costSensitivity: 0.3 });
+    expect(state.currentConfig.switchPolicy?.costSensitivity).toBe(0.5);
+    let snapshot = runtime.adapters.getSnapshot();
+    expect(snapshot.controls.costSensitivity).toBe(0.3);
+    expect(snapshot.policySources.costSensitivity).toBe('session');
+    state.modeOverride = 'quality';
+    snapshot = runtime.adapters.getSnapshot();
+    expect(snapshot.controls.costSensitivity).toBe(0.3);
+  });
+
+  it('reports a pin or effort override as a mode bypass', () => {
+    const { state, runtime } = moded();
+    expect(runtime.adapters.getSnapshot().modeBypass).toBeUndefined();
+    state.thinkingByProfile.auto = { high: 'low' };
+    expect(runtime.adapters.getSnapshot().modeBypass).toBe('effort');
+    Object.assign(state.pinnedTierByProfile, { auto: 'high' });
+    expect(runtime.adapters.getSnapshot().modeBypass).toBe('pin');
   });
 });
 

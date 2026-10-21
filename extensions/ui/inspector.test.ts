@@ -35,6 +35,12 @@ const fixture = () => {
   let snapshot: RouterUISnapshot = {
     profile: '仕事👨‍👩‍👧‍👦',
     lifecycle: 'generating',
+    mode: { mode: 'balanced', source: 'default' },
+    policySources: {
+      costHorizon: 'config',
+      costSensitivity: 'config',
+      strongAdviceConfidence: 'config',
+    },
     controls: { ...controls },
     actual: {
       tier: 'medium',

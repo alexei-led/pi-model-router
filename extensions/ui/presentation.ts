@@ -35,6 +35,32 @@ export const activityRouteLines = (snapshot: RouterUISnapshot): string[] => [
     : ['No configured activity overrides.']),
 ];
 
+export const formatMode = (snapshot: RouterUISnapshot): string =>
+  `${snapshot.mode.mode} (${snapshot.mode.source})${
+    snapshot.modeBypass === 'pin'
+      ? ' · bypassed by pin'
+      : snapshot.modeBypass === 'effort'
+        ? ' · bypassed by effort override'
+        : ''
+  }`;
+
+/** Source note for a switch-policy control shown with its effective value. */
+export const policySourceNote = (
+  snapshot: RouterUISnapshot,
+  key: string,
+): string => {
+  const source = Object.hasOwn(snapshot.policySources, key)
+    ? snapshot.policySources[key as keyof RouterUISnapshot['policySources']]
+    : undefined;
+  return source === 'mode'
+    ? ` (mode ${snapshot.mode.mode})`
+    : source === 'session'
+      ? snapshot.mode.mode === 'balanced'
+        ? ' (session)'
+        : ' (session, overrides mode)'
+      : '';
+};
+
 export const routerTone = (
   snapshot: RouterUISnapshot,
 ): 'error' | 'warning' | 'accent' =>

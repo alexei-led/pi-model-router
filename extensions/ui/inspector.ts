@@ -28,7 +28,9 @@ import {
   advisorName,
   budgetLines,
   classifierLines,
+  formatMode,
   historyStatus,
+  policySourceNote,
   formatRoute as route,
   routeMix,
   routeReason,
@@ -268,6 +270,7 @@ export const formatRouterUISnapshot = (
     `Router / ${snapshot.profile} · ${snapshot.lifecycle}`,
     `Actual: ${route(snapshot.actual)}`,
     routeReason(snapshot),
+    `Mode: ${formatMode(snapshot)}`,
     ...(snapshot.pendingControls
       ? [
           `Next user turn: pin ${snapshot.pendingControls.pin} (pending; actual unchanged)`,
@@ -296,7 +299,7 @@ export const formatRouterUISnapshot = (
                 'Text eligibility only; generation rechecks input, context and authentication.',
                 ...keys.map(
                   (key) =>
-                    `${fieldNames[key]}: ${display((snapshot.pendingControls ?? snapshot.controls)[key])}`,
+                    `${fieldNames[key]}: ${display((snapshot.pendingControls ?? snapshot.controls)[key])}${policySourceNote(snapshot, key)}`,
                 ),
                 'Classifier models: ' +
                   snapshot.classifiers.map((model) => model.model).join(', '),
@@ -1276,6 +1279,7 @@ export class RouterUIInspector implements Component {
             ]
           : []),
         this.theme.fg(routerTone(s), routeReason(s)),
+        muted(`Mode: ${formatMode(s)} · /router mode`),
         ...(differs
           ? [this.theme.fg('warning', `Proposed · ${route(s.advised)}`)]
           : []),
@@ -1319,6 +1323,7 @@ export class RouterUIInspector implements Component {
       ];
     }
     return [
+      muted(`Mode: ${formatMode(s)} · change with /router mode`),
       muted(activityRoutingSummary(s)),
       muted('Pin / effort / baseline: this profile.'),
       muted('Budget / switch policy: session-wide.'),
@@ -1454,7 +1459,7 @@ export class RouterUIInspector implements Component {
           ...wrapTextWithAnsi(
             color(
               selected,
-              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'none (session)') : controlDisplay(field, this.editor.draft[field])}`,
+              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'none (session)') : controlDisplay(field, this.editor.draft[field])}${policySourceNote(this.snapshot, field)}`,
             ),
             w,
           ),

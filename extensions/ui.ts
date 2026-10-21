@@ -15,7 +15,7 @@ import {
   isRoutingReasonCode,
   ROUTER_TIERS,
 } from './types';
-import { routeReason, routerTone } from './ui/presentation';
+import { formatMode, routeReason, routerTone } from './ui/presentation';
 
 export { openRouterInspector } from './ui/inspector';
 
@@ -321,7 +321,13 @@ export const formatDecision = (decision: RoutingDecision): string => {
   const switchCost = decision.switchCost
     ? `switch ${decision.switchCost.reason} · horizon ${decision.switchCost.horizonRequests} · stay ${decision.switchCost.stayUsd === undefined ? 'unknown' : `$${decision.switchCost.stayUsd.toFixed(4)}`} · target ${decision.switchCost.switchUsd === undefined ? 'unknown' : `$${decision.switchCost.switchUsd.toFixed(4)}`}${decision.proposedRoute ? ` · proposed ${decision.proposedRoute.tier}/${decision.proposedRoute.activity ?? 'generic'} ${decision.proposedRoute.model} [${decision.proposedRoute.thinking}]` : ''}`
     : undefined;
-  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${advisor ? ` [${advisor}]` : ''}${switchCost ? ` [${switchCost}]` : ''}${generation ? ` [${generation}]` : ''}`;
+  const mode = decision.mode
+    ? ` {mode ${decision.mode}${decision.modeSource ? ` (${decision.modeSource})` : ''}${decision.modeLever && decision.modeLever !== 'none' ? ` · ${decision.modeLever} lever from ${decision.modeSourceTier ?? decision.tier}` : ''}}`
+    : '';
+  const escalated = decision.escalatedFrom
+    ? ` {escalated from ${decision.escalatedFrom}}`
+    : '';
+  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${mode}${escalated}${advisor ? ` [${advisor}]` : ''}${switchCost ? ` [${switchCost}]` : ''}${generation ? ` [${generation}]` : ''}`;
 };
 
 export const formatPinSummary = (
@@ -387,16 +393,19 @@ export const updateRouterUIStrip = (
   }
   if (!preferences.widgetEnabled) {
     ctx.ui.setWidget('router', undefined);
-    const suffix = hasPending
-      ? ' · pending'
-      : snapshot.switchCost?.reason === 'cost-held'
-        ? ' · held'
-        : ['fallback', 'timeout', 'budget'].includes(snapshot.lifecycle)
-          ? ` · ${snapshot.lifecycle}`
-          : snapshot.advice?.outcome === 'selected'
-            ? ' · advised'
-            : '';
     const width = Math.max(1, process.stdout.columns ?? 80);
+    // Model identity wins on narrow terminals; the widget always shows the mode.
+    const mode =
+      width >= 70 ? ` · ${snapshot.mode.mode} (${snapshot.mode.source})` : '';
+    const suffix = hasPending
+      ? `${mode} · pending`
+      : snapshot.switchCost?.reason === 'cost-held'
+        ? `${mode} · held`
+        : ['fallback', 'timeout', 'budget'].includes(snapshot.lifecycle)
+          ? `${mode} · ${snapshot.lifecycle}`
+          : snapshot.advice?.outcome === 'selected'
+            ? `${mode} · advised`
+            : mode;
     ctx.ui.setStatus(
       'router',
       ctx.ui.theme.fg(
@@ -418,7 +427,7 @@ export const updateRouterUIStrip = (
         ? `Next user turn: ${pending.pin !== snapshot.controls.pin ? `pin ${pending.pin}` : 'settings changed'} (pending) · ${reason}`
         : snapshot.pendingRoutes
           ? `Next user turn: route edits queued (pending) · ${reason}`
-          : `${reason} · ${snapshot.profile}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
+          : `${reason} · ${snapshot.profile} · ${formatMode(snapshot)}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
       return [
         theme.fg(tone, truncateToWidth(identity(w), w)),
         theme.fg(hasPending ? 'warning' : 'muted', truncateToWidth(next, w)),

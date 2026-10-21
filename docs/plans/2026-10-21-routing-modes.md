@@ -89,7 +89,7 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [x] C9 `provider-request.ts`: mode in the `policy` fence; live-mode check after classification; mode-specific switch policy into `evaluateSwitch`.
 - [x] C10 State: `modeOverride` in `router-state`; restore; decision allowlist.
 - [x] C11 Commands: `/router mode`, completions, help text, `ROUTER_COMMANDS`.
-- [ ] C12 UI: widget, `/router status`, inspector Now/Settings, log formatting.
+- [x] C12 UI: widget, `/router status`, inspector Now/Settings, log formatting.
 - [ ] C13 Fixture: per-tier prices; a failing-tool scenario for escalation.
 - [ ] C14 `AGENTS.md` module list: `modes.ts`, `escalation.ts`.
 
