@@ -338,13 +338,49 @@ describe('mode and Settings-tab policy precedence', () => {
     expect(snapshot.controls.costSensitivity).toBe(0.3);
   });
 
-  it('reports a pin or effort override as a mode bypass', () => {
+  it('activates a queued policy edit after the mode changes', async () => {
     const { state, runtime } = moded();
-    expect(runtime.adapters.getSnapshot().modeBypass).toBeUndefined();
-    state.thinkingByProfile.auto = { high: 'low' };
-    expect(runtime.adapters.getSnapshot().modeBypass).toBe('effort');
+    expect(
+      await runtime.adapters.applyControls({
+        profile: 'auto',
+        action: 'apply',
+        changes: [{ key: 'costSensitivity', before: 0.8, after: 0.3 }],
+      }),
+    ).toBe('applied');
+    state.modeOverride = 'quality';
+    expect(runtime.activatePending()).toBe(true);
+    expect(state.currentConfig.sessionPolicy).toEqual({ costSensitivity: 0.3 });
+  });
+
+  it('rejects a queued policy edit after its policy layers change', async () => {
+    const { state, runtime } = moded();
+    expect(
+      await runtime.adapters.applyControls({
+        profile: 'auto',
+        action: 'apply',
+        changes: [{ key: 'costSensitivity', before: 0.8, after: 0.3 }],
+      }),
+    ).toBe('applied');
+    state.currentConfig = {
+      ...state.currentConfig,
+      sessionPolicy: { costSensitivity: 0.6 },
+    };
+    expect(runtime.activatePending()).toBe(false);
+    expect(state.currentConfig.sessionPolicy).toEqual({ costSensitivity: 0.6 });
+  });
+
+  it('reports a pin, or only the overridden tiers, as a mode bypass', () => {
+    const { state, runtime } = moded();
+    const bypass = () => runtime.adapters.getSnapshot().modeBypass;
+    expect(bypass()).toBeUndefined();
+    state.thinkingByProfile.auto = {};
+    expect(bypass()).toBeUndefined();
+    state.thinkingByProfile.auto = { micro: 'off' };
+    expect(bypass()).toBeUndefined();
+    state.thinkingByProfile.auto = { low: 'high', high: 'low' };
+    expect(bypass()).toEqual(['high', 'low']);
     Object.assign(state.pinnedTierByProfile, { auto: 'high' });
-    expect(runtime.adapters.getSnapshot().modeBypass).toBe('pin');
+    expect(bypass()).toBe('pin');
   });
 });
 

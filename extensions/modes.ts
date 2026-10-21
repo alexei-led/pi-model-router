@@ -8,7 +8,9 @@ import type {
   RoutePair,
   RouterConfig,
   RouterMode,
+  RouterModeBypass,
   RouterSwitchPolicy,
+  RouterThinkingByTier,
   RouterTier,
 } from './types';
 import { ROUTER_TIERS } from './types';
@@ -41,6 +43,27 @@ export const modeForProfile = (
         ? config.profiles[profile]?.mode
         : undefined,
   });
+
+/** A pin bypasses the mode; an effort override bypasses only its own tiers (micro is never transformed). */
+export const modeBypassFor = (
+  pinned: boolean,
+  overrides: RouterThinkingByTier | undefined,
+): RouterModeBypass | undefined => {
+  if (pinned) return 'pin';
+  const tiers = ROUTER_TIERS.filter(
+    (tier) => tier !== 'micro' && overrides?.[tier] !== undefined,
+  );
+  return tiers.length ? tiers : undefined;
+};
+
+export const modeBypassLabel = (
+  bypass: RouterModeBypass | undefined,
+): string =>
+  bypass === 'pin'
+    ? ' · bypassed by pin'
+    : bypass
+      ? ` · bypassed at ${bypass.join(', ')} by effort override`
+      : '';
 
 /** Config policy < mode patch < Settings-tab edits for this session. */
 export const effectivePolicy = (

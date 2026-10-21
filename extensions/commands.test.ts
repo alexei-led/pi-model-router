@@ -607,9 +607,14 @@ describe('/router mode', () => {
       'effort override',
       (s: MutableCommandState) =>
         (s.thinkingByProfile.balanced = { high: 'low' }),
-      ' · bypassed by effort override',
+      ' · bypassed at high by effort override',
     ],
-  ])('shows that a %s bypasses the mode', async (_name, mutate, suffix) => {
+    [
+      'Settings save with no effort',
+      (s: MutableCommandState) => (s.thinkingByProfile.balanced = {}),
+      '',
+    ],
+  ])('shows whether a %s bypasses the mode', async (_name, mutate, suffix) => {
     const { run, lastNotice } = setup((s) => {
       mutate(s);
     });

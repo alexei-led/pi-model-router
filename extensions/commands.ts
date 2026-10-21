@@ -14,7 +14,7 @@ import {
   ROUTER_PIN_VALUES,
   THINKING_LEVELS,
 } from './domain';
-import { modeForProfile } from './modes';
+import { modeBypassFor, modeBypassLabel, modeForProfile } from './modes';
 import { effortAdjustments, preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
@@ -117,13 +117,13 @@ export const registerCommands = (
       profile,
       state.modeOverride,
     );
-    const bypass =
-      profile && Object.hasOwn(state.pinnedTierByProfile, profile)
-        ? ' · bypassed by pin'
-        : profile && Object.hasOwn(state.thinkingByProfile, profile)
-          ? ' · bypassed by effort override'
-          : '';
-    return `Mode: ${mode} (${source})${bypass}`;
+    const bypass = profile
+      ? modeBypassFor(
+          Object.hasOwn(state.pinnedTierByProfile, profile),
+          state.thinkingByProfile[profile],
+        )
+      : undefined;
+    return `Mode: ${mode} (${source})${modeBypassLabel(bypass)}`;
   };
 
   const showStatus = (ctx: ExtensionContext) => {

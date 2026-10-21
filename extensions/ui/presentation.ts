@@ -1,3 +1,4 @@
+import { modeBypassLabel } from '../modes';
 import type {
   RouterUIAdviceObservation,
   RouterUIHistoryEntry,
@@ -36,13 +37,7 @@ export const activityRouteLines = (snapshot: RouterUISnapshot): string[] => [
 ];
 
 export const formatMode = (snapshot: RouterUISnapshot): string =>
-  `${snapshot.mode.mode} (${snapshot.mode.source})${
-    snapshot.modeBypass === 'pin'
-      ? ' · bypassed by pin'
-      : snapshot.modeBypass === 'effort'
-        ? ' · bypassed by effort override'
-        : ''
-  }`;
+  `${snapshot.mode.mode} (${snapshot.mode.source})${modeBypassLabel(snapshot.modeBypass)}`;
 
 /** Source note for a switch-policy control shown with its effective value. */
 export const policySourceNote = (

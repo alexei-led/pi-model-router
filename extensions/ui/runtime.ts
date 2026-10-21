@@ -3,7 +3,7 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { DEFAULT_MODES, normalizeAdvisorConfig } from '../config';
 import { isThinkingLevel, parseCanonicalModelRef } from '../domain';
-import { effectivePolicy, modeForProfile } from '../modes';
+import { effectivePolicy, modeBypassFor, modeForProfile } from '../modes';
 import {
   availableRoutePairs,
   preservesRouteCoverage,
@@ -267,13 +267,21 @@ export const createRouterUIRuntime = (
           Object.assign(value, { [key]: entry.value[key] });
     return value;
   };
+  const policyLayers = () => {
+    const { switchPolicy, modes, sessionPolicy } = state.currentConfig;
+    return JSON.stringify([switchPolicy, modes, sessionPolicy]);
+  };
   const queue = (
     global: boolean,
     base: RouterUIControls,
     next: RouterUIControls,
     previous: RouterUIPendingControls | undefined,
   ): RouterUIPendingControls | undefined => {
-    const entry = { base: { ...base }, value: { ...base } };
+    const entry = {
+      base: { ...base },
+      value: { ...base },
+      policyLayers: previous?.policyLayers ?? policyLayers(),
+    };
     for (const key of Object.keys(base) as (keyof RouterUIControls)[]) {
       if (globalFields.has(key) !== global || next[key] === base[key]) continue;
       Object.assign(entry.value, { [key]: next[key] });
@@ -754,11 +762,10 @@ export const createRouterUIRuntime = (
       lastAdvice: lastAdvice?.advice,
       loggingEnabled: state.debugEnabled === true,
       mode: modeOf(profile),
-      ...(Object.hasOwn(state.pinnedTierByProfile, profile)
-        ? { modeBypass: 'pin' as const }
-        : Object.hasOwn(state.thinkingByProfile, profile)
-          ? { modeBypass: 'effort' as const }
-          : {}),
+      modeBypass: modeBypassFor(
+        Object.hasOwn(state.pinnedTierByProfile, profile),
+        state.thinkingByProfile[profile],
+      ),
       policySources: policySources(profile),
       controls: controls(profile),
       pendingControls: pendingValue(profile),
@@ -915,9 +922,16 @@ export const createRouterUIRuntime = (
     pending.delete(profile);
     pendingRoutes.delete(profile);
     const latest = controls(profile);
+    // Effective policy values depend on the mode; a mode or profile switch is not a concurrent edit.
+    const layers = policyLayers();
     const baseConflict = entries.some(
       (entry) =>
-        entry && edited(entry).some((key) => latest[key] !== entry.base[key]),
+        entry &&
+        edited(entry).some((key) =>
+          Object.hasOwn(ROUTER_UI_POLICY_CONTROLS, key)
+            ? entry.policyLayers !== layers
+            : latest[key] !== entry.base[key],
+        ),
     );
     const overrides = new Map<string, RouterUIRouteOverride | undefined>();
     let routeConflict = false;

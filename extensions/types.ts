@@ -642,7 +642,6 @@ export interface RouterUIHistoryEntry {
   cacheReadTokens?: number | undefined;
   cacheWriteTokens?: number | undefined;
 }
-/** Presentation only: no credentials, transcript text or remote explanations. */
 export const ROUTER_UI_POLICY_CONTROLS = {
   costHorizon: 'horizonRequests',
   costSensitivity: 'costSensitivity',
@@ -652,6 +651,9 @@ export const ROUTER_UI_POLICY_CONTROLS = {
 >;
 export type RouterUIPolicyControl = keyof typeof ROUTER_UI_POLICY_CONTROLS;
 export type RouterUIPolicySource = 'config' | 'mode' | 'session';
+/** A pin bypasses the whole mode; an effort override, only the listed tiers. */
+export type RouterModeBypass = 'pin' | readonly RouterTier[];
+/** Presentation only: no credentials, transcript text or remote explanations. */
 export interface RouterUISnapshot {
   profile: string;
   lifecycle: RouterUILifecycle;
@@ -671,8 +673,7 @@ export interface RouterUISnapshot {
   lastAdvice?: RouterUIAdviceObservation | undefined;
   loggingEnabled: boolean;
   mode: ResolvedMode;
-  /** A pin or effort override on the active profile bypasses the mode. */
-  modeBypass?: 'pin' | 'effort' | undefined;
+  modeBypass?: RouterModeBypass | undefined;
   /** Where each shown switch-policy control value comes from. */
   policySources: Readonly<Record<RouterUIPolicyControl, RouterUIPolicySource>>;
   controls: Readonly<RouterUIControls>;
@@ -720,6 +721,8 @@ export interface RouterRequestObservation {
 export interface RouterUIPendingControls {
   base: RouterUIControls;
   value: RouterUIControls;
+  /** Policy layers at queue time; policy edits conflict only when these change, not the mode. */
+  policyLayers: string;
 }
 export interface RouterUIRuntimeState {
   currentConfig: RouterConfig;
