@@ -145,7 +145,7 @@ Isolated: `PI_CODING_AGENT_DIR` and `HOME` under the scratchpad, `pi install --l
 - [ ] L6 Status shows mode and source.
 - [ ] L7 Log records carry `mode`, `modeSource`, classified tier, route in use.
 - [ ] L8 Escalation via the fixture failure scenario.
-- [ ] L10 **Impact, offline** (manager request): replay a fixed prompt set and recorded traces (`docs/assets/usage-data.json` where usable) through the matrix per mode; report estimated catalog cost per mode and the model/effort mix per profile. Any mode or profile without a real difference (for example zero prices or same-model tiers) is reported as a finding.
+- [x] L10 **Impact, offline** (manager request): replay a fixed prompt set and recorded traces (`docs/assets/usage-data.json` where usable) through the matrix per mode; report estimated catalog cost per mode and the model/effort mix per profile. Any mode or profile without a real difference (for example zero prices or same-model tiers) is reported as a finding. Result: `docs/research/2026-10-21-routing-modes-impact.md`.
 - [ ] L11 **Impact, live** (manager request): one representative multi-turn task per mode in an isolated agterm session, on one subscription-billed and one API-billed profile, classifier Jev (`typesafe/jev-1.14.0`, enabled and approved in the user's config). Capture models used, switches, tokens and estimated cost from `/router log` and `/router usage`. Blocker: an isolated agent dir has no provider login. Needs the user to log in inside it (`! PI_CODING_AGENT_DIR=… pi` then `/login`) or to approve another way. I will not copy `auth.json`.
 - [ ] L9 Screenshots; close the test sessions.
 
