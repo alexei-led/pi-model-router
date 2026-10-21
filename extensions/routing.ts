@@ -413,12 +413,8 @@ const applyModeToCell = (
 ): ModeCell => {
   const configAt = (tier: RouterTier) => cellProfile[tier] ?? generic[tier];
   const resolved = { ...generic, ...cellProfile };
-  const pairs = availableRoutePairs(
-    resolved,
-    findModel,
-    imageAttached,
-    thinkingOverrides,
-  );
+  // Lever sources use configured routes: another tier's manual override stays with that tier.
+  const pairs = availableRoutePairs(resolved, findModel, imageAttached);
   const primaries = primaryRoutePairs(resolved, pairs);
   // Another tier's route is a lever only if its model holds the request.
   const fits = (pair: RoutePair) => {

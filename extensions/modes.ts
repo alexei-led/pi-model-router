@@ -100,7 +100,9 @@ export const transformRoute = (input: {
       lower &&
       lower.model !== own.model &&
       ownPrice !== undefined &&
+      // A zero price is a placeholder, not evidence of a cheaper model.
       lowerPrice !== undefined &&
+      lowerPrice > 0 &&
       lowerPrice < ownPrice
     )
       return {

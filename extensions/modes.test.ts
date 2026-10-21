@@ -52,6 +52,7 @@ const shapes: Record<string, Shape> = {
     micro: ['luna', 'off'],
   },
   zeroPrices: { medium: ['free', 'medium'], low: ['freeToo', 'medium'] },
+  lowerFree: { medium: ['sonnet', 'medium'], low: ['free', 'medium'] },
   unknownPrice: { medium: ['unpriced', 'medium'], low: ['luna', 'medium'] },
   noLow: { high: ['opus', 'high'], medium: ['sonnet', 'medium'] },
 };
@@ -107,6 +108,7 @@ describe('mode transform', () => {
     ['openaiUser', 'quality', 'medium', ['medium', 'high', 'effort']],
     ['openaiUser', 'quality', 'low', ['low', 'high', 'effort']],
     ['zeroPrices', 'cost', 'medium', ['medium', 'low', 'effort']],
+    ['lowerFree', 'cost', 'medium', ['medium', 'low', 'effort']],
     ['unknownPrice', 'cost', 'medium', ['medium', 'low', 'effort']],
     ['noLow', 'cost', 'medium', ['medium', 'low', 'effort']],
   ])('%s %s %s', (shape, mode, tier, [sourceTier, thinking, lever]) => {

@@ -171,8 +171,7 @@ describe('escalation hold', () => {
   it('does not apply the floor on another branch', () => {
     const first = update({}, [user('shared'), ...failing], 'low');
     expect(
-      update(first.state, [user('shared'), user('other task')], 'medium')
-        .floor,
+      update(first.state, [user('shared'), user('other task')], 'medium').floor,
     ).toBeUndefined();
   });
 

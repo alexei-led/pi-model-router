@@ -843,6 +843,21 @@ describe('mode transform in the route matrix', () => {
     expect(plan(built, 'high').mode?.lever).toBe('effort');
   });
 
+  it("uses the lever source tier's configured effort, not its override", () => {
+    const built = matrix('cost', { overrides: { low: 'low' } });
+    expect(route(plan(built, 'medium'))).toEqual([
+      'test/haiku/high',
+      'test/backup/high',
+    ]);
+    expect(revalidated(plan(built, 'medium'))).toEqual(
+      route(plan(built, 'medium')),
+    );
+    expect(route(plan(built, 'low'))).toEqual([
+      'test/haiku/low',
+      'test/backup/low',
+    ]);
+  });
+
   it('never moves quality onto the high route over the soft budget', () => {
     const capped = required(
       normalizeConfig({
