@@ -253,7 +253,7 @@ Request preparation applies routing policy and uses provider-scoped coordination
 The Signal Panel reads a sanitized presentation snapshot through one `/router`
 command family. `ui/presentation.ts` formats fixed local reasons and bounded bars.
 It makes no advisor calls. The widget and fallback footer status are mutually
-exclusive. Wide inspectors are floating right overlays, not transcript-reflowing sidebars; narrow custom screens replace the editor area while preserving the host footer and widgets. The host footer stays intact. Now, Usage and Settings share one draft.
+exclusive. Wide inspectors are floating right overlays, not transcript-reflowing sidebars; narrow custom screens replace the editor area while preserving the host footer and widgets. The host footer stays intact. Now, Routes, Classifier, Usage and Settings share one inspector interaction. Classifier and Settings share a compare-and-set control draft; Routes keeps a separate sparse-cell draft.
 Recorded session cost is projected separately from retained-window history.
 Provider observations distinguish
 selected advice from attempted/actual generation and cannot affect routing or retries.
@@ -262,6 +262,6 @@ Pending session controls use field-level compare-and-set, activate before the ne
 and are revalidated against current capabilities. They never enable privacy settings.
 The inspector's transient state is cleared on reload, session replacement, and shutdown.
 Activated pins and effort retain the existing branch persistence.
-Usage is a projection of the profile's retained debug history, not a new accounting ledger.
+Usage and switch history project the profile's retained debug observations, not a new accounting ledger. Model switches require adjacent known generation targets; effort-only changes are separate and review-only records cannot establish a generation transition. Classifier last-operation diagnostics are transient, allowlisted observations independent of history collection, refreshed when the selected advice is available. They never attest backend authentication.
 
 Strict TypeScript, Biome cycle and directional-import rules, a production-only complexity ratchet, and per-module V8 coverage gates protect these boundaries. Behavior tests use Pi 1.1.0 types, real host startup, and in-memory providers. Classifier transport tests use synthetic fixtures. They do not use live credentials.

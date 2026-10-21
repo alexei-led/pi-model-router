@@ -183,6 +183,8 @@ describe('/router surface', () => {
     const { cmd } = setup();
     expect(cmd.complete('')).toEqual([
       'status',
+      'routes',
+      'classifier',
       'usage',
       'settings',
       'profile',

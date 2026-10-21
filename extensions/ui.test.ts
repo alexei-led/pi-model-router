@@ -398,6 +398,7 @@ describe('ui.ts lifecycle strip', () => {
     activityCells: [],
     routeCells: [],
     history: [],
+    loggingEnabled: false,
     classifiers: [],
     chatModels: [],
     privacy: {

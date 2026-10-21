@@ -44,6 +44,8 @@ const THINKING_VALUES = ['auto', ...THINKING_LEVELS] as const;
 const USAGE = [
   '/router                        overview (text outside TUI)',
   '/router status                 short text status',
+  '/router routes                 configured routes and per-cell editor',
+  '/router classifier             classifier status and session selection',
   '/router usage                  retained usage and known costs',
   '/router settings               session controls',
   '/router profile <name>         switch profile (enables the router)',
@@ -122,7 +124,7 @@ export const registerCommands = (
             `Last: ${last.tier} → ${last.targetProvider}/${last.targetModelId} (${last.thinking}) · ${formatDecisionSource(last)}`,
           ]
         : []),
-      'Details: /router · /router usage · /router settings',
+      'Details: /router · /router routes · /router classifier · /router usage · /router settings',
       ...state.lastConfigWarnings,
     ];
     const text = lines.join('\n');
@@ -421,6 +423,8 @@ export const registerCommands = (
         case 'status':
           if (noArgs('/router status')) showStatus(ctx);
           return;
+        case 'routes':
+        case 'classifier':
         case 'usage':
         case 'settings':
           if (noArgs(`/router ${verb}`)) {

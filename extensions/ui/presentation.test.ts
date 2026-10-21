@@ -1,15 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import type { RouterUISnapshot } from '../types';
+import type {
+  RouterUIHistoryEntry,
+  RouterUIRoute,
+  RouterUISnapshot,
+} from '../types';
 import {
   activityRouteLines,
   activityRoutingSummary,
   advisorName,
   budgetLines,
+  classifierLines,
+  classifierStatus,
   formatRoute,
+  historyStatus,
+  observedRouteChanges,
   routeMix,
   routeReason,
   routerTone,
+  routeTimeline,
   textBar,
+  usageSummary,
 } from './presentation';
 
 const snapshot: RouterUISnapshot = {
@@ -36,6 +46,7 @@ const snapshot: RouterUISnapshot = {
   activityCells: [],
   routeCells: [],
   history: [],
+  loggingEnabled: false,
   classifiers: [],
   chatModels: [],
   privacy: { advisorEnabled: false, approvedModels: [], auth: 'unknown' },
@@ -261,4 +272,149 @@ describe('activity override presentation', () => {
       expect(text).not.toContain('undefined');
     },
   );
+});
+
+describe('routing observability', () => {
+  const actual = (
+    model: string,
+    thinking: RouterUIRoute['thinking'] = 'low',
+  ): RouterUIRoute => ({
+    tier: 'low',
+    provider: 'fixture',
+    model,
+    thinking,
+  });
+  const enabled: RouterUISnapshot = {
+    ...snapshot,
+    loggingEnabled: true,
+    controls: { ...snapshot.controls, advisor: 'typesafe/jev-1.14.0' },
+    classifiers: [
+      { model: 'typesafe/jev-1.14.0', name: 'Jev 1.14', textInput: true },
+    ],
+    privacy: {
+      advisorEnabled: true,
+      approvedModels: ['typesafe/jev-1.14.0'],
+      auth: 'unknown',
+    },
+  };
+  it.each([
+    [
+      'disabled',
+      { ...enabled, privacy: { ...enabled.privacy, advisorEnabled: false } },
+      'Disabled',
+    ],
+    [
+      'unselected',
+      { ...enabled, controls: { ...enabled.controls, advisor: undefined } },
+      'Not configured',
+    ],
+    ['unregistered', { ...enabled, classifiers: [] }, 'Not registered'],
+    [
+      'unapproved',
+      { ...enabled, privacy: { ...enabled.privacy, approvedModels: [] } },
+      'Not approved',
+    ],
+    [
+      'non-text',
+      {
+        ...enabled,
+        classifiers: [
+          { model: 'typesafe/jev-1.14.0', name: 'Non-text', textInput: false },
+        ],
+      },
+      'Unsupported input',
+    ],
+    ['approved', enabled, 'Eligible to ask'],
+  ])(
+    'explains %s without claiming authentication',
+    (_name, value, expected) => {
+      expect(classifierStatus(value)).toContain(expected);
+      expect(classifierStatus(value)).not.toContain('authenticated');
+    },
+  );
+  it('labels the actual operation model/profile separately from the selected model', () => {
+    const lines = classifierLines({
+      ...enabled,
+      lastAdvice: {
+        advisor: 'fixture/previous',
+        profile: 'previous-profile',
+        outcome: 'deadline',
+        latencyMs: 12.7,
+        source: 'review',
+      },
+    }).join('\n');
+    expect(lines).toContain('Active model: typesafe/jev-1.14.0');
+    expect(lines).toContain('Last observed advice: deadline · 13 ms');
+    expect(lines).toContain(
+      'Operation model: fixture/previous · review · profile previous-profile',
+    );
+    expect(lines).toContain('read-only');
+    expect(
+      classifierLines({
+        ...snapshot,
+        advice: { advisor: 'fixture/legacy', outcome: 'unavailable' },
+      }).join('\n'),
+    ).toContain('source unreported');
+  });
+  it('distinguishes initial observations, physical switches and effort changes', () => {
+    const history: RouterUIHistoryEntry[] = [
+      { actual: actual('a'), reason: 'baseline' },
+      { actual: { ...actual('a'), tier: 'high' } },
+      { reviewOnly: true, actual: actual('never-generated') },
+      { actual: actual('a', 'high'), reason: 'classifier' },
+      { actual: actual('b', 'high'), reason: 'pinned' },
+      {},
+      { actual: actual('a') },
+    ];
+    expect(observedRouteChanges(history).map((change) => change.kind)).toEqual([
+      'observed',
+      'effort',
+      'model',
+      'observed',
+    ]);
+    const lines = routeTimeline(history);
+    expect(lines).toContain(
+      'Effort change: fixture/a [low] → fixture/a [high] · classifier',
+    );
+    expect(lines).toContain(
+      'Model switch: fixture/a [high] → fixture/b [high] · pinned',
+    );
+    expect(lines.at(-1)).toBe('Observed: fixture/a [low]');
+    expect(lines.join('\n')).not.toContain('never-generated');
+    expect(routeTimeline([])).toEqual(['No retained generation targets.']);
+  });
+  it('does not invent a switch across the retained-history boundary', () => {
+    const history: RouterUIHistoryEntry[] = [
+      { actual: actual('old') },
+      ...Array.from({ length: 50 }, () => ({ actual: actual('current') })),
+    ];
+    expect(observedRouteChanges(history).map((change) => change.kind)).toEqual([
+      'observed',
+    ]);
+    const changes = Array.from({ length: 8 }, (_, index) => ({
+      actual: actual(String(index)),
+    }));
+    expect(routeTimeline(changes)).toHaveLength(4);
+  });
+  it('keeps partial costs unknown and separates model changes from effort changes', () => {
+    const value: RouterUISnapshot = {
+      ...enabled,
+      history: [
+        { actual: actual('a'), generationCostUsd: 0.1 },
+        { actual: actual('b') },
+        { actual: actual('b', 'high') },
+      ],
+    };
+    const lines = usageSummary(value).join('\n');
+    expect(lines).toContain('Model switches: 1 · effort changes: 1');
+    expect(lines).toContain('$0.1000 · coverage 1/3');
+    expect(
+      usageSummary({ ...value, history: [{ actual: actual('a') }] }).join('\n'),
+    ).toContain('cost: unknown');
+    expect(usageSummary(snapshot).join('\n')).toContain(
+      'History collection is off',
+    );
+    expect(historyStatus(enabled)).toContain('no decisions retained yet');
+    expect(historyStatus(value)).toContain('last 50 observations');
+  });
 });

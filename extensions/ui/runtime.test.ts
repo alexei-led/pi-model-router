@@ -866,3 +866,157 @@ describe('activity-aware UI capability validation', () => {
     ).toBe('conflict');
   });
 });
+
+describe('last classifier operation independent of history collection', () => {
+  it('records terminal reviews with logging off without changing routing or granting approval', () => {
+    const { state, runtime } = setup();
+    Object.assign(state, { debugEnabled: false });
+    const decision = {
+      profile: 'auto',
+      tier: 'medium' as const,
+      thinking: 'off' as const,
+      targetProvider: 'openai',
+      targetModelId: 'medium',
+      targetLabel: 'openai/medium',
+      reasonCode: 'classifier' as const,
+      advisor: 'classifier' as const,
+      timestamp: 200,
+      reviewOnly: true,
+      adviceSource: 'review' as const,
+      classification: {
+        outcome: 'selected' as const,
+        latencyMs: 12,
+        startedAt: 200,
+        model: 'fixture/advisor',
+        requestId: 'new',
+      },
+    };
+    runtime.recordAdvice(decision);
+    expect(runtime.adapters.getSnapshot()).toMatchObject({
+      loggingEnabled: false,
+      history: [],
+      lifecycle: 'idle',
+      lastAdvice: {
+        advisor: 'fixture/advisor',
+        profile: 'auto',
+        outcome: 'selected',
+        source: 'review',
+      },
+      privacy: { advisorEnabled: false, approvedModels: [] },
+    });
+    runtime.recordAdvice({
+      ...decision,
+      classification: {
+        ...decision.classification,
+        requestId: 'old',
+        startedAt: 100,
+      },
+    });
+    runtime.recordAdvice({
+      ...decision,
+      classification: { ...decision.classification, latencyMs: 999 },
+    });
+    expect(runtime.adapters.getSnapshot().lastAdvice?.latencyMs).toBe(12);
+    runtime.recordAdvice({
+      ...decision,
+      classification: undefined,
+      advisor: 'none',
+    });
+    expect(runtime.adapters.getSnapshot().lastAdvice?.requestId).toBe('new');
+    state.selectedProfile = 'another-profile';
+    expect(runtime.adapters.getSnapshot().lastAdvice?.profile).toBe('auto');
+    Object.assign(state, { debugEnabled: true });
+    expect(runtime.adapters.getSnapshot().loggingEnabled).toBe(true);
+    runtime.reset();
+    expect(runtime.adapters.getSnapshot().lastAdvice).toBeUndefined();
+  });
+});
+
+describe('classifier operation chronology', () => {
+  it('uses the local decision timestamp when operation start metrics are missing', () => {
+    const { runtime } = setup();
+    const decision = {
+      profile: 'auto',
+      tier: 'medium' as const,
+      thinking: 'off' as const,
+      targetProvider: 'openai',
+      targetModelId: 'medium',
+      targetLabel: 'openai/medium',
+      reasonCode: 'classifier' as const,
+      advisor: 'classifier' as const,
+      timestamp: 200,
+      classification: {
+        outcome: 'selected' as const,
+        latencyMs: 12,
+        startedAt: 200,
+        model: 'fixture/old',
+        requestId: 'old',
+      },
+    };
+    runtime.recordAdvice(decision);
+    runtime.recordAdvice({
+      ...decision,
+      timestamp: 300,
+      classification: {
+        outcome: 'unavailable',
+        latencyMs: 0,
+        model: 'fixture/new',
+      },
+    });
+    expect(runtime.adapters.getSnapshot().lastAdvice).toMatchObject({
+      advisor: 'fixture/new',
+      outcome: 'unavailable',
+    });
+    runtime.recordAdvice({
+      ...decision,
+      timestamp: 400,
+      classification: undefined,
+    });
+    expect(runtime.adapters.getSnapshot().lastAdvice?.advisor).toBe(
+      'fixture/new',
+    );
+  });
+});
+
+describe('live classifier provenance', () => {
+  it('shows the newly completed advisor before generation finishes', () => {
+    const { runtime } = setup();
+    const decision = {
+      profile: 'auto',
+      tier: 'medium' as const,
+      thinking: 'off' as const,
+      targetProvider: 'openai',
+      targetModelId: 'medium',
+      targetLabel: 'openai/medium',
+      reasonCode: 'classifier' as const,
+      advisor: 'classifier' as const,
+      timestamp: 200,
+      classification: {
+        outcome: 'selected' as const,
+        latencyMs: 1,
+        startedAt: 200,
+        model: 'fixture/old',
+        requestId: 'old',
+      },
+    };
+    runtime.recordAdvice(decision);
+    runtime.beginRequest()({
+      stage: 'selected',
+      decision: {
+        ...decision,
+        timestamp: 300,
+        classification: {
+          ...decision.classification,
+          startedAt: 300,
+          model: 'fixture/new',
+          requestId: 'new',
+        },
+      },
+    });
+    expect(runtime.adapters.getSnapshot().lastAdvice).toMatchObject({
+      advisor: 'fixture/new',
+      requestId: 'new',
+    });
+    expect(runtime.adapters.getSnapshot().history).toEqual([]);
+  });
+});

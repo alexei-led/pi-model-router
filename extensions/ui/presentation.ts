@@ -153,3 +153,122 @@ export const routeMix = (
     `Unknown routes: ${retained.filter((entry) => !entry.actual).length}`,
   ];
 };
+
+/** Only adjacent known generation targets establish a switch; reviews are not generation. */
+export const observedRouteChanges = (
+  history: readonly RouterUIHistoryEntry[],
+) => {
+  const changes: {
+    kind: 'model' | 'effort' | 'observed';
+    from?: RouterUIRoute;
+    to: RouterUIRoute;
+    reason?: string | undefined;
+  }[] = [];
+  let previous: RouterUIRoute | undefined;
+  for (const entry of history.slice(-50)) {
+    if (entry.reviewOnly) continue;
+    const current = entry.actual;
+    if (!current) {
+      previous = undefined;
+      continue;
+    }
+    const kind = !previous
+      ? 'observed'
+      : previous.provider !== current.provider ||
+          previous.model !== current.model
+        ? 'model'
+        : previous.thinking !== current.thinking
+          ? 'effort'
+          : undefined;
+    if (kind)
+      changes.push({
+        kind,
+        ...(previous ? { from: previous } : {}),
+        to: current,
+        reason: entry.reason,
+      });
+    previous = current;
+  }
+  return changes;
+};
+
+export const routeTimeline = (
+  history: readonly RouterUIHistoryEntry[],
+): string[] => {
+  const changes = observedRouteChanges(history);
+  if (!changes.length) return ['No retained generation targets.'];
+  const identity = (value: RouterUIRoute) =>
+    `${value.provider}/${value.model} [${value.thinking}]`;
+  return changes
+    .slice(-4)
+    .map(
+      (change) =>
+        `${change.kind === 'model' ? 'Model switch' : change.kind === 'effort' ? 'Effort change' : 'Observed'}: ${change.from ? `${identity(change.from)} → ` : ''}${identity(change.to)}${change.reason ? ` · ${change.reason}` : ''}`,
+    );
+};
+
+export const historyStatus = (snapshot: RouterUISnapshot): string =>
+  !snapshot.loggingEnabled
+    ? 'History collection is off · /router log on'
+    : snapshot.history.length
+      ? 'History collection is on · last 50 observations'
+      : 'History collection is on · no decisions retained yet';
+
+export const classifierStatus = (
+  snapshot: RouterUISnapshot,
+  selected = snapshot.controls.advisor,
+): string => {
+  if (!snapshot.privacy.advisorEnabled)
+    return 'Disabled · set advisor.enabled in user configuration';
+  if (!selected) return 'Not configured · select a Pi classifier';
+  const model = snapshot.classifiers.find((entry) => entry.model === selected);
+  if (!model) return 'Not registered · load its Pi provider extension';
+  if (!model.textInput)
+    return 'Unsupported input · select a text-capable classifier';
+  if (!snapshot.privacy.approvedModels.includes(selected))
+    return 'Not approved for this profile · edit user configuration';
+  return 'Eligible to ask · Pi checks credentials at request time';
+};
+
+export const classifierLines = (
+  snapshot: RouterUISnapshot,
+  selected = snapshot.controls.advisor,
+): string[] => {
+  const last = snapshot.lastAdvice ?? snapshot.advice;
+  return [
+    classifierStatus(snapshot, selected),
+    `Active model: ${snapshot.controls.advisor ?? 'not configured'}`,
+    `Advisor enabled: ${snapshot.privacy.advisorEnabled} · profile ${snapshot.profile}`,
+    ...(last
+      ? [
+          `Last observed advice: ${last.outcome}${last.latencyMs === undefined ? '' : ` · ${Math.round(last.latencyMs)} ms`}`,
+          `Operation model: ${last.advisor} · ${last.source ?? 'source unreported'}${last.profile ? ` · profile ${last.profile}` : ''}`,
+        ]
+      : ['No classifier calls observed.']),
+    'Credentials and profile approval are read-only.',
+    'Selecting a model does not enable advice or grant approval.',
+    'Session selection applies next user turn. No config writes.',
+    'None stops advice; /router reload restores file settings.',
+  ];
+};
+
+export const usageSummary = (snapshot: RouterUISnapshot): string[] => {
+  const retained = snapshot.history
+    .slice(-50)
+    .filter((entry) => !entry.reviewOnly);
+  const costs = retained.flatMap((entry) =>
+    entry.generationCostUsd === undefined ? [] : [entry.generationCostUsd],
+  );
+  const changes = observedRouteChanges(snapshot.history);
+  return [
+    historyStatus(snapshot),
+    `Retained generation decisions: ${retained.length} · active branch, not lifetime`,
+    ...(retained.length
+      ? [
+          `Model switches: ${changes.filter((change) => change.kind === 'model').length} · effort changes: ${changes.filter((change) => change.kind === 'effort').length}`,
+          `Known generation cost: ${costs.length ? `$${costs.reduce((sum, cost) => sum + cost, 0).toFixed(4)}` : 'unknown'} · coverage ${costs.length}/${retained.length}`,
+          'Catalog prices only. Missing cost is unknown, not free.',
+        ]
+      : ['Send a new request with history on to collect decisions.']),
+  ];
+};

@@ -204,6 +204,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   };
 
   const recordDebugDecision = (decision: RoutingDecision) => {
+    routerUI.recordAdvice(decision);
     if (!debugEnabled) return;
     debugHistory = [...debugHistory, snapshotDecision(decision)].slice(
       -MAX_DEBUG_HISTORY,

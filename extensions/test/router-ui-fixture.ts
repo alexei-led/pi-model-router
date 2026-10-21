@@ -181,8 +181,11 @@ export default (pi: ExtensionAPI) => {
     const question = context.questions.route;
     const keys =
       question?.type === 'choice' ? Object.keys(question.criteria) : [];
+    const preferredTier = model.id === 'demo/other' ? 'high' : 'medium';
     const choice =
-      keys.find((key) => key.startsWith('medium|')) ?? keys[0] ?? 'uncertain';
+      keys.find((key) => key.startsWith(`${preferredTier}|`)) ??
+      keys[0] ??
+      'uncertain';
     return {
       api: model.api,
       provider: model.provider,
@@ -203,18 +206,17 @@ export default (pi: ExtensionAPI) => {
   };
   pi.registerProvider('router-fixture-classifiers', {
     apiKey: 'local-fixture-no-network',
-    models: [
-      {
-        type: 'classifier',
-        id: 'demo/route',
-        name: 'Fixture route chooser',
-        api: 'fixture-classifier',
-        baseUrl: 'https://fixture.invalid',
-        input: ['text'],
-        contextWindow: 65536,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      },
-    ],
+    models: ['demo/route', 'demo/other'].map((id) => ({
+      type: 'classifier' as const,
+      id,
+      name:
+        id === 'demo/route' ? 'Fixture medium chooser' : 'Fixture high chooser',
+      api: 'fixture-classifier',
+      baseUrl: 'https://fixture.invalid',
+      input: ['text'],
+      contextWindow: 65536,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    })),
     classifiers: { 'fixture-classifier': { classify: classifyFixture } },
   });
   pi.registerCommand('router-demo-check', {

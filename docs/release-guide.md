@@ -79,7 +79,6 @@ Use the exact tag as the release title, for example `v0.7.1`.
 Start the notes with one sentence about the change.
 Use only relevant sections: fixes, changes, upgrade requirements, release checks, and links.
 State compatibility changes directly. Keep historical test results tied to their release.
-After publication, replace the generated change list with reviewed release notes based on `CHANGELOG.md`.
-Keep the generated package metadata and full-changelog link at the end.
+The workflow extracts the matching committed `CHANGELOG.md` version section before publication. Missing or empty notes stop the release. GitHub receives those reviewed notes with the exact tag as title, followed by package metadata. Keep the verified full-changelog link in the committed version section; do not author a second release body.
 
 If a published version needs a code correction, release a new version. Do not overwrite the package or move its tag.
