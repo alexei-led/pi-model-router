@@ -1,4 +1,5 @@
 import { type Api, calculateCost, type Model } from '@earendil-works/pi-ai';
+import { DEFAULT_SWITCH_POLICY } from './config';
 import type {
   EffortCacheSharing,
   GenerationDiagnostics,
@@ -105,11 +106,7 @@ export const evaluateSwitch = (
   input: SwitchPolicyInput,
 ): SwitchPolicyResult => {
   const { current, proposed, currentModel, proposedModel, config } = input;
-  const policy = config.switchPolicy ?? {
-    horizonRequests: 5,
-    costSensitivity: 0.5,
-    strongAdviceConfidence: 0.9,
-  };
+  const policy = config.switchPolicy ?? DEFAULT_SWITCH_POLICY;
   const horizon = policy.horizonRequests;
   const sameModel =
     currentModel.provider === proposedModel.provider &&

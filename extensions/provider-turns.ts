@@ -1,4 +1,5 @@
 import { MAX_TURN_CACHE_ENTRIES } from './constants';
+import type { EscalationState } from './escalation';
 import type {
   AdvisorConfig,
   ClassifierRequest,
@@ -85,6 +86,9 @@ export interface ProviderTurnCache {
     stamp: ReviewStamp,
     run: (signal: AbortSignal) => Promise<ClassifierResult>,
   ) => void;
+  /** Runtime-only repeated-failure hold; never persisted. */
+  escalation: () => EscalationState;
+  setEscalation: (state: EscalationState) => void;
   dispose: () => void;
   startClassifier: (
     key: string,
@@ -184,6 +188,7 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
   const pendingClassifierFlights = new Map<string, ClassifierFlight>();
   const turnRequests = new Map<string, number>();
   const reviews = new Map<string, BackgroundReview>();
+  let escalation: EscalationState = {};
   const rememberBounded = <T>(map: Map<string, T>, key: string, value: T) => {
     map.delete(key);
     map.set(key, value);
@@ -311,6 +316,11 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
       continuations.clear();
       advisedTurns.clear();
       turnRequests.clear();
+      escalation = {};
+    },
+    escalation: () => escalation,
+    setEscalation: (state) => {
+      escalation = state;
     },
     startClassifier: (key, config, request, run) =>
       startClassifierFlight(

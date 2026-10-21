@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
-import { normalizeAdvisorConfig } from '../config';
+import { DEFAULT_SWITCH_POLICY, normalizeAdvisorConfig } from '../config';
 import { isThinkingLevel, parseCanonicalModelRef } from '../domain';
 import {
   availableRoutePairs,
@@ -922,7 +922,7 @@ export const createRouterUIRuntime = (
     const nextConfig = {
       ...config,
       switchPolicy: {
-        ...config.switchPolicy,
+        ...(config.switchPolicy ?? DEFAULT_SWITCH_POLICY),
         horizonRequests: applying.costHorizon,
         costSensitivity: applying.costSensitivity,
         strongAdviceConfidence: applying.strongAdviceConfidence,

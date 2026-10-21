@@ -89,6 +89,7 @@ const isDecision = (value: unknown): value is RoutingDecision =>
   isThinkingLevel(value.thinking) &&
   (value.activity === undefined || isRouterActivity(value.activity)) &&
   (value.routeCell === undefined || isRouterActivity(value.routeCell)) &&
+  (value.escalatedFrom === undefined || isRouterTier(value.escalatedFrom)) &&
   isFiniteNumber(value.timestamp) &&
   ['profile', 'targetProvider', 'targetModelId', 'targetLabel'].every(
     (key) => typeof value[key] === 'string',
@@ -409,6 +410,9 @@ export const snapshotDecision = (
   reasonCode: isRoutingReasonCode(decision.reasonCode)
     ? decision.reasonCode
     : 'legacy',
+  escalatedFrom: isRouterTier(decision.escalatedFrom)
+    ? decision.escalatedFrom
+    : undefined,
   routingLatencyMs:
     isFiniteNumber(decision.routingLatencyMs) && decision.routingLatencyMs >= 0
       ? decision.routingLatencyMs

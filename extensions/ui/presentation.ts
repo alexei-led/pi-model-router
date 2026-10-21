@@ -54,6 +54,8 @@ export const routeReason = (snapshot: RouterUISnapshot): string => {
   if (snapshot.lifecycle === 'fallback') return 'Explicit generation fallback';
   if (snapshot.lifecycle === 'budget')
     return 'Over soft budget → eligible baseline';
+  if (snapshot.reason === 'escalation')
+    return 'Repeated tool failure · escalated one tier';
   if (
     snapshot.reuse === 'continuation' &&
     snapshot.advice?.source === 'review' &&

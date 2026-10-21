@@ -7,9 +7,11 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { createCandidate, selectedAdviceConfidence } from './choice';
 import { runClassifierDetailed } from './classifier';
+import { DEFAULT_SWITCH_POLICY } from './config';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
 import { hasImageAttachment } from './context';
 import { parseCanonicalModelRef } from './domain';
+import { updateEscalation } from './escalation';
 import {
   createClassifierFlightKey,
   type ProviderTurnCache,
@@ -36,6 +38,7 @@ import type {
   RouterTier,
   RoutingDecision,
 } from './types';
+import { ROUTER_TIERS } from './types';
 
 type RoutingRegistry = Pick<
   ExtensionContext['modelRegistry'],
@@ -716,6 +719,56 @@ const continueCompatibleRoute = (
   };
 };
 
+const tierRank = (tier: RouterTier): number =>
+  ROUTER_TIERS.length - ROUTER_TIERS.indexOf(tier);
+
+/** A repeated failure raises the route to the floor tier; budget never admits high. */
+const applyEscalation = (
+  input: RequestRouteInput,
+  selected: SelectedRoute,
+  matrix: RouteMatrix,
+  budget: boolean,
+): SelectedRoute => {
+  const { state, floor } = updateEscalation(input.cache.escalation(), {
+    messages: input.context.messages,
+    incumbent: selected.plan.tier,
+    holdTurns:
+      input.config.switchPolicy?.escalationHoldTurns ??
+      DEFAULT_SWITCH_POLICY.escalationHoldTurns,
+  });
+  input.cache.setEscalation(state);
+  if (!floor || tierRank(selected.plan.tier) >= tierRank(floor))
+    return selected;
+  const plan = [...ROUTER_TIERS]
+    .reverse()
+    .filter(
+      (tier) =>
+        tierRank(tier) >= tierRank(floor) && !(budget && tier === 'high'),
+    )
+    .flatMap((tier) => [
+      matrix.plans.find(
+        (entry) => entry.tier === tier && entry.cell === selected.plan.cell,
+      ),
+      matrix.plans.find((entry) => entry.tier === tier && !entry.cell),
+    ])
+    .find((entry) => entry !== undefined);
+  if (!plan) return selected;
+  const { activity, advisor, adviceSource, bypassReason, classification } =
+    selected.decision;
+  return {
+    plan,
+    decision: {
+      ...decisionForPlan(input, plan, 'escalation'),
+      activity,
+      advisor,
+      adviceSource,
+      bypassReason,
+      classification,
+      escalatedFrom: selected.plan.tier,
+    },
+  };
+};
+
 export const prepareRouterRequest = async (
   input: RequestRouteInput,
 ): Promise<PreparedRouterRequest> => {
@@ -799,6 +852,8 @@ export const prepareRouterRequest = async (
       priorAssistant,
       mustContinueGoogle,
     );
+  if (!input.pinnedTier && !mustContinueGoogle)
+    selected = applyEscalation(input, selected, matrix, budget);
   if (toolContinuation && !mustContinueGoogle)
     scheduleBackgroundReview(
       input,

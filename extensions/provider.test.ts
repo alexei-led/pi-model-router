@@ -1657,6 +1657,7 @@ describe('activity matrix provider routing', () => {
       horizonRequests: 1,
       costSensitivity: 1,
       strongAdviceConfidence: 0.9,
+      escalationHoldTurns: 2,
     };
     s.state.currentConfig.advisor = {
       ...required(s.state.currentConfig.advisor),
@@ -1763,6 +1764,7 @@ describe('activity matrix provider routing', () => {
       horizonRequests: 1,
       costSensitivity: 1,
       strongAdviceConfidence: 0.9,
+      escalationHoldTurns: 2,
     };
     s.models[s.models.findIndex((m) => m.id === 'docs')] = model('docs', {
       cost: { input: 0.1, output: 0.1, cacheRead: 0.01, cacheWrite: 0.1 },
@@ -2313,4 +2315,118 @@ describe('activity matrix provider routing', () => {
     expect(cancelled.delegate).toHaveBeenCalledOnce();
     expect(cancelled.state.accumulatedCost).toBe(0.01);
   });
+});
+
+describe('repeated failure escalation', () => {
+  const turn = (
+    text: string,
+    ...results: Array<[toolName: string, isError: boolean]>
+  ): Context['messages'] => [
+    { role: 'user', content: text, timestamp: 1 },
+    ...results.flatMap(([toolName, isError], index) => [
+      message({
+        model: 'small',
+        stopReason: 'toolUse',
+        content: [
+          {
+            type: 'toolCall',
+            id: `${text}-${index}`,
+            name: toolName,
+            arguments: {},
+          },
+        ],
+      }),
+      {
+        role: 'toolResult' as const,
+        toolCallId: `${text}-${index}`,
+        toolName,
+        content: [
+          {
+            type: 'text' as const,
+            text: isError ? 'FAIL parser.test.ts:12' : 'ok',
+          },
+        ],
+        isError,
+        timestamp: 2,
+      },
+    ]),
+  ];
+  const failingLoop = turn(
+    'fix the parser',
+    ['bash', true],
+    ['edit', false],
+    ['bash', true],
+  );
+  const routeWith = (raw: Record<string, unknown> = {}, pin?: 'low') => {
+    const s = setup();
+    s.state.pinnedTierByProfile = pin ? { balanced: pin } : {};
+    s.state.currentConfig = normalizeConfig({
+      ...raw,
+      profiles: {
+        balanced: {
+          baselineTier: 'low',
+          high: { model: 'test/primary' },
+          medium: { model: 'test/fallback' },
+          low: { model: 'test/small' },
+          ...((raw.profiles as Record<string, object> | undefined)?.balanced ??
+            {}),
+        },
+      },
+    }).config;
+    const run = async (messages: Context['messages']) => {
+      s.delegate.mockClear();
+      await consume(s.stream({ messages }));
+      return s.delegate.mock.calls[0]?.[0].id;
+    };
+    return { s, run };
+  };
+
+  it('moves one tier up after the same failure repeats across an edit', async () => {
+    const { s, run } = routeWith();
+    expect(await run(failingLoop)).toBe('fallback');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'escalation',
+      escalatedFrom: 'low',
+    });
+  });
+
+  it('keeps the baseline when no edit separates the failures', async () => {
+    const { s, run } = routeWith();
+    expect(
+      await run(turn('fix the parser', ['bash', true], ['bash', true])),
+    ).toBe('small');
+    expect(s.state.lastDecision?.reasonCode).toBe('baseline');
+  });
+
+  it('does not override a pin', async () => {
+    const { s, run } = routeWith({}, 'low');
+    expect(await run(failingLoop)).toBe('small');
+    expect(s.state.lastDecision?.reasonCode).toBe('pinned');
+  });
+
+  it('never escalates to high over the soft budget', async () => {
+    const { s, run } = routeWith({
+      maxSessionBudget: 0.01,
+      profiles: { balanced: { baselineTier: 'medium' } },
+    });
+    s.state.accumulatedCost = 1;
+    expect(await run(failingLoop)).toBe('fallback');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'budget',
+    });
+  });
+
+  it.each([
+    [0, 'small'],
+    [1, 'fallback'],
+  ])(
+    'with escalationHoldTurns %i the next user turn routes to %s',
+    async (escalationHoldTurns, next) => {
+      const { run } = routeWith({ switchPolicy: { escalationHoldTurns } });
+      expect(await run(failingLoop)).toBe('fallback');
+      expect(await run([...failingLoop, ...turn('add a test')])).toBe(next);
+    },
+  );
 });

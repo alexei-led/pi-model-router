@@ -131,6 +131,8 @@ export interface RouterSwitchPolicy {
   horizonRequests: number;
   costSensitivity: number;
   strongAdviceConfidence: number;
+  /** Further user turns a repeated-failure escalation holds its floor. */
+  escalationHoldTurns: number;
 }
 
 export interface RouterConfig {
@@ -275,6 +277,7 @@ export const ROUTING_REASON_CODES = [
   'classifier',
   'fallback',
   'budget',
+  'escalation',
   'legacy',
 ] as const;
 export type RoutingReasonCode = (typeof ROUTING_REASON_CODES)[number];
@@ -371,6 +374,8 @@ export interface RoutingDecision {
   targetModelId: string;
   targetLabel: string;
   reasonCode: RoutingReasonCode;
+  /** Tier selected before a repeated-failure escalation raised it. */
+  escalatedFrom?: RouterTier | undefined;
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
   advisor?: AdvisorOutcome | undefined;

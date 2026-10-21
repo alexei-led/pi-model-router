@@ -1,6 +1,6 @@
 # Routing modes (`cost | balanced | quality`) — v0.16.0
 
-Status: Phase 1 (analysis and plan). Waiting for manager go before Phase 2.
+Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see open choices).
 
 - Branch `feat/routing-modes`, worktree `../pi-model-router.worktrees/routing-modes`, based on `origin/main` at `ff499f65` (v0.15.1, tagged).
 - Merge order: v0.15.1 is already merged and tagged. No rebase needed. This branch targets v0.16.0.
@@ -43,7 +43,7 @@ Status: Phase 1 (analysis and plan). Waiting for manager go before Phase 2.
 - The classifier sees transformed routes in its criteria (`choice.ts:409-423`). This can bias its tier choice. Prompts and labels stay unchanged.
 - In cost mode two tiers can resolve to the same model and effort. The classifier still runs, because `oneEffectivePlan` is checked only with meaningful activities (`provider-request.ts:409-411`). Extra advisor cost, same route. Not fixed here (scope).
 - Effort-only moves with `unknown` cache sharing pass the switch-cost check free (`switch-policy.ts:126-127`). Both levers' effort steps move without a tax.
-- Subscription providers may have zero or missing catalog prices. Then the cost model lever never fires and cost uses the effort lever. Not verified for the user's `openai-codex-*` and `anthropic-*` entries.
+- Subscription prices (checked 2026-10-21, read-only): the user's `anthropic-*` and `openai-codex-*` providers are `pi-sub-aliases` clones of built-in Pi 1.3.0 models (`cloneAliasModel` is a `structuredClone`, cost included); `models.json` overrides only `contextWindow`. Catalog input prices: `gpt-6.1-sol` 2, `gpt-6-luna` 0.1, `claude-opus-5-5` 4, `claude-sonnet-5-5` 2, `claude-haiku-4-5` 1. None is zero, so the cost model lever can fire for every routed profile. No fix needed. Not checked through a live registry.
 - Escalation hold state is runtime-only. Reload or resume drops it (codex does the same).
 - The project-file allowlist is a breaking change for repos that set other keys. No `.pi/model-router.json` found under `~/Workspace` (depth 4).
 - Coverage gate: 90% branches on `routing.ts` and `state.ts`.
@@ -59,7 +59,7 @@ Status: Phase 1 (analysis and plan). Waiting for manager go before Phase 2.
 6. **Validation:** explicit `thinking: off|minimal` on `low`/`medium`/`high` (generic or activity cell) **disables that tier with a warning** (existing invalid-tier pattern). Routes limited by capability (`reasoning: false`, `thinkingLevels`) stay valid; the transform never moves them below `low`.
 7. **Effort override** (`/router thinking`, Shift+Tab) is a manual choice: **mode is bypassed for overridden tiers.** Status shows `mode cost (session) · bypassed by effort override`.
 8. **Budget exceeded:** **quality's model lever never targets `high`.** Otherwise a medium cell would generate the high model and slip past the budget pool (`routing.ts:481-486`).
-9. **Settings-tab cost sensitivity vs mode patch:** **mode patch wins** (design §5). The Settings tab shows the effective value with `(mode cost)`. Mode is changed by command only in 0.16.0.
+9. **Settings-tab cost sensitivity vs mode patch (manager decision):** an explicit Settings-tab edit is runtime user intent and wins over the mode patch for that session; the Settings tab shows that it overrides the mode. Config-file `switchPolicy` still loses to the mode patch. Mode is changed by command only in 0.16.0.
 10. **Session override scope:** **one value per session**, not per profile.
 11. **User profile defaults:** work profiles `cost`, personal profiles `balanced`. The user decides.
 
@@ -78,8 +78,8 @@ Status: Phase 1 (analysis and plan). Waiting for manager go before Phase 2.
 
 ### Code
 
-- [ ] C1 `escalation.ts`: `detectEscalation` (signature, edit-in-between, current user turn only, latest pair) and hold logic.
-- [ ] C2 Wire escalation into `prepareRouterRequest` (floor after advice and continuation; reason code `escalation`; pins, Google continuation and budget rules).
+- [x] C1 `escalation.ts`: `detectEscalation` (signature, edit-in-between, current user turn only, latest pair) and hold logic.
+- [x] C2 Wire escalation into `prepareRouterRequest` (floor after advice and continuation; reason code `escalation`; pins, Google continuation and budget rules).
 - [ ] C3 Types: `RouterMode`, `ModeSource`, `modes` config, `RoutePlan` provenance, decision fields, reason code.
 - [ ] C4 Config: normalize `profiles.<n>.mode`, `modes`, `switchPolicy.escalationHoldTurns`; merge rules; effective policy `{...switchPolicy, ...modes[mode].policy}`.
 - [ ] C5 Config: project allowlist replaces `stripProjectAdvisorConfig`; extract project `mode`.

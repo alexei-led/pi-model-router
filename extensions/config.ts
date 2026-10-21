@@ -627,6 +627,13 @@ export const stripProjectAdvisorConfig = (
   return project;
 };
 
+export const DEFAULT_SWITCH_POLICY: Readonly<RouterSwitchPolicy> = {
+  horizonRequests: 5,
+  costSensitivity: 0.5,
+  strongAdviceConfidence: 0.9,
+  escalationHoldTurns: 2,
+};
+
 const normalizeSwitchPolicy = (
   raw: unknown,
   warnings: string[],
@@ -650,13 +657,20 @@ const normalizeSwitchPolicy = (
       : typeof rawSwitchPolicy.strongAdviceConfidence === 'number'
         ? rawSwitchPolicy.strongAdviceConfidence
         : Number.NaN;
+  const escalationHoldTurns =
+    rawSwitchPolicy.escalationHoldTurns === undefined
+      ? DEFAULT_SWITCH_POLICY.escalationHoldTurns
+      : typeof rawSwitchPolicy.escalationHoldTurns === 'number'
+        ? rawSwitchPolicy.escalationHoldTurns
+        : Number.NaN;
   const validSwitchPolicy =
     (raw === undefined || isObjectRecord(raw)) &&
     Object.keys(rawSwitchPolicy).every((key) =>
-      ['horizonRequests', 'costSensitivity', 'strongAdviceConfidence'].includes(
-        key,
-      ),
+      Object.hasOwn(DEFAULT_SWITCH_POLICY, key),
     ) &&
+    Number.isSafeInteger(escalationHoldTurns) &&
+    escalationHoldTurns >= 0 &&
+    escalationHoldTurns <= 20 &&
     Number.isSafeInteger(horizonRequests) &&
     horizonRequests >= 1 &&
     horizonRequests <= 20 &&
@@ -669,8 +683,13 @@ const normalizeSwitchPolicy = (
   if (raw !== undefined && !validSwitchPolicy)
     warnings.push('Invalid switchPolicy; using defaults.');
   const effectiveSwitchPolicy = validSwitchPolicy
-    ? { horizonRequests, costSensitivity, strongAdviceConfidence }
-    : { horizonRequests: 5, costSensitivity: 0.5, strongAdviceConfidence: 0.9 };
+    ? {
+        horizonRequests,
+        costSensitivity,
+        strongAdviceConfidence,
+        escalationHoldTurns,
+      }
+    : { ...DEFAULT_SWITCH_POLICY };
 
   return effectiveSwitchPolicy;
 };
