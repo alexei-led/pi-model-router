@@ -154,7 +154,7 @@ Isolated: `PI_CODING_AGENT_DIR` and `HOME` under the scratchpad, `pi install --l
 ### Release
 
 - [ ] R0 T16, T17, L10, L11 and L12 are done and reported before Phase 4.
-- [ ] R1 `npm version minor --no-git-tag-version` → 0.16.0 (`package.json`, `package-lock.json`).
-- [ ] R2 `CHANGELOG.md` `## [0.16.0] - <date>`: Security (project allowlist), Changes, Upgrade; compare link.
-- [ ] R3 Full gate: `npm ci --ignore-scripts`, `npm run check`, `npm run test:coverage`, `npm run check:unused`, `npm run pack:dry`.
+- [x] R1 `npm version minor --no-git-tag-version` → 0.16.0 (`package.json`, `package-lock.json`).
+- [x] R2 `CHANGELOG.md` `## [0.16.0] - <date>`: Security (project allowlist), Changes, Upgrade; compare link.
+- [x] R3 Full gate: `npm ci --ignore-scripts`, `npm run check`, `npm run test:coverage`, `npm run check:unused`, `npm run pack:dry`.
 - [ ] R4 Push the branch, open the PR. Stop before merge, tag or publish.

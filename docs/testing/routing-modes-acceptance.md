@@ -1,6 +1,6 @@
 # Routing modes: actual-host acceptance
 
-Date: 21 October 2026. Branch `feature/routing-modes`, before v0.16.0.
+Date: 21 October 2026. Branch `feat/routing-modes`, before v0.16.0.
 Pi CLI 1.3.0, agterm 0.36.0. Local fixture only: no network, no credentials.
 
 **Result:** all fixture checks passed. Live-provider checks are not part of this report.

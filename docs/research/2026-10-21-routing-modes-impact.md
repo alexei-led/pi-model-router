@@ -1,6 +1,6 @@
 # Routing modes: offline impact
 
-Research date: 21 October 2026. Branch `feature/routing-modes`, before v0.16.0.
+Research date: 21 October 2026. Branch `feat/routing-modes`, before v0.16.0.
 Catalog scenario, not a billing or quality measurement.
 
 ## Method
