@@ -2430,3 +2430,149 @@ describe('repeated failure escalation', () => {
     },
   );
 });
+
+describe('routing mode changes while advice is in flight', () => {
+  const price = (input: number) => ({
+    cost: {
+      input,
+      output: input * 5,
+      cacheRead: input / 10,
+      cacheWrite: input,
+    },
+  });
+  const priced = (mode?: 'cost') => {
+    const s = setup();
+    s.models.splice(
+      0,
+      s.models.length,
+      model('primary', price(4)),
+      model('fallback', price(2)),
+      model('small', { contextWindow: 1024, ...price(1) }),
+    );
+    s.state.pinnedTierByProfile = {};
+    if (mode) s.state.modeOverride = mode;
+    s.state.currentConfig = normalizeConfig({
+      advisor: {
+        enabled: true,
+        model: 'typesafe/jev-latest',
+        reviewEveryRequests: 2,
+      },
+      profiles: {
+        balanced: {
+          advisor: { models: ['typesafe/jev-latest'] },
+          high: { model: 'test/primary' },
+          medium: { model: 'test/fallback' },
+          low: { model: 'test/small' },
+        },
+      },
+    }).config;
+    s.registry.findOfType = (() =>
+      classifierModel) as unknown as ExtensionContext['modelRegistry']['findOfType'];
+    return s;
+  };
+  const routed = (s: ReturnType<typeof setup>) =>
+    s.delegate.mock.calls.at(-1)?.[0].id;
+
+  it('accepts advice for the mode it was asked under', async () => {
+    const s = priced('cost');
+    s.registry.classify = vi.fn<Classify>(async (target, context) =>
+      classifierResponse(target, context, 'high'),
+    );
+    await consume(s.stream(userContext()));
+    expect(routed(s)).toBe('fallback');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      advisor: 'classifier',
+      mode: 'cost',
+      modeSource: 'session',
+      modeLever: 'model',
+      modeSourceTier: 'medium',
+    });
+  });
+
+  it('rejects initial advice after a mode change and generates from the current matrix', async () => {
+    const s = priced();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const classify = vi.fn<Classify>(async (target, context) => {
+      await gate;
+      return classifierResponse(target, context, 'high');
+    });
+    s.registry.classify = classify;
+    const pending = consume(s.stream(userContext()));
+    await vi.waitFor(() => expect(classify).toHaveBeenCalled());
+    s.state.modeOverride = 'cost';
+    release();
+    await pending;
+    // balanced advice would run primary; the same advice on the cost matrix, fallback
+    expect(routed(s)).toBe('small');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      advisor: 'classifier-fallback',
+      mode: 'cost',
+      modeSource: 'session',
+      modeLever: 'model',
+      modeSourceTier: 'low',
+    });
+  });
+
+  it('discards a background review started before a mode change', async () => {
+    const s = priced();
+    const answer = { tier: 'medium' };
+    const classify = vi.fn<Classify>(async (target, context) =>
+      classifierResponse(target, context, answer.tier),
+    );
+    s.registry.classify = classify;
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            {
+              type: 'toolCall',
+              name: 'read',
+              id: `call-${target.id}-${Math.random()}`,
+              arguments: {},
+            },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      { role: 'user', content: 'Implement the retry behavior.', timestamp: 20 },
+    ];
+    const advance = async () => {
+      const { result } = await consume(s.stream({ messages }));
+      messages.push(result);
+      const call = result.content.find((part) => part.type === 'toolCall');
+      if (call?.type !== 'toolCall') throw new Error('Expected a tool call');
+      messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: 'text', text: 'step result' }],
+        isError: false,
+        timestamp: 21 + messages.length,
+      });
+      return result.model;
+    };
+    expect(await advance()).toBe('fallback');
+    answer.tier = 'high';
+    expect(await advance()).toBe('fallback');
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(classify).toHaveBeenCalledTimes(2);
+    s.state.modeOverride = 'cost';
+    // a consumed stale review would run primary (balanced) or fallback (cost high)
+    expect(await advance()).toBe('small');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'baseline',
+      mode: 'cost',
+    });
+  });
+});

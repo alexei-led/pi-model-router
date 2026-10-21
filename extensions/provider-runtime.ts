@@ -9,6 +9,7 @@ import type {
   SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { resolveMode } from './modes';
 import type { GenerationOutcome } from './provider-generation';
 import { runGenerationAttempts } from './provider-generation';
 import {
@@ -18,6 +19,7 @@ import {
 import type { ProviderTurnCache } from './provider-turns';
 import type {
   RouterConfig,
+  RouterMode,
   RouterPinByProfile,
   RouterRequestObservation,
   RouterThinkingByProfile,
@@ -44,6 +46,7 @@ interface ProviderStreamState {
   readonly lastExtensionContext: RequestContext | undefined;
   readonly pinnedTierByProfile: RouterPinByProfile;
   readonly thinkingByProfile: RouterThinkingByProfile;
+  readonly modeOverride?: RouterMode | undefined;
   selectedProfile: string | undefined;
   routerEnabled: boolean;
   lastDecision: RoutingDecision | undefined;
@@ -145,6 +148,14 @@ const prepareStreamRequest = async (
     extensionContext?.sessionManager.getSessionId?.() ?? options?.sessionId;
   const identity = createRouterRequestIdentity(context, sessionId, branch);
   onTurnIdentified(identity.turn);
+  const modeFor = (current: RouterConfig) =>
+    resolveMode({
+      session: state.modeOverride,
+      project: current.projectMode,
+      profile: Object.hasOwn(current.profiles, model.id)
+        ? current.profiles[model.id]?.mode
+        : undefined,
+    });
   const request = await prepareRouterRequest({
     profileName: model.id,
     profile,
@@ -155,6 +166,8 @@ const prepareStreamRequest = async (
     identity,
     ...(pinnedTier ? { pinnedTier } : {}),
     ...(thinkingOverrides ? { thinkingOverrides } : {}),
+    mode: modeFor(config),
+    getCurrentMode: () => modeFor(state.currentConfig),
     accumulatedCost: state.accumulatedCost,
     lastDecision: state.lastDecision,
     ...(options?.signal ? { signal: options.signal } : {}),
@@ -368,6 +381,9 @@ export const startRouterProviderStream = (input: RouterStreamInput): void => {
     },
     get thinkingByProfile() {
       return input.state.thinkingByProfile;
+    },
+    get modeOverride() {
+      return input.state.modeOverride;
     },
     get selectedProfile() {
       return input.state.selectedProfile;

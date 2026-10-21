@@ -7,11 +7,11 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { createCandidate, selectedAdviceConfidence } from './choice';
 import { runClassifierDetailed } from './classifier';
-import { DEFAULT_SWITCH_POLICY } from './config';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
 import { hasImageAttachment } from './context';
 import { parseCanonicalModelRef } from './domain';
 import { updateEscalation } from './escalation';
+import { effectivePolicy } from './modes';
 import {
   createClassifierFlightKey,
   type ProviderTurnCache,
@@ -31,6 +31,7 @@ import type {
   ClassifierRequest,
   ClassifierResult,
   GenerationDiagnostics,
+  ResolvedMode,
   RoutePlan,
   RouterConfig,
   RouterProfile,
@@ -75,6 +76,10 @@ interface RequestRouteInput {
   identity: RouterRequestIdentity;
   pinnedTier?: RouterTier;
   thinkingOverrides?: RouterThinkingByTier;
+  /** Mode in effect when the request started. */
+  mode: ResolvedMode;
+  /** Live mode; a change while advice is in flight rejects that advice. */
+  getCurrentMode: () => ResolvedMode;
   accumulatedCost: number;
   lastDecision: RoutingDecision | undefined;
   signal?: AbortSignal | undefined;
@@ -144,6 +149,24 @@ interface SelectedRoute {
   plan: RoutePlan;
 }
 
+const modeFields = (
+  input: RequestRouteInput,
+  plan: RoutePlan,
+): Pick<
+  RoutingDecision,
+  'mode' | 'modeSource' | 'modeLever' | 'modeSourceTier'
+> =>
+  plan.mode
+    ? {
+        mode: plan.mode.mode,
+        modeSource: [input.mode, input.getCurrentMode()].find(
+          (entry) => entry.mode === plan.mode?.mode,
+        )?.source,
+        modeLever: plan.mode.lever,
+        modeSourceTier: plan.mode.sourceTier,
+      }
+    : {};
+
 const decisionForPlan = (
   input: RequestRouteInput,
   plan: RoutePlan,
@@ -151,6 +174,7 @@ const decisionForPlan = (
 ): RoutingDecision => ({
   ...decisionForPair(input.profileName, plan.attempts[0], reason),
   routeCell: plan.cell,
+  ...modeFields(input, plan),
 });
 
 const canReuseContinuation = (
@@ -482,6 +506,7 @@ const chooseAdvisorRoute = async (
   const activeConfig = input.getCurrentConfig();
   const authorized =
     activeConfig === input.config &&
+    input.getCurrentMode().mode === input.mode.mode &&
     authorization ===
       JSON.stringify([activeConfig.advisor, input.profile.advisor]) &&
     (reviewResult !== undefined || performance.now() < routingDeadline);
@@ -635,7 +660,10 @@ const applySwitchPolicy = (
     proposed: proposedPair,
     currentModel,
     proposedModel: nextModel,
-    config: input.config,
+    config: {
+      ...input.config,
+      switchPolicy: effectivePolicy(input.config, input.mode.mode),
+    },
     ...(previousGeneration ? { previousGeneration } : {}),
     contextTokens,
     outputTokens: previousGeneration?.outputTokens ?? 0,
@@ -712,6 +740,7 @@ const continueCompatibleRoute = (
     decision: {
       ...decisionForPair(input.profileName, match.pair, 'continuation'),
       routeCell: match.plan.cell,
+      ...modeFields(input, match.plan),
       activity: previous?.activity,
       advisor: selected.decision.advisor,
       bypassReason: selected.decision.bypassReason,
@@ -732,9 +761,8 @@ const applyEscalation = (
   const { state, floor } = updateEscalation(input.cache.escalation(), {
     messages: input.context.messages,
     incumbent: selected.plan.tier,
-    holdTurns:
-      input.config.switchPolicy?.escalationHoldTurns ??
-      DEFAULT_SWITCH_POLICY.escalationHoldTurns,
+    holdTurns: effectivePolicy(input.config, input.mode.mode)
+      .escalationHoldTurns,
   });
   input.cache.setEscalation(state);
   if (!floor || tierRank(selected.plan.tier) >= tierRank(floor))
@@ -775,7 +803,10 @@ export const prepareRouterRequest = async (
   input.signal?.throwIfAborted();
   const imageAttached = hasImageAttachment(input.context);
   const contextTokens = estimateRequestTokens(input.context);
-  const matrixFor = (tokens: number) =>
+  const budget =
+    input.config.maxSessionBudget !== undefined &&
+    input.accumulatedCost >= input.config.maxSessionBudget;
+  const matrixFor = (tokens: number, mode = input.mode.mode) =>
     buildRouteMatrix(
       input.profile,
       (provider, id) => input.registry.find(provider, id),
@@ -784,9 +815,15 @@ export const prepareRouterRequest = async (
       input.thinkingOverrides,
       input.config.activityRouting !== 'off',
       input.pinnedTier,
+      { mode, budgetExceeded: budget },
     );
-  const available = () => matrixFor(contextTokens);
-  const matrix = available();
+  const matrix = matrixFor(contextTokens);
+  let currentMatrix = matrix;
+  // After advice, rebuild from the live mode so only the current matrix generates.
+  const available = () => {
+    currentMatrix = matrixFor(contextTokens, input.getCurrentMode().mode);
+    return currentMatrix;
+  };
   const toolContinuation = input.context.messages.at(-1)?.role === 'toolResult';
   const latest = input.context.messages.findLast(
     (entry) => entry.role === 'assistant',
@@ -795,10 +832,8 @@ export const prepareRouterRequest = async (
   const mustContinueGoogle = priorAssistant
     ? requiresGoogleContinuation(priorAssistant)
     : false;
-  const budget =
-    input.config.maxSessionBudget !== undefined &&
-    input.accumulatedCost >= input.config.maxSessionBudget;
   const policy = JSON.stringify([
+    input.mode.mode,
     input.profileName,
     input.profile,
     input.pinnedTier,
@@ -853,7 +888,7 @@ export const prepareRouterRequest = async (
       mustContinueGoogle,
     );
   if (!input.pinnedTier && !mustContinueGoogle)
-    selected = applyEscalation(input, selected, matrix, budget);
+    selected = applyEscalation(input, selected, currentMatrix, budget);
   if (toolContinuation && !mustContinueGoogle)
     scheduleBackgroundReview(
       input,
