@@ -56,6 +56,7 @@ Classifier configuration and exact per-profile approvals belong only in user con
 - `docs/classifier-advisor.md`: classifier configuration, Pi registry behavior, and privacy.
 - `docs/evaluation.md`: dated usage evidence, cost assumptions, and aggregate data.
 - `docs/release-guide.md`: maintainer checks and publication procedure.
+- `docs/decision-matrix.md`: generated routing decision table; regenerate it with its test, never edit it by hand.
 - Keep one fact in one document. Leave archived reports unchanged during current-document updates.
 - `docs/architecture.md`: mechanism and module boundaries.
 - `docs/research/`: dated experiments behind current defaults.

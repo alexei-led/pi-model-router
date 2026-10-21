@@ -1,19 +1,22 @@
+import { readFileSync } from 'node:fs';
 import type { Api, Context, Model } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { normalizeConfig } from './config';
 import { prepareRouterRequest } from './provider-request';
 import { createProviderTurnCache } from './provider-turns';
+import { buildRouteMatrix } from './routing';
 import { message, model, required } from './test/fixtures';
 import type {
+  RawRouterConfig,
   RouterMode,
   RouterThinkingByTier,
   RouterTier,
   RoutingDecision,
 } from './types';
-import { ROUTER_MODES, ROUTER_TIERS } from './types';
+import { ROUTER_ACTIVITIES, ROUTER_MODES, ROUTER_TIERS } from './types';
 
-/** Pi 1.3.0 catalog prices and effort maps for the user's routed models. */
+/** Pi 1.3.0 catalog prices and effort maps for the routed models. */
 const unsupported = { off: null, minimal: null } as const;
 const extended = { xhigh: 'xhigh', max: 'max' } as const;
 const catalog: Model<Api>[] = [
@@ -26,6 +29,12 @@ const catalog: Model<Api>[] = [
   model('claude-sonnet-5-5', {
     provider: 'anthropic',
     cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+    thinkingLevelMap: { ...unsupported, ...extended },
+    contextWindow: 1_000_000,
+  }),
+  model('claude-haiku-5-5', {
+    provider: 'anthropic',
+    cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
     thinkingLevelMap: { ...unsupported, ...extended },
     contextWindow: 1_000_000,
   }),
@@ -47,42 +56,68 @@ const catalog: Model<Api>[] = [
     contextWindow: 272_000,
   }),
 ];
+const findModel = (provider: string, id: string) =>
+  catalog.find((entry) => entry.provider === provider && entry.id === id);
 
 const JEV = 'typesafe/jev-1.14.0';
-type Classify = ExtensionContext['modelRegistry']['classify'];
-/** The user's claude-* and openai-* profile shapes, plus one code cell each. */
-const profiles = {
-  claude: {
-    advisor: { models: [JEV] },
-    high: { model: 'anthropic/claude-opus-5-5', thinking: 'high' },
-    medium: { model: 'anthropic/claude-sonnet-5-5', thinking: 'medium' },
-    low: { model: 'anthropic/claude-sonnet-5-5', thinking: 'low' },
-    micro: { model: 'anthropic/claude-haiku-4-5', thinking: 'off' },
-    activities: {
-      code: {
-        medium: { model: 'anthropic/claude-opus-5-5', thinking: 'medium' },
+type ConfigFile = RawRouterConfig & { advisor?: Record<string, unknown> };
+const reference: ConfigFile = JSON.parse(
+  readFileSync(
+    new URL('../model-router.example.json', import.meta.url),
+    'utf8',
+  ),
+);
+/** The reference configuration, plus the user's claude-* and openai-* profile shapes. */
+const PROFILES = {
+  'reference/personal': { config: reference, profile: 'personal' },
+  'reference/work': { config: reference, profile: 'work' },
+  'user/claude': {
+    profile: 'claude',
+    config: {
+      profiles: {
+        claude: {
+          advisor: { models: [JEV] },
+          high: { model: 'anthropic/claude-opus-5-5', thinking: 'high' },
+          medium: { model: 'anthropic/claude-sonnet-5-5', thinking: 'medium' },
+          low: { model: 'anthropic/claude-sonnet-5-5', thinking: 'low' },
+          micro: { model: 'anthropic/claude-haiku-4-5', thinking: 'off' },
+          activities: {
+            code: {
+              medium: {
+                model: 'anthropic/claude-opus-5-5',
+                thinking: 'medium',
+              },
+            },
+          },
+        },
       },
     },
   },
-  openai: {
-    advisor: { models: [JEV] },
-    high: { model: 'openai-codex/gpt-6.1-sol', thinking: 'xhigh' },
-    medium: { model: 'openai-codex/gpt-6.1-sol', thinking: 'medium' },
-    low: { model: 'openai-codex/gpt-6-luna', thinking: 'medium' },
-    micro: { model: 'openai-codex/gpt-6-luna', thinking: 'off' },
-    activities: {
-      code: { medium: { model: 'openai-codex/gpt-6-luna', thinking: 'high' } },
+  'user/openai': {
+    profile: 'openai',
+    config: {
+      profiles: {
+        openai: {
+          advisor: { models: [JEV] },
+          high: { model: 'openai-codex/gpt-6.1-sol', thinking: 'xhigh' },
+          medium: { model: 'openai-codex/gpt-6.1-sol', thinking: 'medium' },
+          low: { model: 'openai-codex/gpt-6-luna', thinking: 'medium' },
+          micro: { model: 'openai-codex/gpt-6-luna', thinking: 'off' },
+          activities: {
+            code: {
+              medium: { model: 'openai-codex/gpt-6-luna', thinking: 'high' },
+            },
+          },
+        },
+      },
     },
   },
-} as const;
+} satisfies Record<string, { config: ConfigFile; profile: string }>;
+type ProfileKey = keyof typeof PROFILES;
 
-const OUTCOMES = [
-  'none',
-  ...[...ROUTER_TIERS].reverse(),
-  'uncertain',
-  'invalid',
-] as const;
+const OUTCOMES = ['none', ...ROUTER_TIERS, 'uncertain', 'invalid'] as const;
 type Outcome = (typeof OUTCOMES)[number];
+const ACTIVITIES = [...ROUTER_ACTIVITIES, 'uncertain'] as const;
 const MODIFIERS = [
   'plain',
   'pin-medium',
@@ -92,10 +127,10 @@ const MODIFIERS = [
 ] as const;
 type Modifier = (typeof MODIFIERS)[number];
 
+type Classify = ExtensionContext['modelRegistry']['classify'];
 const registry = (outcome: Outcome, activity: string) =>
   ({
-    find: (provider: string, id: string) =>
-      catalog.find((entry) => entry.provider === provider && entry.id === id),
+    find: findModel,
     findOfType: () => ({
       type: 'classifier',
       provider: 'typesafe',
@@ -181,26 +216,40 @@ const toolLoop: Context['messages'] = [
   ]),
 ];
 
+const configFor = (key: ProfileKey, outcome: Outcome, modifier: Modifier) => {
+  const { config, profile }: { config: ConfigFile; profile: string } =
+    PROFILES[key];
+  const normalized = normalizeConfig({
+    ...config,
+    advisor: { ...config.advisor, enabled: outcome !== 'none', model: JEV },
+    ...(modifier === 'budget' ? { maxSessionBudget: 1 } : {}),
+  }).config;
+  return {
+    config: normalized,
+    profileName: profile,
+    profile: required(normalized.profiles[profile]),
+  };
+};
+const thinkingOverridesFor = (
+  modifier: Modifier,
+): RouterThinkingByTier | undefined =>
+  modifier === 'effort-low'
+    ? Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, 'low']))
+    : undefined;
+
 const decide = async (
-  name: keyof typeof profiles,
+  key: ProfileKey,
   outcome: Outcome,
   activity: string,
   mode: RouterMode,
   modifier: Modifier,
 ): Promise<RoutingDecision> => {
-  const config = normalizeConfig({
-    ...(outcome === 'none' ? {} : { advisor: { enabled: true, model: JEV } }),
-    ...(modifier === 'budget' ? { maxSessionBudget: 1 } : {}),
-    profiles: { [name]: profiles[name] },
-  }).config;
+  const { config, profileName, profile } = configFor(key, outcome, modifier);
   const resolved = { mode, source: 'profile' as const };
-  const thinkingOverrides: RouterThinkingByTier | undefined =
-    modifier === 'effort-low'
-      ? Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, 'low']))
-      : undefined;
+  const thinkingOverrides = thinkingOverridesFor(modifier);
   const base = {
-    profileName: name,
-    profile: required(config.profiles[name]),
+    profileName,
+    profile,
     config,
     getCurrentConfig: () => config,
     registry: registry(outcome, activity),
@@ -233,54 +282,203 @@ const decide = async (
   ).decision;
 };
 
-const row = (decision: RoutingDecision): string =>
-  [
-    decision.tier.padEnd(6),
-    `${decision.targetLabel}/${decision.thinking}`.padEnd(37),
-    `cell=${decision.routeCell ?? 'generic'}`.padEnd(12),
-    `lever=${decision.modeLever ?? 'bypass'}${decision.modeSourceTier && decision.modeLever !== 'none' ? `<${decision.modeSourceTier}` : ''}`.padEnd(
-      19,
-    ),
-    `reason=${decision.reasonCode}${decision.escalatedFrom ? `<${decision.escalatedFrom}` : ''}`,
-  ].join(' ');
+interface Row {
+  key: ProfileKey;
+  modifier: Modifier;
+  outcome: Outcome;
+  activity: string;
+  decisions: Record<RouterMode, RoutingDecision>;
+}
+
+const pair = (d: RoutingDecision) =>
+  `${d.tier} ${d.targetModelId}/${d.thinking}`;
+const lever = (d: RoutingDecision) =>
+  d.modeLever === 'model'
+    ? ` (model from ${d.modeSourceTier})`
+    : d.modeLever === 'effort'
+      ? ' (effort)'
+      : '';
+const reason = (d: RoutingDecision) =>
+  `${d.reasonCode}${d.escalatedFrom ? ` from ${d.escalatedFrom}` : ''}`;
+const EFFORT_ORDER = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+/** Input price first, then effort. */
+const rank = (d: RoutingDecision): [number, number] => [
+  required(findModel(d.targetProvider, d.targetModelId)).cost.input,
+  EFFORT_ORDER.indexOf(d.thinking),
+];
+const atMost = (a: RoutingDecision, b: RoutingDecision) => {
+  const [pa, ea] = rank(a);
+  const [pb, eb] = rank(b);
+  return pa < pb || (pa === pb && ea <= eb);
+};
+
+const rows: Row[] = [];
+beforeAll(async () => {
+  for (const key of Object.keys(PROFILES) as ProfileKey[])
+    for (const modifier of MODIFIERS)
+      for (const outcome of OUTCOMES)
+        for (const activity of outcome === 'none' ? ['-'] : ACTIVITIES) {
+          const decisions = {} as Record<RouterMode, RoutingDecision>;
+          for (const mode of ROUTER_MODES)
+            decisions[mode] = await decide(
+              key,
+              outcome,
+              activity,
+              mode,
+              modifier,
+            );
+          rows.push({ key, modifier, outcome, activity, decisions });
+        }
+});
+
+const markdown = (): string => {
+  const lines = [
+    '# Routing decision matrix',
+    '',
+    'Generated by `extensions/decision-matrix.test.ts`. Do not edit by hand:',
+    'run `npx vitest run extensions/decision-matrix.test.ts -u` after a',
+    'reviewed routing change.',
+    '',
+    'Each cell is `tier model/effort`, plus the mode lever that changed the',
+    'configured pair. Prices and effort maps are the Pi 1.3.0 catalog.',
+    'Classifier `none` is the no-classifier baseline path. Activities with',
+    'the same result share one row.',
+    '',
+    'Modifiers: `pin-medium` pins medium; `effort-low` sets every tier effort',
+    'to low; `budget` is above the soft budget; `escalation` follows a',
+    'repeated tool failure with an edit between.',
+  ];
+  for (const key of Object.keys(PROFILES) as ProfileKey[]) {
+    lines.push(
+      '',
+      `## ${key}`,
+      '',
+      '| Modifier | Classifier | Activity | cost | balanced | quality | Reason |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
+    );
+    const groups = new Map<string, { row: Row; activities: string[] }>();
+    for (const row of rows.filter((entry) => entry.key === key)) {
+      const cells = ROUTER_MODES.map((mode) => {
+        const d = row.decisions[mode];
+        return `${pair(d)}${lever(d)}`;
+      });
+      const reasons = [
+        ...new Set(ROUTER_MODES.map((mode) => reason(row.decisions[mode]))),
+      ].join(', ');
+      const id = [row.modifier, row.outcome, ...cells, reasons].join('|');
+      const group = groups.get(id);
+      if (group) group.activities.push(row.activity);
+      else groups.set(id, { row, activities: [row.activity] });
+    }
+    for (const { row, activities } of groups.values()) {
+      const cells = ROUTER_MODES.map((mode) => {
+        const d = row.decisions[mode];
+        return `${pair(d)}${lever(d)}`;
+      });
+      const reasons = [
+        ...new Set(ROUTER_MODES.map((mode) => reason(row.decisions[mode]))),
+      ].join(', ');
+      lines.push(
+        `| ${row.modifier} | ${row.outcome} | ${activities.join(', ')} | ${cells.join(' | ')} | ${reasons} |`,
+      );
+    }
+  }
+  return `${lines.join('\n')}\n`;
+};
 
 describe('golden routing decision matrix', () => {
-  it('matches the reviewed decision table for every classifier outcome, mode and modifier', async () => {
-    const lines: string[] = [];
-    for (const name of Object.keys(profiles) as (keyof typeof profiles)[])
-      for (const modifier of MODIFIERS)
-        for (const outcome of OUTCOMES)
-          for (const activity of outcome === 'none'
-            ? ['-']
-            : ['explore', 'code'])
-            for (const mode of ROUTER_MODES) {
-              const decision = await decide(
-                name,
-                outcome,
-                activity,
-                mode,
-                modifier,
-              );
-              lines.push(
-                `${name.padEnd(6)} ${modifier.padEnd(10)} ${outcome.padEnd(9)} ${activity.padEnd(7)} ${mode.padEnd(8)} -> ${row(decision)}`,
-              );
-            }
-    await expect(`${lines.join('\n')}\n`).toMatchFileSnapshot(
-      './test/golden/decision-matrix.txt',
-    );
+  it('loads the reference configuration without warnings', () => {
+    expect(normalizeConfig(reference).warnings).toEqual([]);
   });
 
-  it('never moves a lever in balanced mode', async () => {
-    for (const name of Object.keys(profiles) as (keyof typeof profiles)[])
-      for (const outcome of OUTCOMES) {
-        const decision = await decide(
-          name,
-          outcome,
-          'code',
-          'balanced',
-          'plain',
-        );
-        expect(decision.modeLever ?? 'none').toBe('none');
+  it('matches the reviewed decision table', async () => {
+    await expect(markdown()).toMatchFileSnapshot('../docs/decision-matrix.md');
+  });
+
+  it('keeps micro identical in every mode', () => {
+    const micro = rows.filter((row) => row.decisions.balanced.tier === 'micro');
+    expect(micro.length).toBeGreaterThan(0);
+    for (const { decisions } of micro)
+      for (const mode of ROUTER_MODES)
+        expect(pair(decisions[mode])).toBe(pair(decisions.balanced));
+  });
+
+  it('keeps balanced equal to routing without a mode', () => {
+    for (const row of rows)
+      expect(row.decisions.balanced.modeLever ?? 'none').toBe('none');
+    for (const key of Object.keys(PROFILES) as ProfileKey[])
+      for (const modifier of MODIFIERS) {
+        const { config, profile } = configFor(key, 'medium', modifier);
+        const pinned = modifier === 'pin-medium' ? 'medium' : undefined;
+        const build = (mode?: RouterMode) =>
+          buildRouteMatrix(
+            profile,
+            findModel,
+            false,
+            1_000,
+            thinkingOverridesFor(modifier),
+            config.activityRouting !== 'off',
+            pinned,
+            mode ? { mode, budgetExceeded: modifier === 'budget' } : undefined,
+          ).plans.map(({ tier, cell, attempts }) => ({ tier, cell, attempts }));
+        expect(build('balanced')).toEqual(build());
       }
+  });
+
+  it('never makes cost dearer or quality cheaper than balanced', () => {
+    for (const { decisions } of rows) {
+      expect(atMost(decisions.cost, decisions.balanced)).toBe(true);
+      expect(atMost(decisions.balanced, decisions.quality)).toBe(true);
+    }
+  });
+
+  it('never routes cost below low or turns thinking off above micro', () => {
+    for (const { decisions } of rows.filter(
+      (row) => row.decisions.balanced.tier !== 'micro',
+    )) {
+      expect(decisions.cost.tier).not.toBe('micro');
+      expect(decisions.cost.modeSourceTier).not.toBe('micro');
+      expect(['off', 'minimal']).not.toContain(decisions.cost.thinking);
+    }
+  });
+
+  it('lets a pin bypass the mode', () => {
+    for (const { decisions } of rows.filter(
+      (row) => row.modifier === 'pin-medium',
+    ))
+      for (const mode of ROUTER_MODES) {
+        expect(pair(decisions[mode])).toBe(pair(decisions.balanced));
+        expect(decisions[mode].modeLever).toBeUndefined();
+      }
+  });
+
+  it('changes the expected number of cells per mode', () => {
+    const differing = Object.fromEntries(
+      (Object.keys(PROFILES) as ProfileKey[]).map((key) => {
+        const own = rows.filter((row) => row.key === key);
+        const count = (mode: RouterMode) =>
+          own.filter(
+            (row) => pair(row.decisions[mode]) !== pair(row.decisions.balanced),
+          ).length;
+        return [
+          key,
+          { cells: own.length, cost: count('cost'), quality: count('quality') },
+        ];
+      }),
+    );
+    expect(differing).toEqual({
+      'reference/personal': { cells: 245, cost: 130, quality: 139 },
+      'reference/work': { cells: 245, cost: 147, quality: 147 },
+      'user/claude': { cells: 245, cost: 131, quality: 139 },
+      'user/openai': { cells: 245, cost: 139, quality: 139 },
+    });
   });
 });

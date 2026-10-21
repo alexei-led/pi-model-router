@@ -74,6 +74,12 @@ the `gpt-6.1-sol` price.
    For those profiles the estimate is catalog cost, not money. The saving is
    real only where the provider meters quota by catalog price or tokens.
 
+5. **The reference configuration shows effort changes only.** In
+   `model-router.example.json`, `strong` and `fast` are the same model, so
+   no mode can use the model lever. Every mode difference in its
+   [decision matrix](../decision-matrix.md) rows is an effort step, with
+   0.0% catalog cost change under equal tokens.
+
 ## Limits
 
 - Equal tokens across modes. A cheaper model can need more turns or output.

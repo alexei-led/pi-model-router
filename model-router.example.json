@@ -68,7 +68,7 @@
         "docs": {
           "medium": {
             "model": "fast",
-            "thinking": "off",
+            "thinking": "low",
             "fallbacks": []
           }
         }
