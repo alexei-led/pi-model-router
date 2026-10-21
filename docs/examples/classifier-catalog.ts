@@ -5,9 +5,7 @@ import {
   createProvider,
   type Provider,
 } from '@earendil-works/pi-ai';
-import { typesafeSystemOneApi } from '@earendil-works/pi-ai/api/typesafe-system-one.lazy';
-import { cloudflareWorkersAIProvider } from '@earendil-works/pi-ai/providers/cloudflare-workers-ai';
-import { typesafeProvider } from '@earendil-works/pi-ai/providers/typesafe';
+import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 const withClassifier = (
@@ -45,9 +43,20 @@ const classifier = (
 });
 
 export default (pi: ExtensionAPI): void => {
+  // Pi's bundled loader exposes providers/all, not individual provider/API imports.
+  const providers = builtinProviders();
+  const typesafe = providers.find((provider) => provider.id === 'typesafe');
+  const cloudflare = providers.find(
+    (provider) => provider.id === 'cloudflare-workers-ai',
+  );
+  if (!typesafe?.classify || !cloudflare?.classify) {
+    throw new Error('Classifier catalog requires Pi 1.3+ built-in classifiers');
+  }
+  const classify = typesafe.classify.bind(typesafe);
+
   pi.registerProvider(
     withClassifier(
-      typesafeProvider(),
+      typesafe,
       classifier(
         'typesafe',
         'jev-1.14.0',
@@ -60,7 +69,7 @@ export default (pi: ExtensionAPI): void => {
   );
   pi.registerProvider(
     withClassifier(
-      cloudflareWorkersAIProvider(),
+      cloudflare,
       classifier(
         'cloudflare-workers-ai',
         '@cf/cloudflare/clef-omni',
@@ -95,7 +104,7 @@ export default (pi: ExtensionAPI): void => {
           0,
         ),
       ],
-      classifiers: { 'typesafe-system-one': typesafeSystemOneApi() },
+      classifiers: { 'typesafe-system-one': { classify } },
     }),
   );
 };

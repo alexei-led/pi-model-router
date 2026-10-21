@@ -43,6 +43,10 @@ does not register a missing model or enable external requests.
 First inspect **`/router classifier` → Classifier model**.
 The list comes from Pi's registered text-classifier catalog.
 
+Install the optional catalog extension only if a classifier you want is missing.
+Pi and the router work without it: use an existing registered classifier, or
+leave advice disabled to use the configured eligible baseline.
+
 The router package does not install extra provider catalogs. For Pi **1.3+**,
 the optional [classifier catalog example](examples/classifier-catalog.ts)
 adds Jev 1.14, Clef Omni and local Ollama/Nimble. It reuses Pi's native API
@@ -56,10 +60,46 @@ mkdir -p ~/.pi/agent/extensions/classifier-catalog
 cp docs/examples/classifier-catalog.ts ~/.pi/agent/extensions/classifier-catalog/index.ts
 ```
 
-This example is an opt-in extension, not an automatically loaded part of the npm
-router package. Do not load it alongside another extension that owns the
-`typesafe`, `cloudflare-workers-ai` or `ollama` provider ID. If chezmoi manages the target, update and apply its source
-instead of editing the generated file.
+Copying the example into this directory makes it a globally discovered Pi
+extension. Pi loads it at startup even when router advice is disabled; an import
+failure can prevent startup. Registration alone does not enable advice or send
+classification requests.
+
+The example imports `builtinProviders` through
+`@earendil-works/pi-ai/providers/all`, which Pi's bundled extension loader exposes.
+It preserves the TypeSafe and Cloudflare catalogs and reuses the TypeSafe
+classifier implementation for local Ollama. Direct imports of individual
+provider or API modules can fail in the bundled loader even when their files
+exist in the installed package.
+
+Do not load it alongside another extension that owns the `typesafe`,
+`cloudflare-workers-ai` or `ollama` provider ID.
+
+Updating the router npm package does not replace a separately installed catalog
+extension. After updating this checkout, copy the example again and restart Pi.
+If chezmoi manages the target, update its source instead:
+
+```sh
+chezmoi source-path ~/.pi/agent/extensions/classifier-catalog/index.ts
+```
+
+Copy the repository example to the source path printed above, then apply only
+that target and restart Pi:
+
+```sh
+chezmoi apply --include files ~/.pi/agent/extensions/classifier-catalog/index.ts
+```
+
+To check the example against an installed Pi 1.3+ without inference, run this
+from the checkout:
+
+```sh
+PI_TEST_BINARY="$(command -v pi)" npm run test:classifier-catalog
+```
+
+The explicit executable avoids npm selecting this checkout's Pi 1.1 test
+dependency. The check starts an isolated Pi RPC session with only this extension
+and checks that startup succeeds.
 
 Pi 1.3's `models.json` adds chat models, not classifier entries. Register missing
 classifier metadata through a Pi provider extension.

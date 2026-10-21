@@ -1,6 +1,6 @@
 {
   "name": "@alexeiled/pi-model-router",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "type": "module",
   "files": [
     "extensions",
@@ -53,6 +53,7 @@
     "build": "tsc",
     "prepublishOnly": "npm run check && npm run test:coverage && npm run check:unused && npm run pack:dry",
     "test": "vitest run --pool=threads",
+    "test:classifier-catalog": "node --test docs/testing/classifier-catalog.smoke.mjs",
     "test:coverage": "vitest run --pool=threads --coverage",
     "check:unused": "knip --production",
     "check": "biome check --error-on-warnings . && npm run tsc",

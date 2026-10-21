@@ -79,7 +79,14 @@ The model answers and calls tools. Periodic background reviews use bounded curre
 Recent records cover 1,967 Pi responses across 25 sessions. They show route use, not guaranteed savings.
 [See the chart, cost calculations, and limits →](docs/evaluation.md)
 
-## Upgrading to 0.15.0
+## Upgrading to 0.15.1
+
+If you installed the optional classifier-catalog extension, replace its copy
+with the updated example before restarting Pi. This fixes startup failures in
+Pi 1.3.0's bundled loader. Updating the router package alone does not update
+that separate extension; follow the [catalog update steps](docs/classifier-advisor.md#1-register-missing-classifier-entries).
+
+### From 0.14
 
 Restart Pi after updating. No routing-policy or configuration migration is required from 0.14.
 Routes and classifier controls now have their own tabs. Classifier enablement and profile approval remain in user configuration.

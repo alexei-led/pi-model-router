@@ -8,6 +8,8 @@
   "files": {
     "includes": [
       "extensions/**",
+      "docs/examples/**/*.ts",
+      "docs/testing/classifier-catalog.smoke.mjs",
       "*.json",
       "vitest.config.ts",
       "!package-lock.json"
