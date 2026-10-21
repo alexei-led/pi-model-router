@@ -41,4 +41,12 @@ Pi CLI 1.3.0, agterm 0.36.0. Local fixture only: no network, no credentials.
 - The fixture classifier always selects `medium`, so this run does not show
   tier changes from advice. The [decision matrix](../decision-matrix.md)
   covers every classifier answer.
-- Screenshots are not part of this report yet.
+- The Settings-tab screenshot is pending.
+
+## Screenshots
+
+Captured with `screencapture`, cropped to the terminal pane with `sips`.
+Only fixture data is shown.
+
+- [Cost mode, session source](../assets/router-ui/modes-widget-cost.png): the route strip shows
+  `cost (session)` and the low model under `medium` advice; the Usage tab is open.

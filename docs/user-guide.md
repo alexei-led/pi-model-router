@@ -210,6 +210,8 @@ A top-level `mode` in the user file is ignored with a warning. Set it per profil
   route, and advice made for the previous mode is not used.
 - A resumed session keeps its override. `/new` starts without it.
 
+![Route strip in cost mode: the low model runs under medium advice, source session](assets/router-ui/modes-widget-cost.png)
+
 Each mode also changes the switch policy:
 
 | Mode | `costSensitivity` | `escalationHoldTurns` |
