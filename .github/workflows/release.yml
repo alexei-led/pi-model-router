@@ -82,6 +82,21 @@ jobs:
               return;
             }
 
+            const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+            const heading = `## [${pkg.version}]`;
+            const start = changelog.indexOf(heading);
+            if (start < 0) {
+              core.setFailed(`Missing changelog section ${heading}.`);
+              return;
+            }
+            const contentStart = changelog.indexOf("\n", start) + 1;
+            const end = changelog.indexOf("\n## ", contentStart);
+            const notes = contentStart === 0 ? "" : changelog.slice(contentStart, end < 0 ? undefined : end).trim();
+            if (!notes) {
+              core.setFailed(`Empty changelog section ${heading}.`);
+              return;
+            }
+            core.setOutput("release_notes", notes);
             core.setOutput("name", pkg.name);
             core.setOutput("version", pkg.version);
             core.setOutput("tag", tag);
@@ -146,12 +161,15 @@ jobs:
           PACKAGE_VERSION: ${{ steps.metadata.outputs.version }}
           RELEASE_NAME: ${{ steps.metadata.outputs.release_name }}
           RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          RELEASE_NOTES: ${{ steps.metadata.outputs.release_notes }}
           PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
         with:
           script: |
             const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
             const tag = process.env.RELEASE_TAG;
             const body = [
+              process.env.RELEASE_NOTES,
+              "",
               "## Package",
               `- Name: \`${process.env.PACKAGE_NAME}\``,
               `- Version: \`${process.env.PACKAGE_VERSION}\``,
@@ -180,7 +198,7 @@ jobs:
               target_commitish: process.env.GITHUB_SHA,
               name: process.env.RELEASE_NAME,
               body,
-              generate_release_notes: true,
+              generate_release_notes: false,
               prerelease: process.env.PRERELEASE === "true",
               make_latest: process.env.PRERELEASE === "true" ? "false" : "true",
             });

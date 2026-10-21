@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.15.0] - 2026-10-21
+
+### Summary
+
+Expose model changes and classifier readiness in five inspector tabs.
+
+### Changes
+
+- Add Now, Routes, Classifier, Usage and Settings tabs, with direct `/router routes` and `/router classifier` commands, narrow-layout navigation and preserved drafts on resize.
+- Separate retained model switches from effort-only changes, excluding reviews and unknown history gaps.
+- Promote the activity/tier route grid and existing searchable editor. Preserve inherited metadata on unchanged selections, ordered fallbacks and next-user-turn activation.
+- Explain classifier enablement, exact selection, profile approval and text-input compatibility. Keep last-operation diagnostics visible with logging off and refresh them before generation finishes.
+- Fix classifier catalog cycling, add an explicit session None selection, and keep credentials and consent read-only.
+- Lead Usage with retained counts, switch counts and known-cost coverage. Put technical counters behind Details and make logging-off state explicit.
+- Document pinned Jev 1.14, Clef variants, OpenAI Decisions and local classifiers. Add an optional Pi 1.3+ catalog example. Update the locked Vite test toolchain to its patched release.
+
+### Upgrade
+
+Restart Pi after updating to load the new inspector and commands. Routing policy, pins and classifier approvals are unchanged. The reference configuration selects pinned Jev 1.14 but keeps advice disabled; register and approve a classifier before enabling it. The optional catalog example needs Pi 1.3+, while the router still supports Pi 1.1+.
+
+### Verification
+
+Release gates and native isolated Pi/agterm fixtures validate automatic route changes, draft/queued controls, route activation, classifier approval and timeout diagnostics, logging-off state, themes and resize. Fixtures use no network or personal credentials. See [acceptance and limits](docs/testing/router-observability-015-acceptance.md).
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.14.0...v0.15.0)
+
 ## [0.14.0] - 2026-10-12
 
 ### Summary
