@@ -89,18 +89,27 @@ export default (pi: ExtensionAPI) => {
     ),
     streamSimple: (model, context, options) => {
       const stream = createAssistantMessageEventStream();
-      const usage = {
+      const tokens = {
         input: 1200,
         output: 80,
         cacheRead: 18000,
         cacheWrite: 300,
+      };
+      const price = (key: keyof typeof tokens) =>
+        (tokens[key] * model.cost[key]) / 1_000_000;
+      const usage = {
+        ...tokens,
         totalTokens: 19580,
         cost: {
-          input: 0.0012,
-          output: 0.00016,
-          cacheRead: 0.0018,
-          cacheWrite: 0.000375,
-          total: 0.003535,
+          input: price('input'),
+          output: price('output'),
+          cacheRead: price('cacheRead'),
+          cacheWrite: price('cacheWrite'),
+          total:
+            price('input') +
+            price('output') +
+            price('cacheRead') +
+            price('cacheWrite'),
         },
       };
       const message: AssistantMessage = {
