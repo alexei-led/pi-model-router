@@ -124,7 +124,8 @@ export interface ResolvedMode {
   source: ModeSource;
 }
 /** Which lever a mode moved for one cell; `none` keeps the configured pair. */
-export type ModeLever = 'model' | 'effort' | 'none';
+export const MODE_LEVERS = ['model', 'effort', 'none'] as const;
+export type ModeLever = (typeof MODE_LEVERS)[number];
 export interface ModeProvenance {
   readonly mode: RouterMode;
   readonly lever: ModeLever;
@@ -438,6 +439,7 @@ export interface RouterLastProfileState {
 
 export interface PersistedStateInput {
   routerEnabled: boolean;
+  modeOverride?: RouterMode | undefined;
   selectedProfile: string | undefined;
   pinnedTierByProfile: RouterPinByProfile;
   thinkingByProfile: RouterThinkingByProfile;
@@ -456,6 +458,8 @@ export interface RouterPersistedState {
   pinTier?: RouterTier | undefined;
   pinByProfile?: RouterPinByProfile | undefined;
   thinkingByProfile?: RouterThinkingByProfile | undefined;
+  /** Session-only `/router mode` override; never in the global state file. */
+  modeOverride?: RouterMode | undefined;
   debugEnabled?: boolean | undefined;
   widgetEnabled?: boolean | undefined;
   debugHistory?: RoutingDecision[] | undefined;

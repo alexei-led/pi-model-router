@@ -18,6 +18,7 @@ import {
 } from './state';
 import type {
   RouterConfig,
+  RouterMode,
   RouterPersistedState,
   RouterPinByProfile,
   RouterThinkingByProfile,
@@ -49,6 +50,7 @@ const routerExtension = (pi: ExtensionAPI) => {
   let clearProviderReviews: (() => void) | undefined;
   const pinnedTierByProfile: RouterPinByProfile = {};
   const thinkingByProfile: RouterThinkingByProfile = {};
+  let modeOverride: RouterMode | undefined;
   let debugHistory: RoutingDecision[] = [];
   let lastNonRouterModel: string | undefined;
   let accumulatedCost = 0;
@@ -127,6 +129,12 @@ const routerExtension = (pi: ExtensionAPI) => {
     },
     thinkingByProfile,
     pinnedTierByProfile,
+    get modeOverride() {
+      return modeOverride;
+    },
+    set modeOverride(value: RouterMode | undefined) {
+      modeOverride = value;
+    },
     get accumulatedCost() {
       return accumulatedCost;
     },
@@ -223,6 +231,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       lastDecision,
       lastNonRouterModel,
       accumulatedCost,
+      modeOverride,
     });
     const snapshot = JSON.stringify({
       ...state,
@@ -376,6 +385,7 @@ const routerExtension = (pi: ExtensionAPI) => {
         structuredClone(savedState.thinkingByProfile),
       );
     }
+    modeOverride = savedState.modeOverride;
     if (savedState.pinTier && selectedProfile) {
       pinnedTierByProfile[selectedProfile] = savedState.pinTier;
     }
@@ -431,6 +441,8 @@ const routerExtension = (pi: ExtensionAPI) => {
       delete thinkingByProfile[key];
     }
     widgetEnabled = true;
+    // Owner-fenced restore below is the only way an override returns.
+    modeOverride = undefined;
     debugHistory = [];
     accumulatedCost = 0;
     lastNonRouterModel =

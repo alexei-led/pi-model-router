@@ -14,6 +14,7 @@ import {
 } from './constants';
 import {
   isObjectRecord,
+  isRouterMode,
   isRouterTier,
   isThinkingLevel,
   parseCanonicalModelRef,
@@ -32,7 +33,7 @@ import type {
   RouterSwitchPolicy,
   RouterTier,
 } from './types';
-import { ROUTER_ACTIVITIES, ROUTER_MODES, ROUTER_TIERS } from './types';
+import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
 
 export const parseConfigFile = (path: string): ParsedConfigFile => {
   if (!existsSync(path)) {
@@ -668,9 +669,6 @@ export const projectRouterConfig = (
     );
   return project;
 };
-
-const isRouterMode = (value: unknown): value is RouterMode =>
-  ROUTER_MODES.some((mode) => mode === value);
 
 /** Untuned starting points; replay data should tune them. */
 export const DEFAULT_MODES: Readonly<

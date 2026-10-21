@@ -9,7 +9,7 @@ import type {
   SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { resolveMode } from './modes';
+import { modeForProfile } from './modes';
 import type { GenerationOutcome } from './provider-generation';
 import { runGenerationAttempts } from './provider-generation';
 import {
@@ -149,13 +149,7 @@ const prepareStreamRequest = async (
   const identity = createRouterRequestIdentity(context, sessionId, branch);
   onTurnIdentified(identity.turn);
   const modeFor = (current: RouterConfig) =>
-    resolveMode({
-      session: state.modeOverride,
-      project: current.projectMode,
-      profile: Object.hasOwn(current.profiles, model.id)
-        ? current.profiles[model.id]?.mode
-        : undefined,
-    });
+    modeForProfile(current, model.id, state.modeOverride);
   const request = await prepareRouterRequest({
     profileName: model.id,
     profile,

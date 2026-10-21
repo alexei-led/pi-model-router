@@ -66,8 +66,74 @@ describe('state.ts', () => {
       { lastNonRouterModel: 'invalid' },
       { debugEnabled: 'yes' },
       { lastDecision: { ...decision, advisor: 'remote' } },
+      { modeOverride: 'thrifty' },
+      { lastDecision: { ...decision, escalatedFrom: 'ultra' } },
     ])
       expect(isRouterPersistedState({ ...valid, ...invalid })).toBe(false);
+  });
+
+  it('round-trips the session mode and decision mode fields', () => {
+    const routed: RoutingDecision = {
+      ...decision,
+      reasonCode: 'escalation',
+      escalatedFrom: 'low',
+      mode: 'cost',
+      modeSource: 'session',
+      modeLever: 'model',
+      modeSourceTier: 'low',
+    };
+    const state = buildPersistedState({
+      routerEnabled: true,
+      selectedProfile: 'p',
+      pinnedTierByProfile: {},
+      thinkingByProfile: {},
+      modeOverride: 'cost',
+      debugEnabled: true,
+      widgetEnabled: true,
+      debugHistory: [routed],
+      lastDecision: routed,
+      lastNonRouterModel: undefined,
+      accumulatedCost: 0,
+    });
+    const restored = JSON.parse(JSON.stringify(state));
+    expect(isRouterPersistedState(restored)).toBe(true);
+    expect(restored.modeOverride).toBe('cost');
+    expect(snapshotDecision(restored.lastDecision)).toMatchObject({
+      reasonCode: 'escalation',
+      escalatedFrom: 'low',
+      mode: 'cost',
+      modeSource: 'session',
+      modeLever: 'model',
+      modeSourceTier: 'low',
+    });
+    expect(
+      snapshotDecision({
+        ...routed,
+        mode: 'thrifty',
+        modeSource: 'repo',
+        modeLever: 'votes',
+      } as unknown as RoutingDecision),
+    ).toMatchObject({
+      mode: undefined,
+      modeSource: undefined,
+      modeLever: undefined,
+    });
+  });
+
+  it('omits the mode override when none is set', () => {
+    const state = buildPersistedState({
+      routerEnabled: true,
+      selectedProfile: 'p',
+      pinnedTierByProfile: {},
+      thinkingByProfile: {},
+      debugEnabled: false,
+      widgetEnabled: false,
+      debugHistory: [],
+      lastDecision: undefined,
+      lastNonRouterModel: undefined,
+      accumulatedCost: 0,
+    });
+    expect('modeOverride' in state).toBe(false);
   });
 
   it.each(['constructor', 'toString', 'hasOwnProperty'])(

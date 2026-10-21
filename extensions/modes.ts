@@ -28,6 +28,20 @@ export const resolveMode = (layers: {
   return { mode: 'balanced', source: 'default' };
 };
 
+export const modeForProfile = (
+  config: RouterConfig,
+  profile: string | undefined,
+  session: RouterMode | undefined,
+): ResolvedMode =>
+  resolveMode({
+    session,
+    project: config.projectMode,
+    profile:
+      profile && Object.hasOwn(config.profiles, profile)
+        ? config.profiles[profile]?.mode
+        : undefined,
+  });
+
 /** Config policy < mode patch < Settings-tab edits for this session. */
 export const effectivePolicy = (
   config: RouterConfig,

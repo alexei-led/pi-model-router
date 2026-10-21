@@ -87,8 +87,8 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [x] C7 `modes.ts`: `resolveMode` and `transformRoute`.
 - [x] C8 `routing.ts`: apply the transform in `buildRouteMatrix`; budget cap for quality.
 - [x] C9 `provider-request.ts`: mode in the `policy` fence; live-mode check after classification; mode-specific switch policy into `evaluateSwitch`.
-- [ ] C10 State: `modeOverride` in `router-state`; restore; decision allowlist.
-- [ ] C11 Commands: `/router mode`, completions, help text, `ROUTER_COMMANDS`.
+- [x] C10 State: `modeOverride` in `router-state`; restore; decision allowlist.
+- [x] C11 Commands: `/router mode`, completions, help text, `ROUTER_COMMANDS`.
 - [ ] C12 UI: widget, `/router status`, inspector Now/Settings, log formatting.
 - [ ] C13 Fixture: per-tier prices; a failing-tool scenario for escalation.
 - [ ] C14 `AGENTS.md` module list: `modes.ts`, `escalation.ts`.
@@ -105,10 +105,10 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [x] T8 **Key regression:** advice started under balanced, mode changed, old result delivered → rejected; generation uses the current transformed matrix. Same for a background review.
 - [x] T9 Generation revalidation succeeds for model-lever and effort-lever plans, fallbacks included.
 - [x] T10 Pin and effort override bypass the mode.
-- [ ] T11 Persistence: override survives resume (same owner); not inherited by new or fork sessions; absent from `model-router-state.json`.
+- [x] T11 Persistence: override survives resume (same owner); not inherited by new or fork sessions; absent from `model-router-state.json`.
 - [x] T12 Escalation: two same-signature failures with an edit between → one tier up for N user turns; no edit → none; different signatures; already `high`; same signature cannot re-escalate; pin and Google continuation skip; budget cap.
-- [ ] T13 Decisions carry `mode`, `modeSource`, classified tier and route in use; snapshot round-trip.
-- [ ] T14 Commands: usage errors, no-profile error, completions.
+- [x] T13 Decisions carry `mode`, `modeSource`, classified tier and route in use; snapshot round-trip.
+- [x] T14 Commands: usage errors, no-profile error, completions.
 - [ ] T16 **Golden decision matrix** (manager request, 2026-10-21): one table-driven test over every classifier outcome (`micro`, `low`, `medium`, `high`, `uncertain`, invalid/failed advice, and the no-classifier baseline path) × mode × activity cell × pin × effort override × budget × escalation hold → expected `{tier, model, thinking, lever, reasonCode}`. Built on a realistic profile (Claude-like and Codex-like shapes from the user's config, catalog prices). Golden output is checked in and reviewed by hand.
 - [ ] T17 Regression cases (manager item 2; the message arrived truncated, text requested): add a case for each past routing bug found in `git log --grep '^fix'` that touches route selection.
 - [ ] T15 Coverage: 90% branches on `routing.ts`, `state.ts` (and the new modules).
