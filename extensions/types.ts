@@ -447,7 +447,14 @@ export interface ParsedConfigFile {
 }
 
 export type RouterUIAdvisorId = string;
-export type RouterUIView = 'now' | 'usage' | 'settings';
+export const ROUTER_UI_VIEWS = [
+  'now',
+  'routes',
+  'classifier',
+  'usage',
+  'settings',
+] as const;
+export type RouterUIView = (typeof ROUTER_UI_VIEWS)[number];
 export type RouterUILifecycle =
   | 'choosing'
   | 'generating'
@@ -562,6 +569,7 @@ export interface RouterUIRouteTransaction {
   changes: readonly RouterUIRouteCellChange[];
 }
 export interface RouterUIAdviceObservation {
+  profile?: string | undefined;
   source?: AdviceSource | undefined;
   advisor: RouterUIAdvisorId;
   requestId?: string | undefined;
@@ -571,6 +579,7 @@ export interface RouterUIAdviceObservation {
   costUsd?: number | undefined;
 }
 export interface RouterUIHistoryEntry {
+  reason?: RoutingReasonCode | undefined;
   reviewOnly?: boolean | undefined;
   actual?: RouterUIRoute | undefined;
   proposed?: RouterUIRoute | undefined;
@@ -591,7 +600,7 @@ export interface RouterUISnapshot {
   lifecycle: RouterUILifecycle;
   /** Recorded catalog costs only, not a complete billing ledger. */
   accumulatedCost?: number | undefined;
-  classifiers: readonly { model: string; name: string }[];
+  classifiers: readonly { model: string; name: string; textInput: boolean }[];
   /** Physical chat targets only; excludes logical router recursion and auth data. */
   chatModels: readonly RouterUIChatModel[];
   reuse?: RoutingDecision['reuse'];
@@ -602,6 +611,8 @@ export interface RouterUISnapshot {
   advised?: RouterUIRoute | undefined;
   switchCost?: SwitchCostDiagnostic | undefined;
   advice?: RouterUIAdviceObservation | undefined;
+  lastAdvice?: RouterUIAdviceObservation | undefined;
+  loggingEnabled: boolean;
   controls: Readonly<RouterUIControls>;
   pendingControls?: Readonly<RouterUIControls> | undefined;
   pendingRoutes?: boolean | undefined;
@@ -657,6 +668,7 @@ export interface RouterUIRuntimeState {
   readonly thinkingByProfile: RouterThinkingByProfile;
   readonly lastDecision: RoutingDecision | undefined;
   readonly debugHistory: readonly RoutingDecision[];
+  readonly debugEnabled?: boolean;
   readonly currentModelRegistry:
     | Pick<ExtensionContext['modelRegistry'], 'find' | 'getModelsOfType'>
     | undefined;

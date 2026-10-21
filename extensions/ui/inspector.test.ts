@@ -47,6 +47,7 @@ const fixture = () => {
     activityCells: [],
     routeCells: [],
     history: [],
+    loggingEnabled: false,
     classifiers: [],
     chatModels: [],
     privacy: {
@@ -169,13 +170,14 @@ describe('Signal Panel', () => {
     f.panel.dispose();
   });
 
-  it('uses three sections with no edit actions while browsing', () => {
+  it('uses five sections with no edit actions while browsing', () => {
     const f = fixture();
     const text = f.panel.render(80).join('\n');
     expect(text).toContain('Now');
     expect(text).toContain('Usage');
     expect(text).toContain('Settings');
-    expect(text).not.toContain('Classifier');
+    expect(text).toContain('Classifier');
+    expect(text).toContain('Routes');
     expect(text).not.toContain('Apply');
     expect(text).not.toContain('Discard');
     f.panel.dispose();
@@ -185,10 +187,14 @@ describe('Signal Panel', () => {
     f.panel.selectTab('settings');
     f.panel.advanced = true;
     const text = f.panel.render(80).join('\n');
-    expect(text).toContain('Classifier review interval');
+    expect(text).not.toContain('Classifier review interval');
     expect(text).toContain('Cost comparison horizon');
     expect(text).toContain('Switch-cost sensitivity');
     expect(text).toContain('Strong-advice override threshold');
+    f.panel.selectTab('classifier');
+    expect(f.panel.render(80).join('\n')).toContain(
+      'Classifier review interval',
+    );
     f.panel.dispose();
   });
   it('starts Settings with only pin visible until Advanced is opened', () => {
@@ -268,7 +274,9 @@ describe('ui/inspector.ts', () => {
     expect(f.adapters.getSnapshot().controls.pin).toBe('auto');
     f.panel.handleInput('[Z'); // back to tabs
     f.panel.selectTab('usage');
-    expect(f.panel.render(80).join('\n')).toContain('retained');
+    expect(f.panel.render(80).join('\n')).toContain(
+      'Retained generation decisions',
+    );
     f.panel.selectTab('settings');
     expect(f.panel.render(80).join('\n')).toContain('Pin tier: high');
     expect(f.draft.draft.pin).toBe('high');
@@ -524,7 +532,7 @@ describe('ui/inspector.ts', () => {
   });
 });
 
-describe('native editable route cells in Settings', () => {
+describe('native editable route cells in Routes', () => {
   const routeCells: RouterUISnapshot['routeCells'] = [
     {
       activity: 'code',
@@ -575,10 +583,8 @@ describe('native editable route cells in Settings', () => {
     },
   ];
   const openRoutes = (panel: RouterUIInspector) => {
-    panel.selectTab('settings');
-    panel.advanced = true;
-    // Tab, 13 all-activity settings, Less settings, Routes.
-    for (let i = 0; i < 15; i++) panel.handleInput('\t');
+    panel.selectTab('routes');
+    panel.handleInput('\t');
     panel.handleInput('\r');
   };
   const browseRoutePages = (
@@ -700,7 +706,7 @@ describe('native editable route cells in Settings', () => {
   );
 });
 
-describe('read-only activity routes in Settings', () => {
+describe('read-only activity routes in Routes', () => {
   const cells: RouterUISnapshot['activityCells'] = [
     {
       activity: 'code',
@@ -722,12 +728,7 @@ describe('read-only activity routes in Settings', () => {
     },
   ];
   const openAdvanced = (panel: RouterUIInspector) => {
-    panel.selectTab('settings');
-    panel.handleInput('\t'); // pin
-    panel.handleInput('\t'); // Advanced action
-    panel.handleInput('\r');
-    panel.handleInput('\x1b[Z'); // pin
-    panel.handleInput('\x1b[Z'); // tab row: browse read-only content
+    panel.selectTab('routes');
   };
   const readPages = (panel: RouterUIInspector, width: number): string => {
     const pages: string[] = [];
@@ -740,7 +741,7 @@ describe('read-only activity routes in Settings', () => {
     return pages.join('\n');
   };
 
-  it('shows mode/count in normal Settings and keeps the override list behind Advanced', () => {
+  it('shows mode/count in Settings and promotes the override list into Routes', () => {
     const f = fixture();
     f.update({ activityCells: cells });
     f.panel.selectTab('settings');
@@ -801,10 +802,11 @@ describe('read-only activity routes in Settings', () => {
       expect(panel.render(width).length).toBeLessThanOrEqual(
         24 - (wide ? 2 : 8),
       );
-      panel.handleInput('\t'); // pin remains the first field, and brings focus back into view
+      panel.selectTab('settings');
+      panel.handleInput('\t');
       expect(panel.render(width).join('\n')).toContain('›Pin tier');
-      panel.handleInput('\x1b[Z'); // tab row
-      panel.handleInput('\x1b[Z'); // Done: no activity-route focus targets
+      panel.selectTab('routes');
+      panel.handleInput('\x1b[Z'); // Done: no editable cells in this fixture
       expect(panel.render(width).join('\n')).toContain('›Done');
       expect(f.adapters.applyControls).not.toHaveBeenCalled();
       expect(f.draft.dirty()).toEqual([]);
@@ -827,7 +829,7 @@ describe('read-only activity routes in Settings', () => {
         availability: 'disabled',
       })),
     });
-    f.panel.selectTab('settings'); // reset scroll/focus; expanded state stays open
+    f.panel.selectTab('routes'); // reset scroll/focus
     const text = readPages(f.panel, 80);
     expect(text).toContain('Activity routing: off');
     expect(text).toContain('Excluded (activity routing off)');
@@ -849,6 +851,150 @@ describe('read-only activity routes in Settings', () => {
     expect(text).toContain('code/medium: configured test/code');
     expect(custom).not.toHaveBeenCalled();
     expect(f.adapters.applyControls).not.toHaveBeenCalled();
+    f.panel.dispose();
+  });
+});
+
+describe('five-tab routing observability', () => {
+  it('cycles every tab and keeps the active tab visible at narrow widths', () => {
+    const f = fixture();
+    const views = ['now', 'routes', 'classifier', 'usage', 'settings'] as const;
+    for (const view of views) {
+      expect(f.panel.currentTab()).toBe(view);
+      const text = f.panel.render(32).join('\n');
+      expect(text.toLowerCase()).toContain(view);
+      f.panel.handleInput('\x1b[C');
+    }
+    expect(f.panel.currentTab()).toBe('now');
+    f.panel.handleInput('\x1b[D');
+    expect(f.panel.currentTab()).toBe('settings');
+    expect(f.adapters.applyControls).not.toHaveBeenCalled();
+    f.panel.dispose();
+  });
+
+  it('explains classifier approval without Advanced or credential access', () => {
+    const f = fixture();
+    Object.assign(f.tui.terminal, { rows: 60 });
+    f.update({
+      controls: { ...controls, advisor: 'typesafe/jev-1.14.0' },
+      classifiers: [
+        { model: 'typesafe/jev-1.14.0', name: 'Jev 1.14', textInput: true },
+      ],
+      privacy: { advisorEnabled: true, approvedModels: [], auth: 'unknown' },
+    });
+    f.panel.selectTab('classifier');
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('typesafe/jev-1.14.0');
+    expect(text).toContain('Not approved');
+    expect(text).toContain('No classifier calls observed');
+    expect(text).toContain('read-only');
+    expect(f.adapters.applyControls).not.toHaveBeenCalled();
+    f.panel.dispose();
+  });
+
+  it('makes logging-off explicit and hides technical usage counters until Details', () => {
+    const f = fixture();
+    Object.assign(f.tui.terminal, { rows: 60 });
+    f.update({ loggingEnabled: false });
+    f.panel.selectTab('usage');
+    const compact = f.panel.render(80).join('\n');
+    expect(compact).toContain('History collection is off');
+    expect(compact).toContain('/router log on');
+    expect(compact).not.toContain('HTTP attempts:');
+    f.panel.handleInput('\t');
+    f.panel.handleInput('\r');
+    expect(f.panel.render(80).join('\n')).toContain('HTTP attempts:');
+    f.panel.dispose();
+  });
+});
+
+describe('classifier catalog navigation', () => {
+  it('cycles every registered classifier in both directions without reordering choices', () => {
+    const f = fixture();
+    const models = ['a/first', 'b/second', 'z/current'];
+    f.update({
+      controls: { ...controls, advisor: 'z/current' },
+      classifiers: models.map((model) => ({
+        model,
+        name: model,
+        textInput: true,
+      })),
+    });
+    Object.assign(f.draft.base, { advisor: 'z/current' });
+    Object.assign(f.draft.draft, { advisor: 'z/current' });
+    f.panel.selectTab('classifier');
+    f.panel.handleInput('\t');
+    for (const expected of [
+      undefined,
+      'a/first',
+      'b/second',
+      'z/current',
+      undefined,
+    ]) {
+      f.panel.handleInput('\x1b[C');
+      expect(f.draft.draft.advisor).toBe(expected);
+    }
+    f.panel.handleInput('\x1b[D');
+    expect(f.draft.draft.advisor).toBe('z/current');
+    expect(f.adapters.applyControls).not.toHaveBeenCalled();
+    f.panel.dispose();
+  });
+});
+
+describe('route metadata and classifier input safety', () => {
+  it('confirming an unchanged route preserves an override with distinct metadata', () => {
+    const f = fixture();
+    f.update({
+      routeCells: [
+        {
+          activity: 'code',
+          tier: 'medium',
+          current: {
+            state: 'override',
+            revision: 'special-capabilities',
+            model: 'test/a',
+            thinking: 'medium',
+            fallbacks: [],
+          },
+          generic: {
+            state: 'inherited',
+            revision: 'generic-capabilities',
+            model: 'test/a',
+            thinking: 'medium',
+            fallbacks: [],
+          },
+        },
+      ],
+    });
+    f.draft.editRoute('code', 'medium', {
+      model: 'test/a',
+      thinking: 'medium',
+    });
+    expect(f.draft.dirtyRoutes()).toEqual([]);
+    expect(f.draft.routeState('code', 'medium')).toMatchObject({
+      state: 'override',
+      revision: 'special-capabilities',
+    });
+    expect(f.adapters.applyRoutes).not.toHaveBeenCalled();
+    f.panel.dispose();
+  });
+  it('does not offer non-text classifiers and offers none as an explicit session selection', () => {
+    const f = fixture();
+    f.update({
+      controls: { ...controls, advisor: 'fixture/text' },
+      classifiers: [
+        { model: 'fixture/image-only', name: 'Image-only', textInput: false },
+        { model: 'fixture/text', name: 'Text', textInput: true },
+      ],
+    });
+    Object.assign(f.draft.base, { advisor: 'fixture/text' });
+    Object.assign(f.draft.draft, { advisor: 'fixture/text' });
+    f.panel.selectTab('classifier');
+    f.panel.handleInput('\t');
+    f.panel.handleInput('\x1b[C');
+    expect(f.draft.draft.advisor).toBeUndefined();
+    f.panel.handleInput('\x1b[C');
+    expect(f.draft.draft.advisor).toBe('fixture/text');
     f.panel.dispose();
   });
 });

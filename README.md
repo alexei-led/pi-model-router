@@ -24,7 +24,7 @@ Advisors add latency. Their fees are separate from generation costs.
 
 ## Optional routing advice
 
-Choose any classifier model configured in Pi as the optional advisor.
+Use Jev, Clef/Clef Flash/Clef Omni, OpenAI Decisions, or a local Ollama or llama.cpp classifier registered in Pi.
 It reads bounded recent context and advises a model and effort from your profile.
 The selected generation model produces the answer, not the advisor.
 
@@ -45,18 +45,23 @@ flowchart LR
 ```
 
 Configure classifier credentials in Pi and approve its exact `provider/model` reference per profile. Selected text can contain private data. The router sends text only. Without an advisor, it uses a compatible local route.
-[Classifier setup and privacy →](docs/classifier-advisor.md)
+[Supported models, credentials and configuration →](docs/classifier-advisor.md)
+
+The [reference config](model-router.example.json) selects pinned Jev 1.14 but leaves advice disabled until you opt in.
+Missing catalog entries need a Pi provider extension; the [optional catalog example](docs/classifier-advisor.md#1-register-missing-classifier-entries) requires Pi 1.3+.
+The router uses one selected classifier, not voting or classifier failover.
 
 ## Inspect routing in Pi
 
-Run **`/router`**. The Signal Panel has three sections: **Now**, **Usage** and **Settings**.
-Open `/router usage` or `/router settings` directly; `/router status` returns short text.
+Run **`/router`** for five tabs: **Now · Routes · Classifier · Usage · Settings**.
+Open any tab with `/router routes`, `/router classifier`, `/router usage` or `/router settings`.
+`/router status` returns short text.
 The two-line strip is on in new sessions. `/router widget` switches to a quiet footer status instead.
 
-![Native Pi router inspector with an above-editor route strip](docs/assets/router-ui/signal-now-dark.png)
+![Five-tab native Pi inspector with physical model and effort switch history](docs/assets/router-ui/tabs-now-dark.png)
 
 Captured from the local dev extension in Pi inside agterm, using synthetic fixture data.
-[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md) · [Adaptive routing acceptance and limits](docs/testing/adaptive-router-acceptance.md)
+[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md) · [Native validation and screenshots](docs/testing/router-observability-015-acceptance.md)
 
 ## A turn in Pi
 
@@ -74,12 +79,12 @@ The model answers and calls tools. Periodic background reviews use bounded curre
 Recent records cover 1,967 Pi responses across 25 sessions. They show route use, not guaranteed savings.
 [See the chart, cost calculations, and limits →](docs/evaluation.md)
 
-## Upgrading to 0.14.0
+## Upgrading to 0.15.0
 
-Restart Pi after updating. No configuration migration is required.
-For an enabled, approved classifier, background reviews default to every four requests.
-Set `advisor.reviewEveryRequests: 0` to keep advice at new user-task boundaries only.
-Reviews send bounded recent text and add advisor requests; existing consent requirements still apply.
+Restart Pi after updating. No routing-policy or configuration migration is required from 0.14.
+Routes and classifier controls now have their own tabs. Classifier enablement and profile approval remain in user configuration.
+History collection is still opt-in: `/router log on` collects new decisions. The inspector makes logging-off state explicit.
+Existing pins, effort settings, eligible-route safeguards and four-request review cadence remain unchanged.
 
 ### From versions before 0.12.0
 
@@ -87,12 +92,12 @@ After updating, restart Pi. Replace `/router-ui` with `/router`, and
 `/router <profile>` with `/router profile <name>`. Classifier advice now uses any Pi-registered classifier. Replace provider-specific configuration with the generic advisor model and exact per-profile approvals.
 [Classifier migration →](docs/user-guide.md#from-011x-to-012x)
 
-Coming from 0.11.0? Replace Jev/Clef/chat-classifier settings with generic advisor settings and exact profile approvals. See the migration note in the user guide.
+Old Jev/Clef/chat-classifier settings do not enable the current advisor. Follow the migration steps above even if the old file still loads without a warning.
 
 ## Install
 
 Requires Pi **1.1.0 or later in the 1.x series** and Node.js **22.19.0+**.
-The test suite and host checks run against Pi 1.1.0; see the [classifier acceptance evidence](docs/testing/classifier-advisor-pi-1.1-acceptance.md).
+Automated SDK/host gates run against Pi 1.1.0. The [0.15 native TUI checks](docs/testing/router-observability-015-acceptance.md) use Pi 1.3.0 in agterm. The optional classifier-catalog example requires Pi 1.3+.
 
 ```sh
 pi install npm:@alexeiled/pi-model-router

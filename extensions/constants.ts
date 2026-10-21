@@ -1,6 +1,11 @@
 /** Profile names are explicit arguments, so command names remain valid profiles. */
 export const ROUTER_COMMANDS = [
   { name: 'status', desc: 'Short text status' },
+  { name: 'routes', desc: 'Configured routes and per-cell editor' },
+  {
+    name: 'classifier',
+    desc: 'Classifier selection, approval and last operation',
+  },
   { name: 'usage', desc: 'Retained history and known costs' },
   { name: 'settings', desc: 'Session routing controls' },
   { name: 'profile', desc: 'Select a router profile' },

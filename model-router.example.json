@@ -8,7 +8,7 @@
   "debug": false,
   "advisor": {
     "enabled": false,
-    "model": "openai/gpt-6-luna",
+    "model": "typesafe/jev-1.14.0",
     "timeoutMs": 10000,
     "reviewEveryRequests": 4,
     "confidenceThreshold": 0.65,
@@ -23,7 +23,7 @@
     },
     "maxRetries": 1
   },
-  "maxSessionBudget": 1.0,
+  "maxSessionBudget": 1,
   "models": {
     "strong": {
       "model": "anthropic/claude-haiku-5-5",
@@ -39,7 +39,7 @@
   "profiles": {
     "personal": {
       "advisor": {
-        "models": ["openai/gpt-6-luna"]
+        "models": ["typesafe/jev-1.14.0"]
       },
       "baselineTier": "medium",
       "high": {

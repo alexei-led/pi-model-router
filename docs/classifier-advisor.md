@@ -1,18 +1,119 @@
 # Classifier advisor
 
-The router can use any text-capable classifier model exposed by Pi's model registry. This includes built-in models, classifiers from Pi provider extensions, and configured custom classifier models. The router does not maintain its own provider list or convert provider-specific APIs.
+The router uses one text-capable classifier from Pi's public registry. Pi owns
+provider APIs and authentication. The classifier advises a route; a separate
+generation model answers the user.
+
+**Setup order:** register the classifier → authenticate in Pi → select and approve
+its exact reference in user configuration → reload → inspect the decision.
+A model appearing in the catalog does not prove that its credentials or server work.
+
+## Supported models
+
+| Classifier | Canonical reference | Setup |
+| --- | --- | --- |
+| Jev 1.14, pinned version | `typesafe/jev-1.14.0` | Register if absent; TypeSafe API key |
+| Jev, provider-managed alias | `typesafe/jev-latest` | Pi's built-in TypeSafe classifier; alias can change |
+| Clef | `cloudflare-workers-ai/@cf/cloudflare/clef` | Cloudflare API key and account ID |
+| Clef Flash | `cloudflare-workers-ai/@cf/cloudflare/clef-flash` | Same Cloudflare credentials |
+| Clef Omni | `cloudflare-workers-ai/@cf/cloudflare/clef-omni` | Register if absent; same Cloudflare credentials |
+| OpenAI Decisions | `openai/gpt-6-luna` | OpenAI API key, not ChatGPT/Codex subscription credentials |
+| Local Ollama / Nimble | `ollama/nimble` | Register classifier; Ollama 0.35+ running with Nimble downloaded |
+| Local llama.cpp | `llama.cpp/<registered-model-id>` | Connect and load a compatible model through Pi |
+
+Other Pi-registered text classifiers work through the same path. The router
+does not limit selection to this table. It does not combine classifier answers
+or fail over to a second classifier.
+
+### Pinning Jev 1.14
+
+Use `typesafe/jev-1.14.0` to request that exact version.
+[TypeSafe's model documentation](https://docs.typesafe.ai/models) currently
+points `jev-latest` at 1.13 and `jev-preview` at 1.14.
+Jev 1.14 uses the same System One choice-question contract.
+
+The reference configuration selects Jev 1.14 as an example but leaves the advisor
+disabled. The router itself has no default classifier. A configured reference
+does not register a missing model or enable external requests.
 
 ## Configure a model
 
-Configure and authenticate the model in Pi first. The model reference is its exact `provider/model-id` from Pi's classifier catalog. For example, Pi 1.1.0 includes `openai/gpt-6-luna` (OpenAI API key), built-in TypeSafe and Cloudflare classifiers, and llama.cpp decision models when the connected server supports them. New provider classifiers work without router code changes.
+### 1. Register missing classifier entries
 
-Enable the advisor in **user** `~/.pi/agent/model-router.json`, then approve that exact reference per profile:
+First inspect **`/router classifier` → Classifier model**.
+The list comes from Pi's registered text-classifier catalog.
+
+The router package does not install extra provider catalogs. For Pi **1.3+**,
+the optional [classifier catalog example](examples/classifier-catalog.ts)
+adds Jev 1.14, Clef Omni and local Ollama/Nimble. It reuses Pi's native API
+implementations and preserves their built-in catalogs. Pi's `models.json`
+overrides still apply.
+
+From a checkout of this repository:
+
+```sh
+mkdir -p ~/.pi/agent/extensions/classifier-catalog
+cp docs/examples/classifier-catalog.ts ~/.pi/agent/extensions/classifier-catalog/index.ts
+```
+
+This example is an opt-in extension, not an automatically loaded part of the npm
+router package. Do not load it alongside another extension that owns the
+`typesafe`, `cloudflare-workers-ai` or `ollama` provider ID. If chezmoi manages the target, update and apply its source
+instead of editing the generated file.
+
+Pi 1.3's `models.json` adds chat models, not classifier entries. Register missing
+classifier metadata through a Pi provider extension.
+The example uses `typesafe-system-one` for Jev and Ollama, and
+`cloudflare-workers-ai-system-one` for Clef Omni.
+See [Pi's custom-provider guide](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/docs/custom-provider.md).
+
+### 2. Authenticate or start the local service
+
+Keep credentials in Pi, never in `model-router.json`.
+Run `/login` and choose the provider's API-key method, or use the environment
+variables below. Local Ollama does not require a real API key.
+
+- **TypeSafe:** configure the provider through Pi, or set `TYPESAFE_API_KEY`.
+- **Cloudflare:** configure the key and account ID through Pi, or set
+  `CLOUDFLARE_API_KEY` and `CLOUDFLARE_ACCOUNT_ID`.
+  [Clef Omni](https://developers.cloudflare.com/workers-ai/models/clef-omni/)
+  uses the same account and API as Clef.
+- **OpenAI:** use API-key authentication for the `openai` provider.
+  [Decisions](https://developers.openai.com/api/docs/guides/decisions) does not
+  accept ChatGPT/Codex subscription tokens. Stored OAuth credentials can take
+  precedence over `OPENAI_API_KEY`; setting that variable alone does not change
+  an existing login method.
+- **Ollama:** start the Ollama app, or run `ollama serve` in another terminal.
+  Then download the decision model:
+
+  ```sh
+  ollama pull nimble
+  ```
+
+  [Ollama's native decision API](https://docs.ollama.com/capabilities/decision)
+  uses `/v1/systemone`. The example defaults to local port 11434 and respects
+  existing `ollama` provider settings in Pi's `models.json`.
+  A remote endpoint override sends text to that server, not necessarily your machine.
+  A regular Ollama chat model does not become a classifier because it can
+  generate JSON. Catalog registration does not start the server or download weights.
+- **llama.cpp:** use Pi's `/login llama.cpp` and `/llama` controls.
+  Select the exact classifier ID Pi registers for the connected model.
+
+All routing advice is **text-only**, including when the selected classifier can
+process images, audio or video.
+
+### 3. Select and approve the classifier
+
+Put advisor settings in **user** `~/.pi/agent/model-router.json`.
+A custom Pi agent directory changes this path.
+Merge these settings with your existing profiles, or adapt this complete example:
 
 ```json
 {
+  "debug": true,
   "advisor": {
     "enabled": true,
-    "model": "openai/gpt-6-luna",
+    "model": "typesafe/jev-1.14.0",
     "timeoutMs": 10000,
     "reviewEveryRequests": 4,
     "confidenceThreshold": 0.65,
@@ -23,26 +124,137 @@ Enable the advisor in **user** `~/.pi/agent/model-router.json`, then approve tha
   "profiles": {
     "personal": {
       "advisor": {
-        "models": ["openai/gpt-6-luna"]
+        "models": ["typesafe/jev-1.14.0"]
       },
-      "high": { "model": "openai/gpt-6-luna" },
-      "medium": { "model": "anthropic/claude-haiku-5-5" },
-      "low": { "model": "llama.cpp/qwen3-coder" }
+      "high": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "thinking": "high"
+      },
+      "medium": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "thinking": "medium"
+      },
+      "low": {
+        "model": "openai-codex/gpt-6-luna",
+        "thinking": "low"
+      }
     },
     "work": {
       "advisor": { "models": [] },
-      "high": { "model": "anthropic/claude-sonnet-4-5" },
-      "medium": { "model": "anthropic/claude-haiku-5-5" }
+      "medium": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "thinking": "medium"
+      }
     }
   }
 }
 ```
 
-Replace the generation model references with models available in your Pi setup. `advisor.models` accepts canonical references only; aliases are not accepted. Approval applies only to the exact provider and model ID. Changing the advisor model does not grant profile approval. Project configuration cannot enable the advisor, change its model, or add profile approvals.
+Replace the **generation** references with models available in your Pi setup.
+They are not the classifier model.
 
-Set `advisor.enabled` to `false` to disable classification. If the reference is not registered, has no text input, is not approved by the active profile, or Pi cannot authenticate it, the router uses the local baseline. It does not invoke a second classifier.
+`profiles.<name>.advisor.models` is an approval list, not a fallback chain.
+Only the globally selected classifier receives text. An empty list disables
+advice for that profile. Approval for one profile does not approve another.
 
-Pi resolves credentials and executes the classifier API. This supports Pi classifiers whose implementations use multiple HTTP requests, local services, custom APIs, or provider-specific authentication. It does not treat a catalog entry as proof that authentication will succeed; Pi reports that at request time.
+References must be exact `provider/model-id` values. Router aliases such as
+`fast` are not accepted. A qualified Pi catalog ID such as
+`typesafe/jev-latest` is accepted, but can resolve to a different upstream version.
+Project `.pi/model-router.json` cannot select, tune, enable or approve classifiers.
+
+### 4. Reload and check the result
+
+After adding or changing a provider extension, run **`/reload`** in Pi.
+After changing only router configuration, run **`/router reload`**.
+
+Then run:
+
+```text
+/router profile personal
+/router log on
+```
+
+Send a new user request, then inspect `/router` or `/router log`.
+The **Now** section shows the physical generation model.
+Pi's normal model label can remain `router/personal` while the physical route changes.
+
+`/router log on` starts collecting new decisions immediately. Use
+`/router log off` to stop collection. Neither command reconstructs older history.
+`/router reload` preserves the current logging toggle, even after changing
+`debug` in the file. Resumed sessions also restore their saved toggle.
+Use the log commands to change collection in an existing session.
+The Usage screen's zero retained decisions does not mean no generation occurred.
+
+## Change classifier
+
+Change **both** the selected model and the active profile's approval list.
+For example, merge these fields into the existing user configuration:
+
+```json
+{
+  "advisor": {
+    "enabled": true,
+    "model": "cloudflare-workers-ai/@cf/cloudflare/clef-omni"
+  },
+  "profiles": {
+    "personal": {
+      "advisor": {
+        "models": [
+          "typesafe/jev-1.14.0",
+          "cloudflare-workers-ai/@cf/cloudflare/clef-omni"
+        ]
+      }
+    }
+  }
+}
+```
+
+This fragment does not replace your profile's generation tiers.
+Use another exact reference from the table for OpenAI, Ollama or llama.cpp.
+
+The **Classifier** tab selects a registered text classifier as a **session override**.
+Left/Right visits every catalog entry without reordering it. Apply queues the
+selection for the next user turn. Selecting **None (session)** stops advice at
+that boundary. `/router reload` restores file-backed settings.
+The inspector cannot enable advice or grant profile approval. Credentials and
+profile approval stay read-only. Session selections reset on reload or replacement.
+
+The tab distinguishes disabled, missing registration, unsupported text input and
+missing profile approval. It labels the active selection separately from the
+last observed operation's model, source and profile. Diagnostics remain available
+with logging off. **Eligible to ask** is not an authentication attestation.
+
+![Missing profile approval is explicit in the native Classifier tab](assets/router-ui/tabs-classifier-unapproved-dark.png)
+![Last timeout diagnostics remain available with history off](assets/router-ui/tabs-classifier-timeout-dark.png)
+
+See [inspector controls and screenshots](user-guide.md#native-inspector).
+
+## Advisor configuration reference
+
+These are router defaults, not guaranteed model-specific optima.
+
+| User configuration field | Default | Meaning |
+| --- | --- | --- |
+| `advisor.enabled` | `false` | Enable only with explicit `true`; omitted advisor means no classifier calls |
+| `advisor.model` | None | Required exact Pi classifier reference when configuring an advisor |
+| `profiles.<name>.advisor.models` | None | Exact references approved for this profile; does not register or select models |
+| `advisor.timeoutMs` | `10000` | Total deadline, including retries; positive and at most 2147483647 ms |
+| `advisor.reviewEveryRequests` | `4` | Background review interval, 0–1000 requests; 0 disables reviews, not initial advice |
+| `advisor.confidenceThreshold` | `0.65` | Top-choice and activity confidence threshold, 0–1 |
+| `advisor.probabilityThreshold` | `0.8` | Cumulative tier-probability threshold, greater than 0 and at most 1 |
+| `advisor.maxStateTokens` | `3000` | Selected text budget, 1–24000 estimated tokens; typed request metadata adds overhead |
+| `advisor.maxRetries` | `1` | Pi retries, 0–4, inside the same deadline |
+| `advisor.temperature` | Unset | Optional positive finite value forwarded to Pi's classifier API |
+| `advisor.context.currentLoopMessages` | `8` | Current-loop message window, 0–40 messages |
+| `advisor.context.previousTurns` | `2` | Earlier dialogue turns, 0–20 |
+| `advisor.context.maxHistoryTokens` | `500` | History text sub-budget, 0–24000 tokens, within the total |
+| `advisor.context.toolResults` | `last-error` | `none`, `last`, `last-error` or opt-in `recent` |
+| `advisor.context.maxToolTokens` | `250` | Tool-result text sub-budget, 0–24000 tokens, within the total |
+
+`debug` controls retained local history, not whether classification runs.
+The [complete reference configuration](../model-router.example.json) leaves
+both classification and debug collection off until you enable them.
+Credentials, endpoints and API keys are not valid advisor fields.
 
 ## Bounds and selection
 
@@ -90,10 +302,17 @@ The router retains allowlisted local model identity, numeric usage/cost diagnost
 
 | Symptom | Check |
 | --- | --- |
-| `Classifier unavailable → baseline` | Confirm the exact classifier reference appears in Pi's registry and is approved in the active user's profile. |
-| Authentication or API error | Sign in or configure the API key in Pi; do not put credentials in router configuration. |
-| Timeout | Raise `advisor.timeoutMs` within the Node timer range, or use a faster configured classifier. |
-| Model does not appear in Settings | Configure/register it in Pi first. The router lists registered classifier models only. |
+| `Classifier unavailable → baseline` | Check registration, Pi credentials, `advisor.enabled` and the active profile's exact approval. Initial advice failure uses the baseline; a failed background review keeps the eligible incumbent. |
+| Authentication or API error | Configure credentials in Pi, not router configuration. For OpenAI, use API-key authentication rather than ChatGPT/Codex subscription tokens. |
+| Timeout | Raise `advisor.timeoutMs` within its documented range, or choose a faster configured classifier. Local model loading also consumes the deadline. |
+| Model does not appear in Settings | Register it in Pi first, then `/reload` after adding a provider extension. The router cannot create a classifier from a name alone. |
+| Selecting a model still does not run it | The inspector cannot enable the advisor or grant approval. Update user configuration, then `/router reload`. |
+| Enabled and approved, but no classifier call | Check for a pin, an exceeded soft generation budget or only one effective eligible plan. These bypass advice. |
+| The model name does not change | Tiers can use one physical model with different effort. Inspect actual tier/effort in Now, not only Pi's logical `router/<profile>` label. |
+| Jev still uses 1.13 | Use the pinned `typesafe/jev-1.14.0` reference instead of assuming `jev-latest` resolves to 1.14. |
+| Ollama is listed but requests fail | Confirm the server is running, Nimble is downloaded, and the configured endpoint supports `/v1/systemone`. A catalog entry is not a server health check. |
+| Usage has zero retained decisions | Run `/router log on` and send a new request. Old history is not reconstructed. |
+| Legacy `jev` settings load but routing stays at baseline | Follow the [migration steps](user-guide.md#from-011x-to-012x). Retired provider settings do not enable the current advisor. |
 | Image classification was expected | The router intentionally sends text only. |
 
-Pi 1.1.0 classifier model reference: [Use classifier models](https://github.com/earendil-works/pi/blob/v1.1.0/packages/coding-agent/docs/models.md#use-classifier-models).
+Pi model reference: [Use classifier models](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/docs/models.md#use-classifier-models).

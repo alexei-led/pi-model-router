@@ -20,18 +20,22 @@ import type {
   RouterUISnapshot,
   RouterUIView,
 } from '../types';
-import { ROUTER_ACTIVITIES, ROUTER_TIERS } from '../types';
+import { ROUTER_ACTIVITIES, ROUTER_TIERS, ROUTER_UI_VIEWS } from '../types';
 import { validateRouterUIControls } from './controls';
 import {
   activityRouteLines,
   activityRoutingSummary,
   advisorName,
   budgetLines,
+  classifierLines,
+  historyStatus,
   formatRoute as route,
   routeMix,
   routeReason,
   routerTone,
+  routeTimeline,
   textBar,
+  usageSummary,
 } from './presentation';
 
 const keys = [
@@ -49,7 +53,10 @@ const keys = [
   'thinkingLow',
   'thinkingMicro',
 ] as const;
-const tabs = ['Now', 'Usage', 'Settings'] as const;
+const tabs = ROUTER_UI_VIEWS.map(
+  (view) => view[0]?.toUpperCase() + view.slice(1),
+);
+const classifierFields = ['advisor', 'timeout', 'reviewEveryRequests'] as const;
 const fieldNames: Record<keyof RouterUIControls, string> = {
   pin: 'Pin tier',
   baseline: 'Baseline',
@@ -86,10 +93,12 @@ const controlChoices = (
   const choices: (string | number | undefined)[] =
     field === 'advisor'
       ? [
-          ...new Set([
-            draft.advisor,
-            ...snapshot.classifiers.map((model) => model.model),
-          ]),
+          undefined,
+          ...new Set(
+            snapshot.classifiers
+              .filter((model) => model.textInput)
+              .map((model) => model.model),
+          ),
         ]
       : field.startsWith('thinking')
         ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
@@ -269,26 +278,35 @@ export const formatRouterUISnapshot = (
           ...routeMix(snapshot.history),
           ...formatRouterUIUsage(snapshot.history),
         ]
-      : tab === 'settings'
-        ? [
-            activityRoutingSummary(snapshot),
-            'TUI Routes edits one activity/tier cell; session overrides queue next user turn.',
-            'Configured activity overrides · not actual',
-            ...activityRouteLines(snapshot),
-            'Text eligibility only; generation rechecks input, context and authentication.',
-            ...keys.map(
-              (key) =>
-                `${fieldNames[key]}: ${display((snapshot.pendingControls ?? snapshot.controls)[key])}`,
-            ),
-            'Classifier models: ' +
-              snapshot.classifiers.map((model) => model.model).join(', '),
-            `Advisor enabled: ${snapshot.privacy.advisorEnabled}`,
-            'Approved models: ' +
-              (snapshot.privacy.approvedModels.join(', ') || 'none'),
-            'Credentials and consent are read-only. Selecting an advisor does not grant approval.',
-            'Session edits activate on the next user turn. No configuration file writes.',
-          ]
-        : [...budgetLines(snapshot)]),
+      : tab === 'classifier'
+        ? classifierLines(snapshot)
+        : tab === 'routes'
+          ? [
+              activityRoutingSummary(snapshot),
+              'Configured activity overrides · not actual',
+              ...activityRouteLines(snapshot),
+              'Generation rechecks input, context and authentication.',
+            ]
+          : tab === 'settings'
+            ? [
+                activityRoutingSummary(snapshot),
+                'TUI Routes edits one activity/tier cell; session overrides queue next user turn.',
+                'Configured activity overrides · not actual',
+                ...activityRouteLines(snapshot),
+                'Text eligibility only; generation rechecks input, context and authentication.',
+                ...keys.map(
+                  (key) =>
+                    `${fieldNames[key]}: ${display((snapshot.pendingControls ?? snapshot.controls)[key])}`,
+                ),
+                'Classifier models: ' +
+                  snapshot.classifiers.map((model) => model.model).join(', '),
+                `Advisor enabled: ${snapshot.privacy.advisorEnabled}`,
+                'Approved models: ' +
+                  (snapshot.privacy.approvedModels.join(', ') || 'none'),
+                'Credentials and consent are read-only. Selecting an advisor does not grant approval.',
+                'Session edits activate on the next user turn. No configuration file writes.',
+              ]
+            : [...budgetLines(snapshot)]),
     'Terminal inspector requires TUI mode. Use /router help for text-mode commands.',
   ].join('\n');
 
@@ -355,6 +373,7 @@ export class RouterUIDraft {
       thinking: after.thinking,
       fallbacks: [...(after.fallbacks ?? [])],
     };
+    if (routeTargetEqual(current, nextState)) return;
     if (routeStateEqual(nextState, before)) {
       this.routeChanges.delete(key);
       return;
@@ -523,6 +542,7 @@ export class RouterUIInspector implements Component {
   private tab = 0;
   advanced = false;
   details = false;
+  usageDetails = false;
   private focus = 0;
   private scroll = 0;
   private disposed = false;
@@ -577,7 +597,7 @@ export class RouterUIInspector implements Component {
     adapters.signal?.addEventListener('abort', this.abort, { once: true });
     if (adapters.signal?.aborted) this.close('close');
   }
-  currentTab = () => (['now', 'usage', 'settings'] as const)[this.tab] ?? 'now';
+  currentTab = (): RouterUIView => ROUTER_UI_VIEWS[this.tab] ?? 'now';
   routeEditorState = () => ({
     open: this.routesOpen,
     cell: { ...this.routeCellSelection },
@@ -591,6 +611,8 @@ export class RouterUIInspector implements Component {
     this.routeFocus = 0;
   };
   selectTab = (name: string): void => {
+    this.routesOpen = false;
+    this.closeRouteModal();
     this.tab = Math.max(
       0,
       tabs.findIndex((tab) => tab.toLowerCase() === name),
@@ -639,20 +661,27 @@ export class RouterUIInspector implements Component {
     );
     this.timeoutInput.setValue(String(this.editor.draft.timeout));
   };
-  private fields = (): readonly (keyof RouterUIControls)[] =>
-    this.routesOpen
-      ? []
-      : this.tab === 2
-        ? this.advanced
-          ? keys
-          : ['pin']
-        : [];
+  private fields = (): readonly (keyof RouterUIControls)[] => {
+    if (this.routesOpen) return [];
+    if (this.currentTab() === 'classifier') return classifierFields;
+    if (this.currentTab() !== 'settings') return [];
+    return this.advanced
+      ? keys.filter((key) => !classifierFields.some((field) => field === key))
+      : ['pin'];
+  };
   private actions = (): string[] => [
-    ...(this.tab === 0 ? ['Why this route?'] : []),
-    ...(this.tab === 2
+    ...(this.currentTab() === 'now' ? ['Why this route?'] : []),
+    ...(this.currentTab() === 'routes' && this.snapshot.routeCells.length
+      ? ['Edit cell']
+      : []),
+    ...(this.currentTab() === 'usage'
+      ? [this.usageDetails ? 'Less detail' : 'Details']
+      : []),
+    ...(this.currentTab() === 'settings'
+      ? [this.advanced ? 'Less settings' : 'Advanced']
+      : []),
+    ...(['settings', 'classifier'].includes(this.currentTab())
       ? [
-          this.advanced ? 'Less settings' : 'Advanced',
-          ...(this.advanced ? ['Routes'] : []),
           ...(this.editor.dirty().length ? ['Apply', 'Discard'] : []),
           ...(this.editor.canUndo() && !this.editor.dirty().length
             ? ['Undo']
@@ -837,7 +866,7 @@ export class RouterUIInspector implements Component {
     'Reset to generic',
     'Apply routes',
     'Discard routes',
-    'Back to Settings',
+    'Back to Routes',
   ];
   private handleRouteInput = (data: string): void => {
     if (matchesKey(data, 'escape')) {
@@ -845,7 +874,7 @@ export class RouterUIInspector implements Component {
       else {
         this.routesOpen = false;
         this.focus =
-          this.actions().indexOf('Routes') + this.fields().length + 1;
+          this.actions().indexOf('Edit cell') + this.fields().length + 1;
       }
       this.tui.requestRender();
       return;
@@ -918,8 +947,8 @@ export class RouterUIInspector implements Component {
           break;
         case 6:
           this.routesOpen = false;
-          this.routeFocus =
-            this.actions().indexOf('Routes') + this.fields().length + 1;
+          this.focus =
+            this.actions().indexOf('Edit cell') + this.fields().length + 1;
           break;
       }
     }
@@ -1011,7 +1040,7 @@ export class RouterUIInspector implements Component {
       selected(3, 'Reset to generic / inherit'),
       selected(4, 'Apply routes'),
       selected(5, 'Discard route draft'),
-      selected(6, 'Back to Settings'),
+      selected(6, 'Back to Routes'),
       ...(draft
         ? [this.theme.fg('warning', 'Draft changes are not applied.')]
         : []),
@@ -1052,7 +1081,9 @@ export class RouterUIInspector implements Component {
     if (this.editor.busy) return;
     const fields = this.fields();
     const field = fields[this.focus - 1];
-    if (matchesKey(data, 'tab') || matchesKey(data, 'shift+tab')) {
+    if (this.focus === 0 && /^[1-5]$/u.test(data)) {
+      this.selectTab(ROUTER_UI_VIEWS[Number(data) - 1] ?? 'now');
+    } else if (matchesKey(data, 'tab') || matchesKey(data, 'shift+tab')) {
       const count = fields.length + this.actions().length + 1;
       this.focus =
         (this.focus + (matchesKey(data, 'tab') ? 1 : count - 1)) % count;
@@ -1060,7 +1091,12 @@ export class RouterUIInspector implements Component {
       (matchesKey(data, 'left') || matchesKey(data, 'right')) &&
       this.focus === 0
     ) {
-      this.tab = (this.tab + (matchesKey(data, 'right') ? 1 : 2)) % 3;
+      this.selectTab(
+        ROUTER_UI_VIEWS[
+          (this.tab + (matchesKey(data, 'right') ? 1 : tabs.length - 1)) %
+            tabs.length
+        ] ?? 'now',
+      );
       this.scroll = 0;
     } else if (
       matchesKey(data, 'pageUp') ||
@@ -1105,7 +1141,9 @@ export class RouterUIInspector implements Component {
         this.focus = this.advanced ? 2 : 1;
         this.scroll = 0;
       }
-      if (action === 'Routes') {
+      if (action === 'Details' || action === 'Less detail')
+        this.usageDetails = !this.usageDetails;
+      if (action === 'Edit cell') {
         this.routesOpen = true;
         this.routeFocus = 0;
         this.scroll = 0;
@@ -1135,11 +1173,75 @@ export class RouterUIInspector implements Component {
     }
     this.tui.requestRender();
   };
+  private routeOverview = (): string[] => {
+    const s = this.snapshot;
+    const order = ['micro', 'low', 'medium', 'high'] as const;
+    const dirty = this.editor.dirtyRoutes();
+    return [
+      this.theme.fg('accent', 'Configured routes · not actual generation'),
+      activityRoutingSummary(s),
+      '',
+      'Activity'.padEnd(9) +
+        ['micro', 'low', 'med', 'high'].map((tier) => tier.padEnd(6)).join(''),
+      ...ROUTER_ACTIVITIES.map(
+        (activity) =>
+          activity.padEnd(9) +
+          order
+            .map((tier) => {
+              const cell = s.routeCells.find(
+                (entry) => entry.activity === activity && entry.tier === tier,
+              );
+              const state = this.editor.routeState(activity, tier);
+              const marker =
+                state.state === 'override'
+                  ? 'O'
+                  : state.state === 'inherited'
+                    ? 'I'
+                    : '—';
+              const draft = dirty.some(
+                (entry) => entry.activity === activity && entry.tier === tier,
+              );
+              return (
+                marker +
+                (draft ? '*' : '') +
+                (cell?.pending ? '+' : '')
+              ).padEnd(6);
+            })
+            .join(''),
+      ),
+      '',
+      'I inherited · O override · — missing',
+      '* draft · + queued for next user turn',
+      'Edit cell opens model, effort and ordered fallback details.',
+      '',
+      'Generic text-capable routes · not actual',
+      ...order.map(
+        (tier) =>
+          tier +
+          ': ' +
+          (s.eligible[tier]
+            ? route(s.eligible[tier])
+            : 'not eligible / unknown'),
+      ),
+      'Generation rechecks input, context and authentication.',
+      '',
+      'Configured activity overrides · not actual',
+      ...activityRouteLines(s),
+    ];
+  };
   private content = (): string[] => {
     const s = this.snapshot;
     const muted = (text: string) => this.theme.fg('muted', text);
-    const heading = (text: string) => this.theme.fg('accent', text);
-    if (this.tab === 0) {
+    if (this.currentTab() === 'routes') return this.routeOverview();
+    if (this.currentTab() === 'classifier')
+      return classifierLines(s, this.editor.draft.advisor);
+    if (this.currentTab() === 'usage')
+      return [
+        ...usageSummary(s),
+        ...(s.history.length ? ['', ...routeMix(s.history)] : []),
+        ...(this.usageDetails ? ['', ...this.usage] : []),
+      ];
+    if (this.currentTab() === 'now') {
       const actual = s.lifecycle === 'off' ? undefined : s.actual;
       const differs =
         s.advised &&
@@ -1151,14 +1253,25 @@ export class RouterUIInspector implements Component {
           s.advised.routeCell !== actual?.routeCell);
       return [
         muted(
-          `${s.lifecycle === 'idle' ? 'Last generation' : 'Actual generation'} · ${s.lifecycle}`,
+          (s.lifecycle === 'idle' ? 'Last generation' : 'Actual generation') +
+            ' · ' +
+            s.lifecycle,
         ),
-        heading(actual ? actual.model : 'unknown / no observed generation'),
+        this.theme.fg(
+          'accent',
+          actual
+            ? `${actual.provider}/${actual.model}`
+            : 'unknown / no observed generation',
+        ),
         ...(actual
           ? [
               this.theme.fg(
                 'success',
-                `${actual.activity ?? 'generic'} · ${actual.tier} · effort ${actual.thinking}`,
+                (actual.activity ?? 'generic') +
+                  ' · ' +
+                  actual.tier +
+                  ' · effort ' +
+                  actual.thinking,
               ),
             ]
           : []),
@@ -1178,35 +1291,25 @@ export class RouterUIInspector implements Component {
           ? [
               this.theme.fg(
                 'warning',
-                `Next user turn: ${changes(s.controls, s.pendingControls)
-                  .map(
-                    (change) =>
-                      `${fieldNames[change.key]} ${display(change.after)}`,
-                  )
-                  .join(' · ')} (pending)`,
+                'Next user turn: ' +
+                  changes(s.controls, s.pendingControls)
+                    .map(
+                      (change) =>
+                        `${fieldNames[change.key]} ${display(change.after)}`,
+                    )
+                    .join(' · ') +
+                  ' (pending)',
               ),
             ]
           : []),
         '',
-        ...budgetLines(s).map((line, i) =>
-          i === 1
-            ? this.theme.fg(
-                s.controls.budget !== undefined &&
-                  (s.accumulatedCost ?? 0) >= s.controls.budget
-                  ? 'warning'
-                  : 'accent',
-                line,
-              )
-            : muted(line),
-        ),
-        '',
-        muted(
-          `Observed routes · ${Math.min(50, s.history.length)} retained decisions`,
-        ),
-        ...routeMix(s.history),
+        'Switch history · retained active branch',
+        historyStatus(s),
+        ...routeTimeline(s.history),
         ...(this.details
           ? [
               '',
+              ...budgetLines(s),
               `Actual: ${route(actual)}`,
               `Advised (not actual): ${route(s.advised)}`,
               `Next pin: ${(s.pendingControls ?? s.controls).pin}`,
@@ -1215,62 +1318,21 @@ export class RouterUIInspector implements Component {
           : []),
       ];
     }
-    if (this.tab === 1)
-      return [
-        heading('Observed routes · retained active branch'),
-        ...routeMix(s.history).map((line, index) =>
-          this.theme.fg(
-            (['dim', 'accent', 'success', 'warning'] as const)[index] ??
-              'muted',
-            line,
-          ),
-        ),
-        '',
-        ...this.usage.map((line) =>
-          line.startsWith('Cache-read')
-            ? this.theme.fg('success', line)
-            : line.startsWith('Catalog cost')
-              ? this.theme.fg('accent', line)
-              : muted(line),
-        ),
-      ];
     return [
       muted(activityRoutingSummary(s)),
       muted('Pin / effort / baseline: this profile.'),
-      muted('Advisor / deadline / budget / switch policy: session-wide.'),
+      muted('Budget / switch policy: session-wide.'),
+      muted('Classifier selection and deadline: Classifier tab.'),
       muted('Apply queues the next user turn; not tool turns.'),
       ...(this.advanced
         ? [
-            '',
-            heading('Configured activity overrides · not actual'),
-            ...activityRouteLines(s),
-            '',
-            heading('Generic text-capable routes · not actual'),
-            muted('Generation rechecks input, context and authentication.'),
-            ...(['micro', 'low', 'medium', 'high'] as const).map(
-              (tier) =>
-                `${tier}: ${s.eligible[tier] ? route(s.eligible[tier]) : 'not eligible / unknown'}`,
-            ),
-            '',
-            heading('Advisor authorization · read-only'),
-            `Advisor enabled: ${s.privacy.advisorEnabled}`,
-            'Selected model approved: ' +
-              Boolean(
-                this.editor.draft.advisor &&
-                  s.privacy.approvedModels.includes(this.editor.draft.advisor),
-              ),
-            'Approved models: ' +
-              (s.privacy.approvedModels.join(', ') || 'none'),
-            'Models come from Pi classifier registry; Pi owns authentication.',
-            'Selecting an advisor does not grant consent.',
-            'Recent text can contain private data. Filtering is not redaction.',
-            'Advisor failure → baseline, never a second advisor.',
-            'Soft budget excludes advice; not a spending cap.',
+            ...budgetLines(s),
             'Session overrides only. No config file writes.',
+            'Pins persist until cleared. Credentials and consent remain in user configuration.',
           ]
         : [
             muted(
-              'Pins persist until cleared. Advanced: advisor, budget, effort.',
+              'Pins persist until cleared. Advanced: budget, effort and switch policy.',
             ),
           ]),
     ];
@@ -1309,23 +1371,36 @@ export class RouterUIInspector implements Component {
       this.theme.fg(selected ? 'accent' : 'muted', text);
     const header = [
       this.theme.fg('accent', `Router / ${this.snapshot.profile}`),
-      tabs
-        .map((tab, i) =>
-          color(
-            i === this.tab,
-            `${!this.routesOpen && this.focus === 0 && i === this.tab ? '›' : ''}${tab}`,
+      visibleWidth(tabs.join(' | ')) + 1 <= w
+        ? tabs
+            .map((tab, i) =>
+              color(
+                i === this.tab,
+                `${!this.routesOpen && this.focus === 0 && i === this.tab ? '›' : ''}${tab}`,
+              ),
+            )
+            .join(' | ')
+        : color(
+            true,
+            `${this.tab + 1}/${tabs.length} ${tabs[this.tab]} · ←→ tabs`,
           ),
-        )
-        .join(' | '),
     ];
     const status = this.statusMessage();
+    const actionIndex = this.routesOpen
+      ? this.routeFocus
+      : this.focus - fields.length - 1;
+    const actionBar = actions
+      .map((action, i) =>
+        color(i === actionIndex, `${i === actionIndex ? '›' : ''}${action}`),
+      )
+      .join(' | ');
     const footer = [
       ...((
         this.routesOpen
           ? this.editor.dirtyRoutes().length ||
             this.editor.message ||
             this.editor.busy
-          : this.tab === 2 &&
+          : ['settings', 'classifier'].includes(this.currentTab()) &&
             (this.editor.dirty().length ||
               this.editor.message ||
               this.editor.busy)
@@ -1343,21 +1418,16 @@ export class RouterUIInspector implements Component {
             ),
           ]
         : []),
-      actions
-        .map((action, i) => {
-          const selected = this.routesOpen
-            ? this.routeFocus === i
-            : this.focus === fields.length + i + 1;
-          return color(selected, `${selected ? '›' : ''}${action}`);
-        })
-        .join(' | '),
+      visibleWidth(actionBar) > w && actions[actionIndex]
+        ? color(true, `›${actions[actionIndex]} · Tab actions`)
+        : actionBar,
       this.theme.fg(
         'dim',
         this.routesOpen
           ? this.routeModal === 'models'
             ? 'Tab search/results · Enter choose · Esc back'
             : 'Esc back · Tab focus · Enter select · actual generation unchanged'
-          : 'Esc close · Tab focus · ←→ tabs/value · PgUp/Dn',
+          : 'Esc close · Tab focus · ←→ tabs/value · 1–5 tabs · PgUp/Dn',
       ),
     ];
     const body = this.routesOpen
@@ -1384,7 +1454,7 @@ export class RouterUIInspector implements Component {
           ...wrapTextWithAnsi(
             color(
               selected,
-              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'not configured') : controlDisplay(field, this.editor.draft[field])}`,
+              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'none (session)') : controlDisplay(field, this.editor.draft[field])}`,
             ),
             w,
           ),
@@ -1461,6 +1531,7 @@ export const openRouterInspector = async (
   let repeat = true;
   let advanced = false;
   let details = false;
+  let usageDetails = false;
   const initialRouteCell =
     adapters
       .getSnapshot()
@@ -1493,6 +1564,7 @@ export const openRouterInspector = async (
           component.selectTab(initialTab);
           component.advanced = advanced;
           component.details = details;
+          component.usageDetails = usageDetails;
           component.restoreRouteEditor(routeEditor.open, routeEditor.cell);
           return component;
         },
@@ -1511,6 +1583,7 @@ export const openRouterInspector = async (
       initialTab = component?.currentTab() ?? initialTab;
       advanced = component?.advanced ?? advanced;
       details = component?.details ?? details;
+      usageDetails = component?.usageDetails ?? usageDetails;
       routeEditor = component?.routeEditorState() ?? routeEditor;
     } finally {
       component?.dispose();

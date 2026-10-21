@@ -107,6 +107,7 @@ const recommendationOf = (
 const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
   const metrics = decision.classification;
   return {
+    reason: decision.reasonCode,
     reviewOnly: decision.reviewOnly,
     actual:
       !decision.reviewOnly && decision.generation
@@ -119,6 +120,7 @@ const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
       decision.advisor === 'classifier' ||
       decision.advisor === 'classifier-fallback'
         ? {
+            profile: decision.profile,
             source: decision.adviceSource,
             advisor: metrics?.model ?? 'Classifier',
             requestId: metrics?.requestId,
@@ -195,6 +197,12 @@ export const createRouterUIRuntime = (
   let historySource: readonly RoutingDecision[] | undefined;
   let historyProfile: string | undefined;
   let history: RouterUIHistoryEntry[] = [];
+  let lastAdvice:
+    | {
+        startedAt: number;
+        advice: RouterUIHistoryEntry['advice'];
+      }
+    | undefined;
   const publish = () => {
     for (const refresh of listeners) {
       try {
@@ -690,10 +698,10 @@ export const createRouterUIRuntime = (
           ? registry.getModelsOfType('classifier')
           : []
         )
-          .filter((model) => model.input.includes('text'))
           .map((model) => ({
             model: `${model.provider}/${model.id}`,
             name: model.name,
+            textInput: model.input.includes('text'),
           }))
           .sort((a, b) => a.model.localeCompare(b.model)) ?? [],
       reuse: last?.reuse,
@@ -718,6 +726,8 @@ export const createRouterUIRuntime = (
           : undefined,
       switchCost: last?.switchCost,
       advice: last ? historyOf(last).advice : undefined,
+      lastAdvice: lastAdvice?.advice,
+      loggingEnabled: state.debugEnabled === true,
       controls: controls(profile),
       pendingControls: pendingValue(profile),
       pendingRoutes: routeCells.some((cell) => cell.pending !== undefined),
@@ -959,6 +969,7 @@ export const createRouterUIRuntime = (
     actual = undefined;
     advised = undefined;
     observation = undefined;
+    lastAdvice = undefined;
     observedProfile = undefined;
     historySource = undefined;
     publish();
@@ -976,6 +987,7 @@ export const createRouterUIRuntime = (
       if (requestEpoch !== epoch || profile !== state.selectedProfile) return;
       if (event.decision) observation = snapshotDecision(event.decision);
       if (event.stage === 'selected') {
+        if (event.decision) recordAdvice(event.decision);
         if (event.decision?.advisor === 'classifier')
           advised = recommendationOf(event.decision) ?? routeOf(event.decision);
       } else if (event.stage === 'generating' && event.decision) {
@@ -993,5 +1005,27 @@ export const createRouterUIRuntime = (
       changed();
     };
   };
-  return { adapters, activatePending, reset, beginRequest, publish };
+  const recordAdvice = (decision: RoutingDecision): void => {
+    if (!decision.classification) return;
+    const advice = historyOf(decision).advice;
+    if (!advice) return;
+    const startedAt = decision.classification.startedAt ?? decision.timestamp;
+    if (
+      lastAdvice &&
+      (lastAdvice.startedAt > startedAt ||
+        (advice.requestId !== undefined &&
+          advice.requestId === lastAdvice.advice?.requestId))
+    )
+      return;
+    lastAdvice = { startedAt, advice };
+    publish();
+  };
+  return {
+    adapters,
+    activatePending,
+    reset,
+    beginRequest,
+    recordAdvice,
+    publish,
+  };
 };
