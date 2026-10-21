@@ -122,7 +122,7 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [x] D4 `docs/architecture.md`: transform location, matrix provenance, fence, escalation, module list.
 - [x] D5 `docs/classifier-advisor.md`: candidates show transformed routes (one fact, one line).
 - [x] D6 Mode policy values documented as untuned in one place (user guide).
-- [ ] D7 Screenshots: existing method (`docs/testing/router-ui-agterm-acceptance.md:39-65, 202-206`): agterm window, `screencapture -l <window>`, `sips` crop, fixture extension. New: widget with `cost (session)`, `/router status`, Settings/Now tab with mode. Add an acceptance report `docs/testing/routing-modes-acceptance.md`. Status: acceptance report written (`docs/testing/routing-modes-acceptance.md`, L1–L8 evidence); screenshots pending from the manager.
+- [x] D7 Screenshots: existing method (`docs/testing/router-ui-agterm-acceptance.md:39-65, 202-206`): agterm window, `screencapture -l <window>`, `sips` crop, fixture extension. New: widget with `cost (session)`, `/router status`, Settings/Now tab with mode. Add an acceptance report `docs/testing/routing-modes-acceptance.md`. Status: acceptance report links the cost-mode route strip and the Settings panel (`docs/assets/router-ui/modes-widget-cost.png`, `modes-settings.png`); both are cropped to the content.
 
 ### Config and migration
 
