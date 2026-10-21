@@ -143,13 +143,12 @@ describe('project file allowlist', () => {
     mode: 'cost',
     activityRouting: 'off',
     ui: { statusLine: 'detailed' },
-    models: { fast: { model: 'test/fast' } },
     profiles: {
       work: {
         baselineTier: 'low',
         high: tier,
         medium: tier,
-        low: { model: 'fast' },
+        low: { model: 'test/fast' },
         micro: tier,
         activities: { code: { medium: tier } },
       },
@@ -165,6 +164,12 @@ describe('project file allowlist', () => {
   it.each([
     ['switchPolicy', { switchPolicy: { costSensitivity: 0 } }],
     ['modes', { modes: { cost: { policy: {} } } }],
+    [
+      'model aliases',
+      {
+        models: { fast: { model: 'test/fast', effortCacheSharing: 'shared' } },
+      },
+    ],
     ['maxSessionBudget', { maxSessionBudget: 1000 }],
     ['debug', { debug: true }],
     ['rules', { rules: [] }],

@@ -619,7 +619,7 @@ export const normalizeAdvisorConfig = (
   };
 };
 
-const PROJECT_KEYS = ['profiles', 'models', 'activityRouting', 'ui', 'mode'];
+const PROJECT_KEYS = ['profiles', 'activityRouting', 'ui', 'mode'];
 const PROJECT_PROFILE_KEYS = [
   'high',
   'medium',
@@ -631,7 +631,8 @@ const PROJECT_PROFILE_KEYS = [
 
 /**
  * A repository controls its project file, so it may only choose among routes,
- * display and mode. Policy, budget, debug and classifier settings stay user-owned.
+ * display and mode. Model aliases, policy, budget, debug and classifier settings
+ * stay user-owned: alias metadata such as `effortCacheSharing` changes switch cost.
  */
 export const projectRouterConfig = (
   raw: object,
