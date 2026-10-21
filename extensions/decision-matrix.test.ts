@@ -243,6 +243,10 @@ const decide = async (
   activity: string,
   mode: RouterMode,
   modifier: Modifier,
+  start?: {
+    messages: Context['messages'];
+    lastDecision: RoutingDecision | undefined;
+  },
 ): Promise<RoutingDecision> => {
   const { config, profileName, profile } = configFor(key, outcome, modifier);
   const resolved = { mode, source: 'profile' as const };
@@ -260,7 +264,7 @@ const decide = async (
     mode: resolved,
     getCurrentMode: () => resolved,
     accumulatedCost: modifier === 'budget' ? 5 : 0,
-    lastDecision: undefined,
+    lastDecision: start?.lastDecision,
     cache: createProviderTurnCache(),
   };
   if (modifier === 'escalation')
@@ -269,7 +273,7 @@ const decide = async (
       context: { messages: toolLoop },
       identity: { turn: 'failing-turn', branch: ['b'] },
     });
-  const messages: Context['messages'] = [
+  const messages: Context['messages'] = start?.messages ?? [
     ...(modifier === 'escalation' ? toolLoop : []),
     { role: 'user', content: 'Continue with the next change.', timestamp: 10 },
   ];
@@ -481,4 +485,58 @@ describe('golden routing decision matrix', () => {
       'user/openai': { cells: 245, cost: 139, quality: 139 },
     });
   });
+});
+
+describe('starting from the balanced medium model', () => {
+  // The router can take over a tool loop from a native model, or resume with a
+  // restored decision. The prior model must not map onto a transformed cell
+  // that costs more than balanced in cost mode, or less in quality mode.
+  it.each(Object.keys(PROFILES) as ProfileKey[])(
+    'keeps cost <= balanced <= quality for %s',
+    async (key) => {
+      const medium = await decide(
+        key,
+        'medium',
+        'explore',
+        'balanced',
+        'plain',
+      );
+      const takeover: Context['messages'] = [
+        { role: 'user', content: 'Continue the task.', timestamp: 1 },
+        message({
+          provider: medium.targetProvider,
+          model: medium.targetModelId,
+          stopReason: 'toolUse',
+          content: [
+            { type: 'toolCall', id: 'n1', name: 'bash', arguments: {} },
+          ],
+        }),
+        {
+          role: 'toolResult',
+          toolCallId: 'n1',
+          toolName: 'bash',
+          content: [{ type: 'text', text: 'ok' }],
+          isError: false,
+          timestamp: 2,
+        },
+      ];
+      const newTask: Context['messages'] = [
+        { role: 'user', content: 'Start the next task.', timestamp: 3 },
+      ];
+      for (const messages of [takeover, newTask])
+        for (const lastDecision of [undefined, medium])
+          for (const outcome of ['uncertain', 'none'] as const) {
+            const route = (mode: RouterMode) =>
+              decide(key, outcome, 'explore', mode, 'plain', {
+                messages,
+                lastDecision,
+              });
+            const [cost, balanced, quality] = await Promise.all(
+              ROUTER_MODES.map(route),
+            );
+            expect(atMost(required(cost), required(balanced))).toBe(true);
+            expect(atMost(required(balanced), required(quality))).toBe(true);
+          }
+    },
+  );
 });
