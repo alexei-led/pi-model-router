@@ -520,7 +520,11 @@ const chooseAdvisorRoute = async (
         ))
       : undefined;
   // Advice resolves a current cell; representative IDs never become physical targets by themselves.
-  const validated = plan && matrix.plans.some((entry) => entry.id === plan.id);
+  // An unchanged cell keeps its ID across modes, so the mode is compared too.
+  const validated =
+    plan &&
+    input.getCurrentMode().mode === input.mode.mode &&
+    matrix.plans.some((entry) => entry.id === plan.id);
   if (!validated && reviewResult) {
     selected.decision = {
       ...selected.decision,
@@ -886,7 +890,7 @@ export const prepareRouterRequest = async (
       priorAssistant,
       mustContinueGoogle,
     );
-  if (!input.pinnedTier && !mustContinueGoogle)
+  if (!input.pinnedTier && !(toolContinuation && mustContinueGoogle))
     selected = applyEscalation(input, selected, currentMatrix, budget);
   if (toolContinuation && !mustContinueGoogle)
     scheduleBackgroundReview(

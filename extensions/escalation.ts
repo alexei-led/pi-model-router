@@ -113,15 +113,11 @@ export const updateEscalation = (
           holdTurns: input.holdTurns,
         }
       : state;
-  const anchorIndex = users.findLastIndex(
-    (message) => userKey(message) === next.anchor,
-  );
-  const turnsAfter = users.length - 1 - anchorIndex;
-  return {
-    state: next,
-    floor:
-      anchorIndex >= 0 && turnsAfter <= (next.holdTurns ?? 0)
-        ? next.floor
-        : undefined,
-  };
+  // Only the hold window can contain the anchor; hash nothing without a hold.
+  const held =
+    next.anchor !== undefined &&
+    users
+      .slice(-((next.holdTurns ?? 0) + 1))
+      .some((message) => userKey(message) === next.anchor);
+  return { state: next, floor: held ? next.floor : undefined };
 };

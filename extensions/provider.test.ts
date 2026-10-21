@@ -2429,6 +2429,22 @@ describe('repeated failure escalation', () => {
       expect(await run([...failingLoop, ...turn('add a test')])).toBe(next);
     },
   );
+
+  it('keeps the hold on a new user turn after a Google answer with thinking', async () => {
+    const { run } = routeWith({ switchPolicy: { escalationHoldTurns: 1 } });
+    const googleAnswer = message({
+      api: 'google-generative-ai',
+      model: 'fallback',
+      content: [
+        { type: 'thinking', thinking: 'plan' },
+        { type: 'text', text: 'fixed' },
+      ],
+    });
+    expect(await run(failingLoop)).toBe('fallback');
+    expect(
+      await run([...failingLoop, googleAnswer, ...turn('add a test')]),
+    ).toBe('fallback');
+  });
 });
 
 describe('routing mode changes while advice is in flight', () => {
@@ -2440,7 +2456,7 @@ describe('routing mode changes while advice is in flight', () => {
       cacheWrite: input,
     },
   });
-  const priced = (mode?: 'cost') => {
+  const priced = (mode?: 'cost', low: object = { model: 'test/small' }) => {
     const s = setup();
     s.models.splice(
       0,
@@ -2462,7 +2478,7 @@ describe('routing mode changes while advice is in flight', () => {
           advisor: { models: ['typesafe/jev-latest'] },
           high: { model: 'test/primary' },
           medium: { model: 'test/fallback' },
-          low: { model: 'test/small' },
+          low,
         },
       },
     }).config;
@@ -2515,6 +2531,29 @@ describe('routing mode changes while advice is in flight', () => {
       modeSource: 'session',
       modeLever: 'model',
       modeSourceTier: 'low',
+    });
+  });
+
+  it('rejects initial advice after a mode change that leaves the advised cell unchanged', async () => {
+    const s = priced(undefined, { model: 'test/small', thinking: 'low' });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const classify = vi.fn<Classify>(async (target, context) => {
+      await gate;
+      return classifierResponse(target, context, 'low');
+    });
+    s.registry.classify = classify;
+    const pending = consume(s.stream(userContext()));
+    await vi.waitFor(() => expect(classify).toHaveBeenCalled());
+    s.state.modeOverride = 'cost';
+    release();
+    await pending;
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      advisor: 'classifier-fallback',
+      mode: 'cost',
     });
   });
 
