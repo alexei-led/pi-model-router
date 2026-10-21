@@ -109,6 +109,8 @@ Status: Phase 2 (implementation). Manager approved the plan; Q9 changed (see ope
 - [ ] T12 Escalation: two same-signature failures with an edit between → one tier up for N user turns; no edit → none; different signatures; already `high`; same signature cannot re-escalate; pin and Google continuation skip; budget cap.
 - [ ] T13 Decisions carry `mode`, `modeSource`, classified tier and route in use; snapshot round-trip.
 - [ ] T14 Commands: usage errors, no-profile error, completions.
+- [ ] T16 **Golden decision matrix** (manager request, 2026-10-21): one table-driven test over every classifier outcome (`micro`, `low`, `medium`, `high`, `uncertain`, invalid/failed advice, and the no-classifier baseline path) × mode × activity cell × pin × effort override × budget × escalation hold → expected `{tier, model, thinking, lever, reasonCode}`. Built on a realistic profile (Claude-like and Codex-like shapes from the user's config, catalog prices). Golden output is checked in and reviewed by hand.
+- [ ] T17 Regression cases (manager item 2; the message arrived truncated, text requested): add a case for each past routing bug found in `git log --grep '^fix'` that touches route selection.
 - [ ] T15 Coverage: 90% branches on `routing.ts`, `state.ts` (and the new modules).
 
 ### Docs
@@ -143,10 +145,13 @@ Isolated: `PI_CODING_AGENT_DIR` and `HOME` under the scratchpad, `pi install --l
 - [ ] L6 Status shows mode and source.
 - [ ] L7 Log records carry `mode`, `modeSource`, classified tier, route in use.
 - [ ] L8 Escalation via the fixture failure scenario.
+- [ ] L10 **Impact, offline** (manager request): replay a fixed prompt set and recorded traces (`docs/assets/usage-data.json` where usable) through the matrix per mode; report estimated catalog cost per mode and the model/effort mix per profile. Any mode or profile without a real difference (for example zero prices or same-model tiers) is reported as a finding.
+- [ ] L11 **Impact, live** (manager request): one representative multi-turn task per mode in an isolated agterm session, on one subscription-billed and one API-billed profile, classifier Jev (`typesafe/jev-1.14.0`, enabled and approved in the user's config). Capture models used, switches, tokens and estimated cost from `/router log` and `/router usage`. Blocker: an isolated agent dir has no provider login. Needs the user to log in inside it (`! PI_CODING_AGENT_DIR=… pi` then `/login`) or to approve another way. I will not copy `auth.json`.
 - [ ] L9 Screenshots; close the test sessions.
 
 ### Release
 
+- [ ] R0 T16, T17, L10 and L11 are done and reported before Phase 4.
 - [ ] R1 `npm version minor --no-git-tag-version` → 0.16.0 (`package.json`, `package-lock.json`).
 - [ ] R2 `CHANGELOG.md` `## [0.16.0] - <date>`: Security (project allowlist), Changes, Upgrade; compare link.
 - [ ] R3 Full gate: `npm ci --ignore-scripts`, `npm run check`, `npm run test:coverage`, `npm run check:unused`, `npm run pack:dry`.
