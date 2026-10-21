@@ -694,3 +694,176 @@ describe('activity-aware effort controls', () => {
     expect(effortAdjustments(profile, find, 'high', false)).toEqual([]);
   });
 });
+
+describe('mode transform in the route matrix', () => {
+  const extended = { xhigh: 'xhigh', max: 'max' } as const;
+  const catalog = {
+    opus: model('opus', {
+      cost: { input: 4, output: 20, cacheRead: 0.4, cacheWrite: 5 },
+      thinkingLevelMap: extended,
+    }),
+    sonnet: model('sonnet', {
+      cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+      thinkingLevelMap: extended,
+    }),
+    haiku: model('haiku', {
+      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+    }),
+    backup: model('backup', {
+      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+    }),
+  };
+  const find = (provider: string, id: string) =>
+    provider === 'test' ? catalog[id as keyof typeof catalog] : undefined;
+  const profile = required(
+    normalizeConfig({
+      profiles: {
+        auto: {
+          high: { model: 'test/opus', thinking: 'xhigh' },
+          medium: { model: 'test/opus', thinking: 'medium' },
+          low: {
+            model: 'test/haiku',
+            thinking: 'high',
+            fallbacks: ['test/backup'],
+          },
+          micro: { model: 'test/haiku', thinking: 'off' },
+          activities: {
+            code: { medium: { model: 'test/sonnet', thinking: 'high' } },
+          },
+        },
+      },
+    }).config.profiles.auto,
+  );
+  const matrix = (
+    mode: 'cost' | 'balanced' | 'quality' | undefined,
+    options: {
+      pinned?: RouterTier;
+      overrides?: Partial<Record<RouterTier, 'low'>>;
+      budgetExceeded?: boolean;
+      profile?: RouterProfile;
+    } = {},
+  ) =>
+    buildRouteMatrix(
+      options.profile ?? profile,
+      find,
+      false,
+      1,
+      options.overrides,
+      true,
+      options.pinned,
+      mode
+        ? { mode, budgetExceeded: options.budgetExceeded ?? false }
+        : undefined,
+    );
+  const plan = (
+    built: ReturnType<typeof matrix>,
+    tier: RouterTier,
+    cell?: 'code',
+  ) =>
+    required(
+      built.plans.find((entry) => entry.tier === tier && entry.cell === cell),
+    );
+  const route = (entry: ReturnType<typeof plan>) =>
+    entry.attempts.map(({ model: ref, thinking }) => `${ref}/${thinking}`);
+  const revalidated = (entry: ReturnType<typeof plan>) =>
+    currentPlanPairs(entry, find, false).map(
+      ({ model: ref, thinking }) => `${ref}/${thinking}`,
+    );
+
+  it('uses the cheaper lower tier with its own fallbacks and keeps the classified tier', () => {
+    const medium = plan(matrix('cost'), 'medium');
+    expect(medium.tier).toBe('medium');
+    expect(medium.mode).toEqual({
+      mode: 'cost',
+      lever: 'model',
+      sourceTier: 'low',
+    });
+    expect(route(medium)).toEqual(['test/haiku/high', 'test/backup/high']);
+    expect(revalidated(medium)).toEqual(route(medium));
+  });
+
+  it('lowers effort one step when the lower tier uses the same model', () => {
+    const high = plan(matrix('cost'), 'high');
+    expect(high.mode?.lever).toBe('effort');
+    expect(route(high)).toEqual(['test/opus/high']);
+    expect(revalidated(high)).toEqual(['test/opus/high']);
+  });
+
+  it('lowers every attempt of the low tier, fallbacks included', () => {
+    const low = plan(matrix('cost'), 'low');
+    expect(route(low)).toEqual(['test/haiku/medium', 'test/backup/medium']);
+    expect(revalidated(low)).toEqual(route(low));
+  });
+
+  it('resolves an activity cell against the generic lower tier', () => {
+    const code = plan(matrix('cost'), 'medium', 'code');
+    expect(code.mode).toEqual({
+      mode: 'cost',
+      lever: 'model',
+      sourceTier: 'low',
+    });
+    expect(route(code)).toEqual(['test/haiku/high', 'test/backup/high']);
+  });
+
+  it('raises effort in quality mode and keeps micro', () => {
+    const built = matrix('quality');
+    expect(route(plan(built, 'high'))).toEqual(['test/opus/max']);
+    expect(route(plan(built, 'medium'))).toEqual(['test/opus/high']);
+    expect(route(plan(built, 'micro'))).toEqual(['test/haiku/off']);
+  });
+
+  it('keeps balanced identical to the configured matrix', () => {
+    const plain = matrix(undefined);
+    const balanced = matrix('balanced');
+    expect(balanced.plans.map((entry) => entry.id)).toEqual(
+      plain.plans.map((entry) => entry.id),
+    );
+    expect(balanced.plans.every((entry) => entry.mode?.lever === 'none')).toBe(
+      true,
+    );
+  });
+
+  it('gives transformed plans new identities so stale advice cannot match', () => {
+    const balanced = new Set(matrix('balanced').plans.map((entry) => entry.id));
+    expect(balanced.has(plan(matrix('cost'), 'medium').id)).toBe(false);
+    expect(balanced.has(plan(matrix('cost'), 'high').id)).toBe(false);
+    expect(balanced.has(plan(matrix('cost'), 'micro').id)).toBe(true);
+  });
+
+  it('bypasses the mode for a pin', () => {
+    const pinned = plan(matrix('cost', { pinned: 'medium' }), 'medium');
+    expect(route(pinned)).toEqual(['test/opus/medium']);
+    expect(pinned.mode).toBeUndefined();
+  });
+
+  it('bypasses the mode for a tier with an effort override', () => {
+    const built = matrix('cost', { overrides: { medium: 'low' } });
+    expect(route(plan(built, 'medium'))).toEqual(['test/opus/low']);
+    expect(plan(built, 'medium').mode).toBeUndefined();
+    expect(plan(built, 'high').mode?.lever).toBe('effort');
+  });
+
+  it('never moves quality onto the high route over the soft budget', () => {
+    const capped = required(
+      normalizeConfig({
+        profiles: {
+          auto: {
+            high: { model: 'test/opus', thinking: 'high' },
+            medium: { model: 'test/haiku', thinking: 'high' },
+          },
+        },
+      }).config.profiles.auto,
+    );
+    expect(
+      route(plan(matrix('quality', { profile: capped }), 'medium')),
+    ).toEqual(['test/opus/high']);
+    expect(
+      route(
+        plan(
+          matrix('quality', { profile: capped, budgetExceeded: true }),
+          'medium',
+        ),
+      ),
+    ).toEqual(['test/haiku/high']);
+  });
+});
