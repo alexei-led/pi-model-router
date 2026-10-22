@@ -14,7 +14,7 @@ export default (pi: ExtensionAPI) => {
   let scenario = 'baseline';
   pi.registerCommand('router-demo', {
     description:
-      'Local fixture: baseline, fallback, unknown, tool, slow, advisor-timeout, advisor-invalid',
+      'Local fixture: baseline, fallback, unknown, tool, escalation, slow, advisor-timeout, advisor-invalid',
     handler: async (args, ctx) => {
       if (
         ![
@@ -22,6 +22,7 @@ export default (pi: ExtensionAPI) => {
           'fallback',
           'unknown',
           'tool',
+          'escalation',
           'slow',
           'advisor-timeout',
           'advisor-invalid',
@@ -29,7 +30,7 @@ export default (pi: ExtensionAPI) => {
         ].includes(args.trim())
       ) {
         ctx.ui.notify(
-          'Fixture scenarios: baseline | fallback | unknown | tool | slow | advisor-timeout | advisor-invalid',
+          'Fixture scenarios: baseline | fallback | unknown | tool | escalation | slow | advisor-timeout | advisor-invalid',
           'info',
         );
         return;
@@ -48,6 +49,24 @@ export default (pi: ExtensionAPI) => {
       details: undefined,
     }),
   });
+  pi.registerTool({
+    name: 'fixture_check',
+    label: 'Fixture check',
+    description: 'Fail with the same deterministic test error every time.',
+    parameters: Type.Object({}),
+    execute: async () => {
+      throw new Error('FAIL fixture.test.ts:12 expected 3, received 4');
+    },
+  });
+  // Distinct catalog prices so the cost mode's model lever is visible.
+  const inputPrice: Record<string, number> = {
+    micro: 0.1,
+    low: 0.5,
+    medium: 2,
+    high: 4,
+    fallback: 2,
+    classifier: 1,
+  };
   pi.registerProvider('router-fixture', {
     api: 'router-fixture-api',
     apiKey: 'local-fixture-no-network',
@@ -60,23 +79,37 @@ export default (pi: ExtensionAPI) => {
         input: ['text'],
         contextWindow: 128000,
         maxTokens: 1024,
-        cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 },
+        cost: {
+          input: inputPrice[id] ?? 1,
+          output: (inputPrice[id] ?? 1) * 5,
+          cacheRead: (inputPrice[id] ?? 1) / 10,
+          cacheWrite: (inputPrice[id] ?? 1) * 1.25,
+        },
       }),
     ),
     streamSimple: (model, context, options) => {
       const stream = createAssistantMessageEventStream();
-      const usage = {
+      const tokens = {
         input: 1200,
         output: 80,
         cacheRead: 18000,
         cacheWrite: 300,
+      };
+      const price = (key: keyof typeof tokens) =>
+        (tokens[key] * model.cost[key]) / 1_000_000;
+      const usage = {
+        ...tokens,
         totalTokens: 19580,
         cost: {
-          input: 0.0012,
-          output: 0.00016,
-          cacheRead: 0.0018,
-          cacheWrite: 0.000375,
-          total: 0.003535,
+          input: price('input'),
+          output: price('output'),
+          cacheRead: price('cacheRead'),
+          cacheWrite: price('cacheWrite'),
+          total:
+            price('input') +
+            price('output') +
+            price('cacheRead') +
+            price('cacheWrite'),
         },
       };
       const message: AssistantMessage = {
@@ -107,6 +140,32 @@ export default (pi: ExtensionAPI) => {
           message.stopReason = 'error';
           message.errorMessage = 'Fixture pre-content failure';
           stream.push({ type: 'error', reason: 'error', error: message });
+          stream.end();
+          return;
+        }
+        // Repeated failure with an edit between: check, write, check, answer.
+        const loopResults = context.messages
+          .slice(context.messages.findLastIndex((m) => m.role === 'user') + 1)
+          .filter((m) => m.role === 'toolResult').length;
+        if (scenario === 'escalation' && loopResults < 3) {
+          message.content = [
+            {
+              type: 'toolCall',
+              id: `fixture-call-${Date.now()}`,
+              ...(loopResults === 1
+                ? {
+                    name: 'write',
+                    arguments: {
+                      path: 'fixture-notes.txt',
+                      content: `attempt ${Date.now()}\n`,
+                    },
+                  }
+                : { name: 'fixture_check', arguments: {} }),
+            },
+          ];
+          message.stopReason = 'toolUse';
+          stream.push({ type: 'start', partial: message });
+          stream.push({ type: 'done', reason: 'toolUse', message });
           stream.end();
           return;
         }

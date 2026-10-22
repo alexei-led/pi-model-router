@@ -19,7 +19,7 @@ This example uses illustrative model references. Replace them with models and ef
     "auto": {
       "baselineTier": "high",
       "high": { "model": "openai/gpt-6-astra", "thinking": "high" },
-      "low": { "model": "openai/gpt-6-luna", "thinking": "off" }
+      "low": { "model": "openai/gpt-6-luna", "thinking": "low" }
     }
   }
 }
@@ -180,6 +180,84 @@ Advisor charges are excluded; the budget is not a hard cap.
 These images are real Pi/agterm captures using synthetic local fixtures,
 not the HTML prototype. See [validation evidence](testing/signal-panel-acceptance.md).
 
+## Choose a routing mode
+
+A routing mode moves the selected tier's route toward lower cost or higher
+quality. It does not change which tier the classifier or the baseline selects.
+
+| Mode | Route for the selected tier |
+| --- | --- |
+| `cost` | Use the next lower tier's route if its model has a lower input price and its context window holds the request. Otherwise run one effort level lower, but not below `low`. |
+| `balanced` | Use the configured route. This is the default. |
+| `quality` | Run one effort level higher. If the model has no higher level, use the next higher tier's route. Above the soft budget, never move to `high`. |
+
+The mode does not change `micro` routes, pinned routes or routes under an
+effort override (`/router thinking`). The [decision matrix](decision-matrix.md)
+shows the result for each classifier answer, activity, mode and modifier.
+
+The router uses the first mode that is set:
+
+1. Session override: `/router mode cost|balanced|quality`.
+2. Project file: top-level `mode` in `.pi/model-router.json`.
+3. Profile: `profiles.<name>.mode` in the user file.
+4. `balanced`.
+
+A top-level `mode` in the user file is ignored with a warning. Set it per profile.
+
+- Run `/router mode` to show the mode and its source, for example `cost (session)`.
+  A pin adds `bypassed by pin`. An effort override names its tiers, for
+  example `bypassed at high by effort override`.
+- Run `/router mode default` to clear the session override.
+- A mode change applies from the next request. A running request keeps its
+  route, and advice made for the previous mode is not used.
+- A resumed session keeps its override. `/new` starts without it.
+
+![Route strip in cost mode: the low model runs under medium advice, source session](assets/router-ui/modes-widget-cost.png)
+
+Each mode also changes the switch policy:
+
+| Mode | `costSensitivity` | `escalationHoldTurns` |
+| --- | ---: | ---: |
+| `cost` | 0.8 | 1 |
+| `balanced` | configured | configured |
+| `quality` | 0.2 | 4 |
+
+The order is `switchPolicy`, then the mode values, then a Settings-tab edit in
+the current session. The Settings tab marks an edit that overrides the mode.
+`modes.<mode>.policy` in the user file replaces these values.
+These values are initial settings, not tuned by measurement. See the
+[offline estimate](research/2026-10-21-routing-modes-impact.md).
+
+### Repeated tool failures
+
+In one user turn, the same tool can fail twice with the same output, with a
+successful `edit` or `write` between the failures. Then the router routes at
+least one tier above the route that failed. This starts at the next request and
+lasts for `escalationHoldTurns` more user turns. It applies in every mode,
+`balanced` included. It does not apply at `high`, with a pin, or on a Google
+thought-signature continuation. The log shows reason `escalation` and
+`escalated from <tier>`.
+
+The hold belongs to the failing turn's user message. It ends early if
+compaction removes that message, and it does not apply on another branch.
+The hold is not saved, so reload and resume end it.
+The match ignores tool arguments and digits. Two unrelated failures of the same
+tool with the same message, with an edit between, also escalate.
+
+Escalation cannot be turned off. To limit it to the rest of the failing turn
+in every mode, set the hold to 0 in the switch policy and in both mode patches.
+The other mode values stay:
+
+```json
+{
+  "switchPolicy": { "escalationHoldTurns": 0 },
+  "modes": {
+    "cost": { "policy": { "escalationHoldTurns": 0 } },
+    "quality": { "policy": { "escalationHoldTurns": 0 } }
+  }
+}
+```
+
 ## Take control
 
 ```mermaid
@@ -234,6 +312,7 @@ Use `/router thinking auto` to clear the override.
 | `/router off` | Restore the previous non-router model. |
 | `/router pin <tier\|auto>` | Pin a tier or return to automatic selection. |
 | `/router thinking <level\|auto>` | Override effort for the profile or clear the override. |
+| `/router mode [cost\|balanced\|quality\|default]` | Show the routing mode, set a session override, or clear it. |
 | `/router log [on\|off\|clear]` | Show recent decisions, control collection, or clear history. |
 | `/router widget` | Toggle the status widget. |
 | `/router reload` | Reload router configuration, not Pi provider extensions. |
@@ -248,7 +327,7 @@ explicit `profile <name>`, including profiles whose names match commands.
 | File | Purpose |
 | --- | --- |
 | `~/.pi/agent/model-router.json` | User configuration and external-advisor approval. A custom Pi agent directory changes this location. |
-| `.pi/model-router.json` | Project overrides for routes and display. Advisor selection, tuning and profile approvals are ignored in project configuration. |
+| `.pi/model-router.json` | Project routes (`profiles.<name>` tier and activity cells, `baselineTier`), `activityRouting`, `ui` and `mode`. Other keys are ignored with a warning, including model aliases, `switchPolicy`, `modes`, `maxSessionBudget`, `debug` and all advisor settings. Project routes can still name any registered model, replace a same-named user profile's routes and set route capabilities; use project files only from repositories you trust. You can keep this file out of Git. |
 | `~/.pi/agent/models.json` | Pi-owned model and credential configuration, not router aliases or classifier approval. |
 | `~/.pi/agent/extensions/` | Optional Pi provider/catalog extensions. Changes require `/reload`. |
 | `~/.pi/agent/model-router-state.json` | Last selected profile. The extension manages this file. |
@@ -259,6 +338,7 @@ A profile needs at least one generic or activity tier. A partial profile is vali
 Profile names must be nonempty, contain no whitespace and not be `__proto__`.
 Command names such as `usage` are valid profiles: use `/router profile usage`.
 The router filters unavailable models and unsupported input before selection. An unsupported effort runs at the nearest supported level.
+`off` or `minimal` at `low`, `medium` or `high` disables that tier with a warning, unless the model is declared `reasoning: false`. `micro` can use `off`.
 `baselineTier` prefers a configured tier. Without it, the preference is `medium`, `high`, `low`, then `micro`.
 The [complete example](../model-router.example.json) shows aliases, tier/activity routes and classifier approval. Its advisor starts disabled; follow [classifier setup](classifier-advisor.md#configure-a-model) before enabling it.
 
@@ -270,6 +350,9 @@ The [complete example](../model-router.example.json) shows aliases, tier/activit
 | `advisor.reviewEveryRequests` | Run a nonblocking classifier review every N valid tool-loop requests (default 4); 0 disables. A result applies only to the immediately following request. |
 | `switchPolicy.horizonRequests` | Cost-comparison horizon, 1–20 requests (default 5). |
 | `switchPolicy.costSensitivity` | 0 is opportunistic (accepts a larger estimated premium); 1 only accepts switches no more expensive than staying. Default 0.5. |
+| `switchPolicy.escalationHoldTurns` | User turns after the failing turn that keep a [repeated-failure escalation](#repeated-tool-failures), 0–20 (default 2). 0 limits it to the failing turn. `cost` and `quality` replace it unless `modes.<mode>.policy` sets it. |
+| `profiles.<name>.mode` | Routing mode for the profile: `cost`, `balanced` or `quality`. See [routing modes](#choose-a-routing-mode). |
+| `modes.<mode>.policy` | Switch-policy values for one mode, which replace the built-in mode values. |
 | `switchPolicy.strongAdviceConfidence` | Minimum relevant classifier confidence that can override estimated switch cost. Default 0.9. Tier and activity confidence are independent. |
 | `models` | Aliases with a `model` reference, optional `contextWindow`/`maxTokens`, and exact `effortCacheSharing: shared\|separate\|unknown` metadata. Omitted metadata means unknown. |
 | `ui.statusLine` | `compact` by default. `detailed` adds the full provider/model reference and recorded catalog cost, still within two widget lines. |
@@ -301,7 +384,7 @@ not a configurable activity. For example:
         "docs": {
           "medium": {
             "model": "openai/gpt-6-luna",
-            "thinking": "off",
+            "thinking": "low",
             "fallbacks": []
           }
         }
@@ -349,7 +432,7 @@ The [evaluation](evaluation.md) separates observed use from hypothetical cost.
 
 ## Sessions and history
 
-Pins, costs, display controls, and recent decisions follow the Pi session branch. Adaptive switch session overrides reset on reload or session replacement; put durable policy in configuration.
+Pins, costs, display controls, and recent decisions follow the Pi session branch. Adaptive switch session overrides reset on reload or session replacement; put durable policy in configuration. A routing-mode override follows the session: resume keeps it, `/new` does not.
 Debug collection retains the last 50 generation/review observations. Usage separates generation decisions from terminal classifier diagnostics and deduplicates classifier IDs, including reviews that expired or did not apply. Turning collection off preserves existing history and the latest decision.
 
 An explicit startup `--model` takes priority.
@@ -366,6 +449,27 @@ not supported; SDK isolation is not proof of inherited policy enforcement.
 See the [required upstream contract](architecture.md#native-child-integration-boundary).
 
 ## Migration
+
+### From 0.15.x to 0.16.0
+
+Restart Pi after upgrading. Configuration without `mode` routes as before
+(`balanced`). Check these changes:
+
+1. **Project files (security fix).** `.pi/model-router.json` can now set only
+   routes, `activityRouting`, `ui` and `mode`. Model aliases, `switchPolicy`,
+   `modes`, `maxSessionBudget`, `debug` and other keys are ignored with a
+   warning. Move them to the user file if you need them. Before 0.16.0, a
+   cloned repository could change these settings. Project routes can still
+   name any registered model and set route capabilities such as
+   `reasoning: false`. Open project files only from repositories you trust.
+2. **Thinking floor.** `off` or `minimal` at `low`, `medium` or `high` now
+   disables that tier with a warning, unless the model is declared
+   `reasoning: false`. Use `low` or higher, or move the route to `micro`.
+3. **Escalation in `balanced`.** A [repeated tool failure](#repeated-tool-failures)
+   now raises the route one tier for two more user turns. To limit it to the
+   rest of the failing turn, [set the hold to 0](#repeated-tool-failures) in
+   `switchPolicy` and in the `cost` and `quality` mode patches.
+4. **Saved sessions.** A session saved by 0.15 restores without a mode override.
 
 ### From 0.14.x to 0.15.0
 

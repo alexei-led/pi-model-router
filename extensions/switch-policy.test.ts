@@ -156,6 +156,7 @@ describe('adaptive switch economics', () => {
         horizonRequests: 5,
         costSensitivity: 1,
         strongAdviceConfidence: 0.9,
+        escalationHoldTurns: 2,
       },
     });
     expect(result.accepted).toBe(true);
@@ -171,6 +172,7 @@ describe('adaptive switch economics', () => {
       horizonRequests: 5,
       costSensitivity: 1,
       strongAdviceConfidence: 0.9,
+      escalationHoldTurns: 2,
     };
     const held = evaluate({
       currentModel: cheap,

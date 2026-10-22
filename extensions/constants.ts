@@ -11,6 +11,10 @@ export const ROUTER_COMMANDS = [
   { name: 'profile', desc: 'Select a router profile' },
   { name: 'pin', desc: 'Pin the active profile to a tier, or auto' },
   { name: 'thinking', desc: 'Override thinking for every tier, or auto' },
+  {
+    name: 'mode',
+    desc: 'Set the session mode: cost, balanced, quality, or default',
+  },
   { name: 'log', desc: 'Recent decisions and advisor stats; on, off or clear' },
   { name: 'widget', desc: 'Toggle the status widget' },
   { name: 'off', desc: 'Leave the router and restore the previous model' },

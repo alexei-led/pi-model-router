@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.16.0] - 2026-10-21
+
+### Summary
+
+Choose a routing mode, `cost`, `balanced` or `quality`, per profile, project or session. Repeated tool failures now escalate one tier, and project router files can no longer change user policy.
+
+### Security
+
+- `.pi/model-router.json` can now set only routes, `activityRouting`, `ui` and `mode`. Before 0.16.0, a cloned repository's file could set model aliases (including `effortCacheSharing`), `switchPolicy`, `maxSessionBudget`, `debug` and other keys. Those keys are now ignored with a warning that shows no values. Advisor settings remain user-only. Project routes can still name any registered model and set route capabilities, so open project files only from repositories you trust.
+
+### Changes
+
+- Add routing modes. `cost` uses the next lower tier's model when it is cheaper and holds the request, otherwise one effort level lower, but not below `low`. `quality` uses one effort level higher, otherwise the next tier, and never moves to `high` over the budget. `balanced` (default) keeps the configured routes. `micro`, pins and effort overrides are not changed.
+- Set the mode with `profiles.<name>.mode`, a top-level `mode` in the project file, or `/router mode cost|balanced|quality|default` for the session. The session override survives resume, not `/new`. A change applies from the next request, and advice made for another mode is not used.
+- Each mode adjusts `costSensitivity` and the escalation hold. `modes.<mode>.policy` replaces these values, and a Settings-tab edit overrides them for the session. The values are untuned starting points.
+- Escalate one tier when the same tool fails twice with an `edit` or `write` between, in one user turn. The escalation lasts `switchPolicy.escalationHoldTurns` more user turns (default 2; `cost` 1, `quality` 4).
+- Show the mode, its source and the lever in the route strip, `/router status`, the inspector and `/router log`.
+- Disable a `low`, `medium` or `high` tier that sets `off` or `minimal` effort, with a warning, unless its model is declared `reasoning: false`.
+- Add a generated [routing decision matrix](docs/decision-matrix.md) and an [offline cost estimate](docs/research/2026-10-21-routing-modes-impact.md) per mode.
+
+### Upgrade
+
+1. Before upgrading, move any `models`, `switchPolicy`, `modes`, `maxSessionBudget` or `debug` settings from `.pi/model-router.json` to the user file. Otherwise 0.16.0 ignores them.
+2. Change `off` or `minimal` effort at `low`, `medium` or `high` to `low` or higher. Otherwise that tier is disabled.
+3. Restart Pi after upgrading. Configuration without `mode` routes as before (`balanced`), except that repeated tool failures now escalate. To limit escalation to the rest of the failing turn, set `escalationHoldTurns` to `0` in `switchPolicy` and in `modes.cost.policy` and `modes.quality.policy`.
+
+See [upgrade details](docs/user-guide.md#from-015x-to-0160).
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.15.1...v0.16.0)
+
 ## [0.15.1] - 2026-10-21
 
 Fix Pi startup when the optional classifier-catalog extension is installed.

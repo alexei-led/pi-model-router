@@ -110,7 +110,31 @@ export interface AdvisorProfileConfig {
   models: string[];
 }
 
+export const ROUTER_MODES = ['cost', 'balanced', 'quality'] as const;
+export type RouterMode = (typeof ROUTER_MODES)[number];
+export const MODE_SOURCES = [
+  'session',
+  'project',
+  'profile',
+  'default',
+] as const;
+export type ModeSource = (typeof MODE_SOURCES)[number];
+export interface ResolvedMode {
+  mode: RouterMode;
+  source: ModeSource;
+}
+/** Which lever a mode moved for one cell; `none` keeps the configured pair. */
+export const MODE_LEVERS = ['model', 'effort', 'none'] as const;
+export type ModeLever = (typeof MODE_LEVERS)[number];
+export interface ModeProvenance {
+  readonly mode: RouterMode;
+  readonly lever: ModeLever;
+  /** Tier whose configured route the cell uses after the transform. */
+  readonly sourceTier: RouterTier;
+}
+
 export interface RouterProfile {
+  mode?: RouterMode | undefined;
   /** Effective, re-normalized sparse overrides; omitted tiers use the generic cell. */
   activities?:
     | Partial<
@@ -131,6 +155,8 @@ export interface RouterSwitchPolicy {
   horizonRequests: number;
   costSensitivity: number;
   strongAdviceConfidence: number;
+  /** Further user turns a repeated-failure escalation holds its floor. */
+  escalationHoldTurns: number;
 }
 
 export interface RouterConfig {
@@ -142,6 +168,14 @@ export interface RouterConfig {
   maxSessionBudget?: number | undefined;
   profiles: Record<string, RouterProfile>;
   models?: Record<string, ModelDefinition> | undefined;
+  /** Built-in mode policy patches deep-merged with user edits. */
+  modes?:
+    | Record<RouterMode, { policy: Partial<RouterSwitchPolicy> }>
+    | undefined;
+  /** Top-level `mode` from the project file only. */
+  projectMode?: RouterMode | undefined;
+  /** Settings-tab policy edits; runtime intent that beats the mode patch. */
+  sessionPolicy?: Partial<RouterSwitchPolicy> | undefined;
 }
 
 export interface RoutePair {
@@ -166,6 +200,7 @@ export interface RoutePlan {
   readonly config: Readonly<RoutedTierConfig>;
   readonly attempts: readonly [Readonly<RoutePair>, ...Readonly<RoutePair>[]];
   readonly thinkingOverrides: Readonly<RouterThinkingByTier> | undefined;
+  readonly mode?: ModeProvenance | undefined;
 }
 export interface ActivityCandidate {
   activity: RouterActivity;
@@ -275,6 +310,7 @@ export const ROUTING_REASON_CODES = [
   'classifier',
   'fallback',
   'budget',
+  'escalation',
   'legacy',
 ] as const;
 export type RoutingReasonCode = (typeof ROUTING_REASON_CODES)[number];
@@ -371,6 +407,13 @@ export interface RoutingDecision {
   targetModelId: string;
   targetLabel: string;
   reasonCode: RoutingReasonCode;
+  /** Tier selected before a repeated-failure escalation raised it. */
+  escalatedFrom?: RouterTier | undefined;
+  mode?: RouterMode | undefined;
+  modeSource?: ModeSource | undefined;
+  modeLever?: ModeLever | undefined;
+  /** Configured tier whose route a mode lever used. */
+  modeSourceTier?: RouterTier | undefined;
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
   advisor?: AdvisorOutcome | undefined;
@@ -396,6 +439,7 @@ export interface RouterLastProfileState {
 
 export interface PersistedStateInput {
   routerEnabled: boolean;
+  modeOverride?: RouterMode | undefined;
   selectedProfile: string | undefined;
   pinnedTierByProfile: RouterPinByProfile;
   thinkingByProfile: RouterThinkingByProfile;
@@ -414,6 +458,8 @@ export interface RouterPersistedState {
   pinTier?: RouterTier | undefined;
   pinByProfile?: RouterPinByProfile | undefined;
   thinkingByProfile?: RouterThinkingByProfile | undefined;
+  /** Session-only `/router mode` override; never in the global state file. */
+  modeOverride?: RouterMode | undefined;
   debugEnabled?: boolean | undefined;
   widgetEnabled?: boolean | undefined;
   debugHistory?: RoutingDecision[] | undefined;
@@ -434,6 +480,8 @@ export interface RawRouterConfig {
   rules?: unknown;
   profiles?: unknown;
   models?: unknown;
+  mode?: unknown;
+  modes?: unknown;
 }
 
 export interface ConfigLoadResult {
@@ -594,6 +642,17 @@ export interface RouterUIHistoryEntry {
   cacheReadTokens?: number | undefined;
   cacheWriteTokens?: number | undefined;
 }
+export const ROUTER_UI_POLICY_CONTROLS = {
+  costHorizon: 'horizonRequests',
+  costSensitivity: 'costSensitivity',
+  strongAdviceConfidence: 'strongAdviceConfidence',
+} as const satisfies Partial<
+  Record<keyof RouterUIControls, keyof RouterSwitchPolicy>
+>;
+export type RouterUIPolicyControl = keyof typeof ROUTER_UI_POLICY_CONTROLS;
+export type RouterUIPolicySource = 'config' | 'mode' | 'session';
+/** A pin bypasses the whole mode; an effort override, only the listed tiers. */
+export type RouterModeBypass = 'pin' | readonly RouterTier[];
 /** Presentation only: no credentials, transcript text or remote explanations. */
 export interface RouterUISnapshot {
   profile: string;
@@ -613,6 +672,10 @@ export interface RouterUISnapshot {
   advice?: RouterUIAdviceObservation | undefined;
   lastAdvice?: RouterUIAdviceObservation | undefined;
   loggingEnabled: boolean;
+  mode: ResolvedMode;
+  modeBypass?: RouterModeBypass | undefined;
+  /** Where each shown switch-policy control value comes from. */
+  policySources: Readonly<Record<RouterUIPolicyControl, RouterUIPolicySource>>;
   controls: Readonly<RouterUIControls>;
   pendingControls?: Readonly<RouterUIControls> | undefined;
   pendingRoutes?: boolean | undefined;
@@ -658,6 +721,8 @@ export interface RouterRequestObservation {
 export interface RouterUIPendingControls {
   base: RouterUIControls;
   value: RouterUIControls;
+  /** Policy layers at queue time; policy edits conflict only when these change, not the mode. */
+  policyLayers: string;
 }
 export interface RouterUIRuntimeState {
   currentConfig: RouterConfig;
@@ -666,6 +731,7 @@ export interface RouterUIRuntimeState {
   readonly routerEnabled: boolean;
   readonly pinnedTierByProfile: RouterPinByProfile;
   readonly thinkingByProfile: RouterThinkingByProfile;
+  readonly modeOverride?: RouterMode | undefined;
   readonly lastDecision: RoutingDecision | undefined;
   readonly debugHistory: readonly RoutingDecision[];
   readonly debugEnabled?: boolean;

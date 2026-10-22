@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
-import { normalizeAdvisorConfig } from '../config';
+import { DEFAULT_MODES, normalizeAdvisorConfig } from '../config';
 import { isThinkingLevel, parseCanonicalModelRef } from '../domain';
+import { effectivePolicy, modeBypassFor, modeForProfile } from '../modes';
 import {
   availableRoutePairs,
   preservesRouteCoverage,
@@ -25,6 +26,8 @@ import type {
   RouterUIHistoryEntry,
   RouterUILifecycle,
   RouterUIPendingControls,
+  RouterUIPolicyControl,
+  RouterUIPolicySource,
   RouterUIRoute,
   RouterUIRouteCellState,
   RouterUIRouteSelection,
@@ -32,7 +35,11 @@ import type {
   RouterUISnapshot,
   RoutingDecision,
 } from '../types';
-import { ROUTER_ACTIVITIES, ROUTER_TIERS } from '../types';
+import {
+  ROUTER_ACTIVITIES,
+  ROUTER_TIERS,
+  ROUTER_UI_POLICY_CONTROLS,
+} from '../types';
 import { validateRouterUIControls } from './controls';
 
 const thinkingFields = {
@@ -212,9 +219,28 @@ export const createRouterUIRuntime = (
       }
     }
   };
+  const modeOf = (profile: string) =>
+    modeForProfile(state.currentConfig, profile, state.modeOverride);
+  const policySources = (
+    profile: string,
+  ): Record<RouterUIPolicyControl, RouterUIPolicySource> => {
+    const config = state.currentConfig;
+    const patch = (config.modes ?? DEFAULT_MODES)[modeOf(profile).mode].policy;
+    return Object.fromEntries(
+      Object.entries(ROUTER_UI_POLICY_CONTROLS).map(([control, key]) => [
+        control,
+        config.sessionPolicy?.[key] !== undefined
+          ? 'session'
+          : patch[key] !== undefined
+            ? 'mode'
+            : 'config',
+      ]),
+    ) as Record<RouterUIPolicyControl, RouterUIPolicySource>;
+  };
   const controls = (profile: string): RouterUIControls => {
     const config = state.currentConfig;
     const thinking = state.thinkingByProfile[profile];
+    const policy = effectivePolicy(config, modeOf(profile).mode);
     return {
       pin: state.pinnedTierByProfile[profile] ?? 'auto',
       baseline: config.profiles[profile]?.baselineTier ?? 'auto',
@@ -222,10 +248,9 @@ export const createRouterUIRuntime = (
       advisor: config.advisor?.model,
       timeout: config.advisor?.timeoutMs ?? 10_000,
       reviewEveryRequests: config.advisor?.reviewEveryRequests ?? 4,
-      costHorizon: config.switchPolicy?.horizonRequests ?? 5,
-      costSensitivity: config.switchPolicy?.costSensitivity ?? 0.5,
-      strongAdviceConfidence:
-        config.switchPolicy?.strongAdviceConfidence ?? 0.9,
+      costHorizon: policy.horizonRequests,
+      costSensitivity: policy.costSensitivity,
+      strongAdviceConfidence: policy.strongAdviceConfidence,
       thinkingHigh: thinking?.high,
       thinkingMedium: thinking?.medium,
       thinkingLow: thinking?.low,
@@ -242,13 +267,21 @@ export const createRouterUIRuntime = (
           Object.assign(value, { [key]: entry.value[key] });
     return value;
   };
+  const policyLayers = () => {
+    const { switchPolicy, modes, sessionPolicy } = state.currentConfig;
+    return JSON.stringify([switchPolicy, modes, sessionPolicy]);
+  };
   const queue = (
     global: boolean,
     base: RouterUIControls,
     next: RouterUIControls,
     previous: RouterUIPendingControls | undefined,
   ): RouterUIPendingControls | undefined => {
-    const entry = { base: { ...base }, value: { ...base } };
+    const entry = {
+      base: { ...base },
+      value: { ...base },
+      policyLayers: previous?.policyLayers ?? policyLayers(),
+    };
     for (const key of Object.keys(base) as (keyof RouterUIControls)[]) {
       if (globalFields.has(key) !== global || next[key] === base[key]) continue;
       Object.assign(entry.value, { [key]: next[key] });
@@ -728,6 +761,12 @@ export const createRouterUIRuntime = (
       advice: last ? historyOf(last).advice : undefined,
       lastAdvice: lastAdvice?.advice,
       loggingEnabled: state.debugEnabled === true,
+      mode: modeOf(profile),
+      modeBypass: modeBypassFor(
+        Object.hasOwn(state.pinnedTierByProfile, profile),
+        state.thinkingByProfile[profile],
+      ),
+      policySources: policySources(profile),
       controls: controls(profile),
       pendingControls: pendingValue(profile),
       pendingRoutes: routeCells.some((cell) => cell.pending !== undefined),
@@ -883,9 +922,16 @@ export const createRouterUIRuntime = (
     pending.delete(profile);
     pendingRoutes.delete(profile);
     const latest = controls(profile);
+    // Effective policy values depend on the mode; a mode or profile switch is not a concurrent edit.
+    const layers = policyLayers();
     const baseConflict = entries.some(
       (entry) =>
-        entry && edited(entry).some((key) => latest[key] !== entry.base[key]),
+        entry &&
+        edited(entry).some((key) =>
+          Object.hasOwn(ROUTER_UI_POLICY_CONTROLS, key)
+            ? entry.policyLayers !== layers
+            : latest[key] !== entry.base[key],
+        ),
     );
     const overrides = new Map<string, RouterUIRouteOverride | undefined>();
     let routeConflict = false;
@@ -919,14 +965,21 @@ export const createRouterUIRuntime = (
       publish();
       return false;
     }
+    // Settings-tab policy edits are runtime intent: they beat the mode patch.
+    const editedPolicy = Object.fromEntries(
+      Object.entries(ROUTER_UI_POLICY_CONTROLS).flatMap(([control, key]) =>
+        entries.some((entry) =>
+          edited(entry).some((field) => field === control),
+        )
+          ? [[key, applying[control as RouterUIPolicyControl]]]
+          : [],
+      ),
+    );
     const nextConfig = {
       ...config,
-      switchPolicy: {
-        ...config.switchPolicy,
-        horizonRequests: applying.costHorizon,
-        costSensitivity: applying.costSensitivity,
-        strongAdviceConfidence: applying.strongAdviceConfidence,
-      },
+      ...(Object.keys(editedPolicy).length
+        ? { sessionPolicy: { ...config.sessionPolicy, ...editedPolicy } }
+        : {}),
       maxSessionBudget: applying.budget,
       profiles: {
         ...config.profiles,

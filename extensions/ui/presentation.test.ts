@@ -26,6 +26,12 @@ const snapshot: RouterUISnapshot = {
   profile: 'auto',
   lifecycle: 'generating',
   accumulatedCost: 1,
+  mode: { mode: 'balanced', source: 'default' },
+  policySources: {
+    costHorizon: 'config',
+    costSensitivity: 'config',
+    strongAdviceConfidence: 'config',
+  },
   controls: {
     pin: 'auto',
     baseline: 'medium',

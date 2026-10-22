@@ -7,11 +7,11 @@ import {
   normalizeTierConfig,
   parseConfigFile,
   profileNames,
+  projectRouterConfig,
   resolveContextWindow,
   resolveMaxTokens,
   resolveModelRef,
   resolveProfileName,
-  stripProjectAdvisorConfig,
 } from './config';
 import { isRouterTier } from './domain';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
@@ -733,6 +733,7 @@ describe('adaptive switch configuration', () => {
       horizonRequests: 8,
       costSensitivity: 0.2,
       strongAdviceConfidence: 0.9,
+      escalationHoldTurns: 2,
     });
     expect(loaded.warnings).toEqual([]);
   });
@@ -753,6 +754,7 @@ describe('adaptive switch configuration', () => {
       horizonRequests: 8,
       costSensitivity: 0.2,
       strongAdviceConfidence: 0.95,
+      escalationHoldTurns: 2,
     });
     expect(config.models?.balanced?.effortCacheSharing).toBe('shared');
     expect(warnings).toEqual([]);
@@ -770,11 +772,30 @@ describe('adaptive switch configuration', () => {
       horizonRequests: 5,
       costSensitivity: 0.5,
       strongAdviceConfidence: 0.9,
+      escalationHoldTurns: 2,
     });
     expect(config.models?.balanced?.effortCacheSharing).toBeUndefined();
     expect(warnings).toContain('Invalid switchPolicy; using defaults.');
     expect(warnings).toContain(
       'Model definition "balanced" has invalid effortCacheSharing. Ignored.',
+    );
+  });
+  it.each<[unknown, number, boolean]>([
+    [undefined, 2, false],
+    [0, 0, false],
+    [20, 20, false],
+    [21, 2, true],
+    [-1, 2, true],
+    [1.5, 2, true],
+    ['4', 2, true],
+  ])('normalizes escalationHoldTurns %s', (value, expected, warned) => {
+    const { config, warnings } = normalizeConfig({
+      switchPolicy: { escalationHoldTurns: value },
+      profiles: { work: { medium: { model: 'test/model' } } },
+    });
+    expect(config.switchPolicy?.escalationHoldTurns).toBe(expected);
+    expect(warnings.includes('Invalid switchPolicy; using defaults.')).toBe(
+      warned,
     );
   });
 });
@@ -843,7 +864,7 @@ describe('classifier advisor config', () => {
     const warnings: string[] = [];
     const merged = mergeConfig(
       base,
-      stripProjectAdvisorConfig(
+      projectRouterConfig(
         {
           advisor: { model: 'attacker/steal', enabled: true },
           profiles: { work: { advisor: { models: ['attacker/steal'] } } },
@@ -938,7 +959,7 @@ describe('activity configuration', () => {
             medium: { model: 'test/base' },
             activities: {
               code: { medium: { thinking: 'high', fallbacks: ['test/a'] } },
-              docs: { medium: { thinking: 'off' } },
+              docs: { medium: { thinking: 'low' } },
             },
           },
         },
@@ -962,7 +983,7 @@ describe('activity configuration', () => {
     });
     expect(config.profiles.auto?.activities?.code?.low?.model).toBe('test/low');
     expect(config.profiles.auto?.activities?.docs?.medium?.thinking).toBe(
-      'off',
+      'low',
     );
   });
 

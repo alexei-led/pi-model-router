@@ -3,7 +3,22 @@
   "switchPolicy": {
     "horizonRequests": 5,
     "costSensitivity": 0.5,
-    "strongAdviceConfidence": 0.9
+    "strongAdviceConfidence": 0.9,
+    "escalationHoldTurns": 2
+  },
+  "modes": {
+    "cost": {
+      "policy": {
+        "costSensitivity": 0.8,
+        "escalationHoldTurns": 1
+      }
+    },
+    "quality": {
+      "policy": {
+        "costSensitivity": 0.2,
+        "escalationHoldTurns": 4
+      }
+    }
   },
   "debug": false,
   "advisor": {
@@ -38,6 +53,7 @@
   },
   "profiles": {
     "personal": {
+      "mode": "balanced",
       "advisor": {
         "models": ["typesafe/jev-1.14.0"]
       },
@@ -68,13 +84,14 @@
         "docs": {
           "medium": {
             "model": "fast",
-            "thinking": "off",
+            "thinking": "low",
             "fallbacks": []
           }
         }
       }
     },
     "work": {
+      "mode": "cost",
       "advisor": {
         "models": []
       },

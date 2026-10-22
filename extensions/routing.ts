@@ -6,11 +6,14 @@ import {
 } from '@earendil-works/pi-ai';
 import { CONTEXT_FILL } from './constants';
 import { parseCanonicalModelRef, THINKING_LEVELS } from './domain';
+import { transformRoute } from './modes';
 import type {
   ModelDefinition,
+  ModeProvenance,
   RoutedTierConfig,
   RoutePair,
   RoutePlan,
+  RouterMode,
   RouterProfile,
   RouterThinkingByTier,
   RouterTier,
@@ -375,6 +378,97 @@ export interface RouteMatrix {
 export const planBehaviorKey = (plan: RoutePlan): string =>
   JSON.stringify(plan.attempts.map(({ model, thinking }) => [model, thinking]));
 
+const declaredLevelsFor = (
+  config: RoutedTierConfig,
+  model: string,
+): ModelDefinition['thinkingLevels'] => {
+  const own =
+    config.model === model
+      ? config
+      : config.resolvedFallbacks?.find((entry) => entry.model === model);
+  return own?.reasoning === false ? [] : own?.thinkingLevels;
+};
+
+interface ModeCell {
+  profile: RouterProfile;
+  thinkingOverrides: RouterThinkingByTier | undefined;
+  provenance: Partial<Record<RouterTier, ModeProvenance>>;
+}
+
+/**
+ * Apply the mode to one cell before plans exist, so candidates, plan IDs and
+ * generation revalidation all see the transformed pair. The transformed
+ * effort rides in the plan's thinking overrides; a model lever swaps in the
+ * source tier's configuration with its own fallbacks.
+ */
+const applyModeToCell = (
+  generic: RouterProfile,
+  cellProfile: RouterProfile,
+  findModel: (provider: string, modelId: string) => Model<Api> | undefined,
+  imageAttached: boolean,
+  thinkingOverrides: RouterThinkingByTier | undefined,
+  mode: RouterMode,
+  budgetExceeded: boolean,
+  contextTokens: number,
+): ModeCell => {
+  const configAt = (tier: RouterTier) => cellProfile[tier] ?? generic[tier];
+  const resolved = { ...generic, ...cellProfile };
+  // Lever sources use configured routes: another tier's manual override stays with that tier.
+  const pairs = availableRoutePairs(resolved, findModel, imageAttached);
+  const primaries = primaryRoutePairs(resolved, pairs);
+  // Another tier's route is a lever only if its model holds the request.
+  const fits = (pair: RoutePair) => {
+    const { provider, modelId } = parseCanonicalModelRef(pair.model);
+    const window = findModel(provider, modelId)?.contextWindow;
+    return window === undefined || contextTokens <= window * CONTEXT_FILL;
+  };
+  const next: RouterProfile = { ...cellProfile };
+  const overrides: RouterThinkingByTier = { ...thinkingOverrides };
+  const provenance: ModeCell['provenance'] = {};
+  for (const tier of ROUTER_TIERS) {
+    // A manual effort override is a deliberate choice; the mode leaves it alone.
+    if (!cellProfile[tier] || thinkingOverrides?.[tier]) continue;
+    const result = transformRoute({
+      mode,
+      tier,
+      routeAt: (target) => {
+        const pair = primaries.find((entry) => entry.tier === target);
+        return pair && (target === tier || fits(pair)) ? pair : undefined;
+      },
+      project: (pair, level) => {
+        const config = configAt(pair.tier);
+        return config
+          ? routeThinking(
+              { ...pair, thinking: level },
+              findModel,
+              imageAttached,
+              declaredLevelsFor(config, pair.model),
+            )
+          : undefined;
+      },
+      inputPrice: (ref) => {
+        const { provider, modelId } = parseCanonicalModelRef(ref);
+        return findModel(provider, modelId)?.cost.input;
+      },
+      allowHigh: !budgetExceeded,
+    });
+    if (!result) continue;
+    provenance[tier] = Object.freeze({
+      mode,
+      lever: result.lever,
+      sourceTier: result.sourceTier,
+    });
+    if (result.lever === 'none') continue;
+    next[tier] = configAt(result.sourceTier);
+    overrides[tier] = result.thinking;
+  }
+  return {
+    profile: next,
+    thinkingOverrides: Object.keys(overrides).length ? overrides : undefined,
+    provenance,
+  };
+};
+
 /** Prevalidate each matrix cell; only its representative is subject to context fit. */
 export const buildRouteMatrix = (
   profile: RouterProfile,
@@ -384,6 +478,7 @@ export const buildRouteMatrix = (
   thinkingOverrides?: RouterThinkingByTier,
   activityRouting = true,
   pinnedTier?: RouterTier,
+  mode?: { mode: RouterMode; budgetExceeded: boolean },
 ): RouteMatrix => {
   const cells = [
     { cell: undefined, profile },
@@ -393,15 +488,34 @@ export const buildRouteMatrix = (
           return overrides ? [{ cell, profile: overrides }] : [];
         })
       : []),
-  ].map((cell) => ({
-    ...cell,
-    pairs: availableRoutePairs(
-      cell.profile,
-      findModel,
-      imageAttached,
-      thinkingOverrides,
-    ),
-  }));
+  ].map((cell) => {
+    // Pins and manual model picks bypass the mode.
+    const moded: ModeCell =
+      mode && !pinnedTier
+        ? applyModeToCell(
+            profile,
+            cell.profile,
+            findModel,
+            imageAttached,
+            thinkingOverrides,
+            mode.mode,
+            mode.budgetExceeded,
+            contextTokens,
+          )
+        : { profile: cell.profile, thinkingOverrides, provenance: {} };
+    return {
+      cell: cell.cell,
+      profile: moded.profile,
+      thinkingOverrides: moded.thinkingOverrides,
+      provenance: moded.provenance,
+      pairs: availableRoutePairs(
+        moded.profile,
+        findModel,
+        imageAttached,
+        moded.thinkingOverrides,
+      ),
+    };
+  });
   const all = cells.flatMap(({ pairs }) => pairs);
   const fitting = pinnedTier
     ? all
@@ -414,7 +528,13 @@ export const buildRouteMatrix = (
         contextTokens,
       );
   const plans: RoutePlan[] = cells.flatMap(
-    ({ cell, profile: cellProfile, pairs }) =>
+    ({
+      cell,
+      profile: cellProfile,
+      pairs,
+      thinkingOverrides: cellOverrides,
+      provenance,
+    }) =>
       primaryRoutePairs(
         cellProfile,
         pairs.filter((pair) => fitting.includes(pair)),
@@ -441,9 +561,10 @@ export const buildRouteMatrix = (
           cell,
           config,
           attempts,
-          thinkingOverrides: thinkingOverrides
-            ? Object.freeze({ ...thinkingOverrides })
+          thinkingOverrides: cellOverrides
+            ? Object.freeze({ ...cellOverrides })
             : undefined,
+          ...(provenance[first.tier] ? { mode: provenance[first.tier] } : {}),
         });
       }),
   );

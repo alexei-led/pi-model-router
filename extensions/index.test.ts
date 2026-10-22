@@ -666,6 +666,82 @@ describe('index.ts (orchestrator)', () => {
     expect(mockPi.appendEntry).toHaveBeenCalledTimes(2);
   });
 
+  describe('session mode override', () => {
+    const owned = (id: string) => {
+      const ctx = buildMockCtx();
+      Object.assign(ctx.sessionManager, { getSessionId: () => id });
+      return ctx;
+    };
+    const router = () => {
+      const command = mockPi.registerCommand.mock.calls.find(
+        ([name]) => name === 'router',
+      )?.[1] as Parameters<ExtensionAPI['registerCommand']>[1] | undefined;
+      if (!command) throw new Error('Missing router command');
+      return (args: string, ctx: ReturnType<typeof buildMockCtx>) =>
+        command.handler(args, ctx as unknown as ExtensionCommandContext);
+    };
+    const start = async (
+      reason: string,
+      ctx: ReturnType<typeof buildMockCtx>,
+    ) => {
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason }, ctx);
+    };
+    const relaunch = () => {
+      eventListeners = {};
+      mockPi = buildMockPi();
+      routerExtension(mockPi);
+    };
+    const savedOverride = async () => {
+      routerExtension(mockPi);
+      const ctx = owned('owner');
+      await start('new', ctx);
+      await router()('mode cost', ctx);
+      const saved = mockPi.appendEntry.mock.calls.at(-1)?.[1];
+      expect(saved).toMatchObject({
+        modeOverride: 'cost',
+        ownerSessionId: 'owner',
+      });
+      return saved;
+    };
+
+    it('restores the override when the same session resumes', async () => {
+      const saved = await savedOverride();
+      relaunch();
+      const ctx = owned('owner');
+      ctx.sessionManager.getBranch = () => [
+        { type: 'custom', customType: 'router-state', data: saved },
+      ];
+      await start('resume', ctx);
+      await router()('mode', ctx);
+      expect(ctx.ui.notify).toHaveBeenLastCalledWith(
+        'Mode: cost (session)',
+        'info',
+      );
+    });
+
+    it.each(['fork', 'new'])(
+      'does not carry the override into a %s session',
+      async (reason) => {
+        const saved = await savedOverride();
+        relaunch();
+        const ctx = owned('child');
+        ctx.sessionManager.getBranch = () => [
+          { type: 'custom', customType: 'router-state', data: saved },
+        ];
+        await start(reason, ctx);
+        await router()('mode', ctx);
+        expect(ctx.ui.notify).toHaveBeenLastCalledWith(
+          'Mode: balanced (default)',
+          'info',
+        );
+        expect(
+          mockPi.appendEntry.mock.calls.at(-1)?.[1].modeOverride,
+        ).toBeUndefined();
+      },
+    );
+  });
+
   it('initialize and register commands, provider, and event hooks', () => {
     routerExtension(mockPi);
 

@@ -7,21 +7,24 @@ import type { AutocompleteItem } from '@earendil-works/pi-tui';
 import { profileNames } from './config';
 import { ROUTER_COMMANDS as VERBS } from './constants';
 import {
+  isRouterMode,
   isRouterPinValue,
   isThinkingLevel,
   parseCanonicalModelRef,
   ROUTER_PIN_VALUES,
   THINKING_LEVELS,
 } from './domain';
+import { modeBypassFor, modeBypassLabel, modeForProfile } from './modes';
 import { effortAdjustments, preservesRouteCoverage } from './routing';
 import type {
   RouterConfig,
+  RouterMode,
   RouterPinByProfile,
   RouterThinkingByProfile,
   RouterUIView,
   RoutingDecision,
 } from './types';
-import { ROUTER_TIERS } from './types';
+import { ROUTER_MODES, ROUTER_TIERS } from './types';
 import {
   formatClassifierStats,
   formatDecision,
@@ -39,6 +42,7 @@ const RETIRED_VERBS: Record<string, string> = {
 };
 
 const LOG_ACTIONS = ['on', 'off', 'clear'] as const;
+const MODE_VALUES = [...ROUTER_MODES, 'default'] as const;
 const THINKING_VALUES = ['auto', ...THINKING_LEVELS] as const;
 
 const USAGE = [
@@ -52,6 +56,7 @@ const USAGE = [
   '/router off                    leave the router; restore the previous model',
   '/router pin <tier|auto>        pin the active profile to high|medium|low|micro, or clear',
   '/router thinking <level|auto>  override thinking for every tier, or clear',
+  '/router mode [cost|balanced|quality|default]  session mode; default clears it',
   '/router log [on|off|clear]     recent decisions and advisor stats; control collection',
   '/router widget                 toggle the status widget',
   '/router reload                 reload model-router.json',
@@ -66,6 +71,7 @@ export const registerCommands = (
     selectedProfile: string | undefined;
     readonly pinnedTierByProfile: RouterPinByProfile;
     readonly thinkingByProfile: RouterThinkingByProfile;
+    modeOverride: RouterMode | undefined;
     readonly lastDecision: RoutingDecision | undefined;
     lastNonRouterModel: string | undefined;
     readonly accumulatedCost: number;
@@ -104,6 +110,22 @@ export const registerCommands = (
     return state.selectedProfile;
   };
 
+  const modeLine = (): string => {
+    const profile = state.selectedProfile;
+    const { mode, source } = modeForProfile(
+      state.currentConfig,
+      profile,
+      state.modeOverride,
+    );
+    const bypass = profile
+      ? modeBypassFor(
+          Object.hasOwn(state.pinnedTierByProfile, profile),
+          state.thinkingByProfile[profile],
+        )
+      : undefined;
+    return `Mode: ${mode} (${source})${modeBypassLabel(bypass)}`;
+  };
+
   const showStatus = (ctx: ExtensionContext) => {
     const profile = state.selectedProfile;
     const config = state.currentConfig;
@@ -117,7 +139,7 @@ export const registerCommands = (
     const lines = [
       `Router: ${state.routerEnabled ? 'on' : 'off'} · profile ${profile ?? 'none'} · available: ${profileNames(config).join(', ')}`,
       `Pin: ${formatPinSummary(state.pinnedTierByProfile)} · effort: ${formatThinkingSummary(state.thinkingByProfile)}`,
-      `Activity routing: ${config.activityRouting ?? 'on'} (configuration)`,
+      `${modeLine()} · activity routing: ${config.activityRouting ?? 'on'} (configuration)`,
       `Recorded catalog cost: ${cost} (not billing; excludes advice)`,
       ...(last && state.routerEnabled
         ? [
@@ -268,6 +290,23 @@ export const registerCommands = (
     );
   };
 
+  const handleMode = (args: string[], ctx: ExtensionContext) => {
+    const value = args[0]?.toLowerCase();
+    if (args.length === 0) {
+      ctx.ui.notify(modeLine(), 'info');
+      return;
+    }
+    if (args.length > 1 || !MODE_VALUES.some((mode) => mode === value)) {
+      usage(ctx, `/router mode [${MODE_VALUES.join('|')}]`);
+      return;
+    }
+    state.modeOverride = isRouterMode(value) ? value : undefined;
+    actions.persistState();
+    actions.updateStatus(ctx);
+    // The next request routes through the normal fence; a pin forces a route now.
+    ctx.ui.notify(`${modeLine()} · applies from the next request`, 'info');
+  };
+
   const handleLog = (args: string[], ctx: ExtensionContext) => {
     const action = args[0]?.toLowerCase();
     if (args.length > 1 || (action && !LOG_ACTIONS.some((a) => a === action))) {
@@ -388,6 +427,16 @@ export const registerCommands = (
                 : `Set thinking to ${value} for every tier`,
             'thinking ',
           );
+        case 'mode':
+          return items(
+            MODE_VALUES,
+            token,
+            (value) =>
+              value === 'default'
+                ? 'Clear the session mode override'
+                : `Use ${value} mode for this session`,
+            'mode ',
+          );
         case 'log':
           return items(
             LOG_ACTIONS,
@@ -441,6 +490,9 @@ export const registerCommands = (
           return;
         case 'thinking':
           handleThinking(rest, ctx);
+          return;
+        case 'mode':
+          handleMode(rest, ctx);
           return;
         case 'log':
           handleLog(rest, ctx);

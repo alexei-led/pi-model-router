@@ -19,6 +19,7 @@ import { createProviderTurnCache } from './provider-turns';
 import { availableRoutePairs } from './routing';
 import type {
   RouterConfig,
+  RouterMode,
   RouterPinByProfile,
   RouterRequestObservation,
   RouterThinkingByProfile,
@@ -64,6 +65,8 @@ export const registerRouterProvider = (
     lastDecision: RoutingDecision | undefined;
     readonly thinkingByProfile: RouterThinkingByProfile;
     readonly pinnedTierByProfile: RouterPinByProfile;
+    /** Session-only `/router mode` override. */
+    readonly modeOverride?: RouterMode | undefined;
     accumulatedCost: number;
     readonly registryTimeoutMs?: number;
   },

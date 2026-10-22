@@ -364,6 +364,30 @@ describe('ui.ts lifecycle strip', () => {
     }
   });
 
+  it('logs the mode, its lever and an escalation', () => {
+    expect(
+      formatDecision({
+        ...decision,
+        reasonCode: 'escalation',
+        escalatedFrom: 'low',
+        mode: 'cost',
+        modeSource: 'project',
+        modeLever: 'model',
+        modeSourceTier: 'low',
+      }),
+    ).toContain(
+      '(escalation) {mode cost (project) · model lever from low} {escalated from low}',
+    );
+    expect(
+      formatDecision({
+        ...decision,
+        mode: 'balanced',
+        modeSource: 'default',
+        modeLever: 'none',
+      }),
+    ).toContain('{mode balanced (default)}');
+  });
+
   it('falls back to one footer status when the widget is hidden', () => {
     const ctx = context();
     Object.assign(ctx, { mode: 'tui' });
@@ -378,6 +402,12 @@ describe('ui.ts lifecycle strip', () => {
   const snapshot: RouterUISnapshot = {
     profile: 'p',
     lifecycle: 'choosing',
+    mode: { mode: 'balanced', source: 'default' },
+    policySources: {
+      costHorizon: 'config',
+      costSensitivity: 'config',
+      strongAdviceConfidence: 'config',
+    },
     controls: {
       pin: 'auto',
       baseline: 'medium',
@@ -407,6 +437,55 @@ describe('ui.ts lifecycle strip', () => {
       auth: 'unknown',
     },
   };
+  it('shows the mode and its source in the widget and a wide footer', () => {
+    const moded: RouterUISnapshot = {
+      ...snapshot,
+      mode: { mode: 'cost', source: 'session' },
+    };
+    const ctx = context();
+    Object.assign(ctx, { mode: 'tui' });
+    updateRouterUIStrip(ctx, moded, { widgetEnabled: true });
+    expect(widget(ctx).join('\n')).toContain('p · cost (session)');
+    const prior = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+    try {
+      for (const [columns, shown] of [
+        [80, true],
+        [60, false],
+      ] as const) {
+        Object.defineProperty(process.stdout, 'columns', {
+          configurable: true,
+          value: columns,
+        });
+        const footer = context();
+        Object.assign(footer, { mode: 'tui' });
+        updateRouterUIStrip(footer, moded, { widgetEnabled: false });
+        const text =
+          vi.mocked(footer.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
+        expect(text.includes('cost (session)')).toBe(shown);
+      }
+    } finally {
+      if (prior) Object.defineProperty(process.stdout, 'columns', prior);
+      else Reflect.deleteProperty(process.stdout, 'columns');
+    }
+  });
+
+  it('shows a mode bypass in the widget', () => {
+    const ctx = context();
+    Object.assign(ctx, { mode: 'tui' });
+    updateRouterUIStrip(
+      ctx,
+      {
+        ...snapshot,
+        mode: { mode: 'cost', source: 'profile' },
+        modeBypass: 'pin',
+      },
+      { widgetEnabled: true },
+    );
+    expect(widget(ctx).join('\n')).toContain(
+      'cost (profile) · bypassed by pin',
+    );
+  });
+
   it.each([40, 60, 80, 120])(
     'prioritizes actual routes and fits %i columns',
     (width) => {

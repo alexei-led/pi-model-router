@@ -12,6 +12,8 @@ The `pi-model-router` is an extension-first model router for the Pi coding agent
   - `extensions/types.ts`: interfaces and type definitions.
   - `extensions/config.ts`: configuration loading, normalization, and merging.
   - `extensions/routing.ts`: eligible baseline, pin/budget policy, model/input validation, and effort mapping.
+  - `extensions/modes.ts`: routing mode resolution, effective switch policy, and the pure cost/quality route transform.
+  - `extensions/escalation.ts`: repeated-failure detection and the bounded one-tier escalation hold.
   - `extensions/context.ts`: bounded recent-text extraction without intent scoring.
   - `extensions/choice.ts`: provider-neutral choice rubric, candidate identity, and strict validation.
   - `extensions/classifier.ts`: bounded typed classification through Pi's public model registry.
@@ -34,6 +36,8 @@ Four tiers (`micro`, `low`, `medium`, `high`) are model/effort choices, not secu
 
 `profiles.<name>.baselineTier` optionally names a configured tier. Filter availability, input and (unpinned) context-window fit first; an unsupported effort runs at the nearest supported level, as in Pi, and only declared `thinkingLevels` narrow it. Then prefer that baseline followed by `medium`, `high`, `low`, `micro`. Partial profiles are valid; only no eligible route is an error. `switchPolicy` defaults to a 5-request horizon, 0.5 cost sensitivity and 0.9 strong-advice threshold. Exact model alias metadata `effortCacheSharing` is `shared`, `separate` or `unknown` (default unknown); never infer cache sharing from provider/model names. Same-model effort changes marked shared have no cache rebuild penalty; unknown metadata does not forbid them. Cross-model switches compare estimated cold first input and a bounded warm-read horizon. Strong classifier evidence may override cost. These are catalog scenarios, not billing/cache-hit guarantees. Deprecated `rules` and `phaseBias` load with a value-free warning but have no routing effect. Do not restore keyword floors, mechanical detectors, phase inference or a hidden legacy mode.
 
+Routing mode `cost | balanced | quality` (default `balanced`) resolves as session override, project file, profile, default. It transforms matrix cells before advice: cost uses a cheaper lower-tier model that fits the context, otherwise one effort step down (not below `low`); quality raises effort one step, otherwise uses the next tier (never `high` over budget). `balanced`, `micro`, pins, and effort overrides keep the configured pair. Policy precedence is `switchPolicy`, then the mode patch, then a Settings-tab session edit. The mode is part of the advice fence. The same tool failure twice with an `edit`/`write` between, in one user turn, raises the route one tier for `escalationHoldTurns` user turns in every mode. Project files may set only routes, `activityRouting`, `ui`, and `mode`.
+
 Reconsider each new task/user-role steering message and periodically review valid tool-loop continuations. Only the next request may consume a fresh bounded review result. Native session ownership and request epochs fence replacement/reload/shutdown. Fresh SDK sessions require fresh extension/provider runtimes; never restore foreign-owner state on a new fork. Native pi-subagents auto-integration/shared inherited providers remain unsupported until a public contract supplies fresh runtime guarantees, native caller binding, effective physical model scope and inherited thinking ceilings. Do not treat transport session IDs, cycling scope or current effort as that contract.
 
 Classifier configuration and exact per-profile approvals belong only in user configuration. Ignore project-level classifier selection, tuning, enablement, and approval settings. Pi's registered text-capable classifier catalog is the source of available models. Do not attach conversation images, even when a Pi classifier can accept images.
@@ -52,6 +56,7 @@ Classifier configuration and exact per-profile approvals belong only in user con
 - `docs/classifier-advisor.md`: classifier configuration, Pi registry behavior, and privacy.
 - `docs/evaluation.md`: dated usage evidence, cost assumptions, and aggregate data.
 - `docs/release-guide.md`: maintainer checks and publication procedure.
+- `docs/decision-matrix.md`: generated routing decision table; regenerate it with its test, never edit it by hand.
 - Keep one fact in one document. Leave archived reports unchanged during current-document updates.
 - `docs/architecture.md`: mechanism and module boundaries.
 - `docs/research/`: dated experiments behind current defaults.

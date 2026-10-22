@@ -4,6 +4,7 @@ import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
   isObjectRecord,
   isRouterActivity,
+  isRouterMode,
   isRouterTier,
   isThinkingLevel,
   parseCanonicalModelRef,
@@ -30,6 +31,8 @@ import {
   isAdvisorOutcome,
   isBypassReason,
   isRoutingReasonCode,
+  MODE_LEVERS,
+  MODE_SOURCES,
   SWITCH_COST_REASONS,
 } from './types';
 
@@ -89,6 +92,7 @@ const isDecision = (value: unknown): value is RoutingDecision =>
   isThinkingLevel(value.thinking) &&
   (value.activity === undefined || isRouterActivity(value.activity)) &&
   (value.routeCell === undefined || isRouterActivity(value.routeCell)) &&
+  (value.escalatedFrom === undefined || isRouterTier(value.escalatedFrom)) &&
   isFiniteNumber(value.timestamp) &&
   ['profile', 'targetProvider', 'targetModelId', 'targetLabel'].every(
     (key) => typeof value[key] === 'string',
@@ -168,6 +172,7 @@ export const isRouterPersistedState = (
     typeof value.selectedProfile === 'string' &&
     isFiniteNumber(value.timestamp) &&
     (value.pinTier === undefined || isRouterTier(value.pinTier)) &&
+    (value.modeOverride === undefined || isRouterMode(value.modeOverride)) &&
     (value.pinByProfile === undefined ||
       isMap(value.pinByProfile, isRouterTier)) &&
     (value.thinkingByProfile === undefined ||
@@ -409,6 +414,15 @@ export const snapshotDecision = (
   reasonCode: isRoutingReasonCode(decision.reasonCode)
     ? decision.reasonCode
     : 'legacy',
+  escalatedFrom: isRouterTier(decision.escalatedFrom)
+    ? decision.escalatedFrom
+    : undefined,
+  mode: isRouterMode(decision.mode) ? decision.mode : undefined,
+  modeSource: MODE_SOURCES.find((source) => source === decision.modeSource),
+  modeLever: MODE_LEVERS.find((lever) => lever === decision.modeLever),
+  modeSourceTier: isRouterTier(decision.modeSourceTier)
+    ? decision.modeSourceTier
+    : undefined,
   routingLatencyMs:
     isFiniteNumber(decision.routingLatencyMs) && decision.routingLatencyMs >= 0
       ? decision.routingLatencyMs
@@ -451,6 +465,7 @@ export const buildPersistedState = ({
   lastDecision,
   lastNonRouterModel,
   accumulatedCost,
+  modeOverride,
 }: PersistedStateInput): RouterPersistedState => {
   const pinByProfile: RouterPinByProfile = {};
   for (const [profile, tier] of Object.entries(pinnedTierByProfile)) {
@@ -466,6 +481,7 @@ export const buildPersistedState = ({
       : {}),
     pinByProfile,
     thinkingByProfile: { ...thinkingByProfile },
+    ...(modeOverride ? { modeOverride } : {}),
     debugEnabled,
     widgetEnabled,
     debugHistory: debugHistory.map(snapshotDecision),

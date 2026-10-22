@@ -86,6 +86,7 @@ const buildState = (): MutableCommandState => ({
   selectedProfile: 'balanced',
   pinnedTierByProfile: {} as RouterPinByProfile,
   thinkingByProfile: {} as RouterThinkingByProfile,
+  modeOverride: undefined,
   lastDecision: decision,
   lastNonRouterModel: 'openai/gpt-4o',
   accumulatedCost: 0.05,
@@ -190,6 +191,7 @@ describe('/router surface', () => {
       'profile',
       'pin',
       'thinking',
+      'mode',
       'log',
       'widget',
       'off',
@@ -562,5 +564,95 @@ describe('/router widget and reload', () => {
     expect(actions.persistState).toHaveBeenCalledOnce();
     expect(actions.updateStatus).toHaveBeenCalledWith(ctx);
     expect(lastNotice()[0]).toContain('Profiles: balanced, cheap');
+  });
+});
+
+describe('/router mode', () => {
+  it('sets and clears the session override and reports the source', async () => {
+    const { run, lastNotice, state, actions } = setup((s) => {
+      s.currentConfig.projectMode = 'quality';
+    });
+    await run('mode');
+    expect(lastNotice()).toEqual(['Mode: quality (project)', 'info']);
+    await run('mode COST');
+    expect(state.modeOverride).toBe('cost');
+    expect(lastNotice()[0]).toBe(
+      'Mode: cost (session) · applies from the next request',
+    );
+    expect(actions.persistState).toHaveBeenCalled();
+    await run('mode default');
+    expect(state.modeOverride).toBeUndefined();
+    expect(lastNotice()[0]).toBe(
+      'Mode: quality (project) · applies from the next request',
+    );
+  });
+
+  it('falls back to the profile mode, then balanced', async () => {
+    const { run, lastNotice, state } = setup();
+    await run('mode');
+    expect(lastNotice()[0]).toBe('Mode: balanced (default)');
+    const profile = state.currentConfig.profiles.balanced;
+    if (profile) profile.mode = 'cost';
+    await run('mode');
+    expect(lastNotice()[0]).toBe('Mode: cost (profile)');
+  });
+
+  it.each([
+    [
+      'pin',
+      (s: MutableCommandState) => (s.pinnedTierByProfile.balanced = 'high'),
+      ' · bypassed by pin',
+    ],
+    [
+      'effort override',
+      (s: MutableCommandState) =>
+        (s.thinkingByProfile.balanced = { high: 'low' }),
+      ' · bypassed at high by effort override',
+    ],
+    [
+      'Settings save with no effort',
+      (s: MutableCommandState) => (s.thinkingByProfile.balanced = {}),
+      '',
+    ],
+  ])('shows whether a %s bypasses the mode', async (_name, mutate, suffix) => {
+    const { run, lastNotice } = setup((s) => {
+      mutate(s);
+    });
+    await run('mode');
+    expect(lastNotice()[0]).toBe(`Mode: balanced (default)${suffix}`);
+  });
+
+  it.each(['mode thrifty', 'mode cost quality'])(
+    'rejects %s with usage',
+    async (args) => {
+      const { run, lastNotice, state } = setup();
+      await run(args);
+      expect(lastNotice()).toEqual([
+        'Usage: /router mode [cost|balanced|quality|default]',
+        'error',
+      ]);
+      expect(state.modeOverride).toBeUndefined();
+    },
+  );
+
+  it('completes mode values', () => {
+    const { cmd } = setup();
+    expect(cmd.complete('mode ')).toEqual([
+      'mode cost',
+      'mode balanced',
+      'mode quality',
+      'mode default',
+    ]);
+    expect(cmd.complete('mode q')).toEqual(['mode quality']);
+  });
+
+  it('shows the mode in short status', async () => {
+    const { run, lastNotice } = setup((s) => {
+      s.modeOverride = 'cost';
+    });
+    await run('status');
+    expect(lastNotice()[0]).toContain(
+      'Mode: cost (session) · activity routing: on (configuration)',
+    );
   });
 });

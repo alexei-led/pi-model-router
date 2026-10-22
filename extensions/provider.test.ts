@@ -1379,13 +1379,13 @@ describe('activity matrix provider routing', () => {
             thinking: 'medium',
             fallbacks: ['test/fallback'],
           },
-          low: { model: 'test/small', thinking: 'off' },
+          low: { model: 'test/small', thinking: 'low' },
           activities: {
             code: {
               medium: { model: 'test/code', fallbacks: ['test/code-backup'] },
             },
             docs: {
-              medium: { model: 'test/docs', thinking: 'off', fallbacks: [] },
+              medium: { model: 'test/docs', thinking: 'low', fallbacks: [] },
             },
           },
         },
@@ -1657,6 +1657,7 @@ describe('activity matrix provider routing', () => {
       horizonRequests: 1,
       costSensitivity: 1,
       strongAdviceConfidence: 0.9,
+      escalationHoldTurns: 2,
     };
     s.state.currentConfig.advisor = {
       ...required(s.state.currentConfig.advisor),
@@ -1763,6 +1764,7 @@ describe('activity matrix provider routing', () => {
       horizonRequests: 1,
       costSensitivity: 1,
       strongAdviceConfidence: 0.9,
+      escalationHoldTurns: 2,
     };
     s.models[s.models.findIndex((m) => m.id === 'docs')] = model('docs', {
       cost: { input: 0.1, output: 0.1, cacheRead: 0.01, cacheWrite: 0.1 },
@@ -2312,5 +2314,354 @@ describe('activity matrix provider routing', () => {
     ).toBe('aborted');
     expect(cancelled.delegate).toHaveBeenCalledOnce();
     expect(cancelled.state.accumulatedCost).toBe(0.01);
+  });
+});
+
+describe('repeated failure escalation', () => {
+  const turn = (
+    text: string,
+    ...results: Array<[toolName: string, isError: boolean]>
+  ): Context['messages'] => [
+    { role: 'user', content: text, timestamp: 1 },
+    ...results.flatMap(([toolName, isError], index) => [
+      message({
+        model: 'small',
+        stopReason: 'toolUse',
+        content: [
+          {
+            type: 'toolCall',
+            id: `${text}-${index}`,
+            name: toolName,
+            arguments: {},
+          },
+        ],
+      }),
+      {
+        role: 'toolResult' as const,
+        toolCallId: `${text}-${index}`,
+        toolName,
+        content: [
+          {
+            type: 'text' as const,
+            text: isError ? 'FAIL parser.test.ts:12' : 'ok',
+          },
+        ],
+        isError,
+        timestamp: 2,
+      },
+    ]),
+  ];
+  const failingLoop = turn(
+    'fix the parser',
+    ['bash', true],
+    ['edit', false],
+    ['bash', true],
+  );
+  const routeWith = (raw: Record<string, unknown> = {}, pin?: 'low') => {
+    const s = setup();
+    s.state.pinnedTierByProfile = pin ? { balanced: pin } : {};
+    s.state.currentConfig = normalizeConfig({
+      ...raw,
+      profiles: {
+        balanced: {
+          baselineTier: 'low',
+          high: { model: 'test/primary' },
+          medium: { model: 'test/fallback' },
+          low: { model: 'test/small' },
+          ...((raw.profiles as Record<string, object> | undefined)?.balanced ??
+            {}),
+        },
+      },
+    }).config;
+    const run = async (messages: Context['messages']) => {
+      s.delegate.mockClear();
+      await consume(s.stream({ messages }));
+      return s.delegate.mock.calls[0]?.[0].id;
+    };
+    return { s, run };
+  };
+
+  it('moves one tier up after the same failure repeats across an edit', async () => {
+    const { s, run } = routeWith();
+    expect(await run(failingLoop)).toBe('fallback');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'escalation',
+      escalatedFrom: 'low',
+    });
+  });
+
+  it('keeps the baseline when no edit separates the failures', async () => {
+    const { s, run } = routeWith();
+    expect(
+      await run(turn('fix the parser', ['bash', true], ['bash', true])),
+    ).toBe('small');
+    expect(s.state.lastDecision?.reasonCode).toBe('baseline');
+  });
+
+  it('does not override a pin', async () => {
+    const { s, run } = routeWith({}, 'low');
+    expect(await run(failingLoop)).toBe('small');
+    expect(s.state.lastDecision?.reasonCode).toBe('pinned');
+  });
+
+  it('never escalates to high over the soft budget', async () => {
+    const { s, run } = routeWith({
+      maxSessionBudget: 0.01,
+      profiles: { balanced: { baselineTier: 'medium' } },
+    });
+    s.state.accumulatedCost = 1;
+    expect(await run(failingLoop)).toBe('fallback');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'budget',
+    });
+  });
+
+  it.each([
+    [0, 'small'],
+    [1, 'fallback'],
+  ])(
+    'with escalationHoldTurns %i the next user turn routes to %s',
+    async (escalationHoldTurns, next) => {
+      const { run } = routeWith({ switchPolicy: { escalationHoldTurns } });
+      expect(await run(failingLoop)).toBe('fallback');
+      expect(await run([...failingLoop, ...turn('add a test')])).toBe(next);
+    },
+  );
+
+  it('keeps the hold on a new user turn after a Google answer with thinking', async () => {
+    const { run } = routeWith({ switchPolicy: { escalationHoldTurns: 1 } });
+    const googleAnswer = message({
+      api: 'google-generative-ai',
+      model: 'fallback',
+      content: [
+        { type: 'thinking', thinking: 'plan' },
+        { type: 'text', text: 'fixed' },
+      ],
+    });
+    expect(await run(failingLoop)).toBe('fallback');
+    expect(
+      await run([...failingLoop, googleAnswer, ...turn('add a test')]),
+    ).toBe('fallback');
+  });
+});
+
+describe('routing mode changes while advice is in flight', () => {
+  const price = (input: number) => ({
+    cost: {
+      input,
+      output: input * 5,
+      cacheRead: input / 10,
+      cacheWrite: input,
+    },
+  });
+  const priced = (mode?: 'cost', low: object = { model: 'test/small' }) => {
+    const s = setup();
+    s.models.splice(
+      0,
+      s.models.length,
+      model('primary', price(4)),
+      model('fallback', price(2)),
+      model('small', { contextWindow: 1024, ...price(1) }),
+    );
+    s.state.pinnedTierByProfile = {};
+    if (mode) s.state.modeOverride = mode;
+    s.state.currentConfig = normalizeConfig({
+      advisor: {
+        enabled: true,
+        model: 'typesafe/jev-latest',
+        reviewEveryRequests: 2,
+      },
+      profiles: {
+        balanced: {
+          advisor: { models: ['typesafe/jev-latest'] },
+          high: { model: 'test/primary' },
+          medium: { model: 'test/fallback' },
+          low,
+        },
+      },
+    }).config;
+    s.registry.findOfType = (() =>
+      classifierModel) as unknown as ExtensionContext['modelRegistry']['findOfType'];
+    return s;
+  };
+  const routed = (s: ReturnType<typeof setup>) =>
+    s.delegate.mock.calls.at(-1)?.[0].id;
+
+  it('accepts advice for the mode it was asked under', async () => {
+    const s = priced('cost');
+    s.registry.classify = vi.fn<Classify>(async (target, context) =>
+      classifierResponse(target, context, 'high'),
+    );
+    await consume(s.stream(userContext()));
+    expect(routed(s)).toBe('fallback');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'high',
+      advisor: 'classifier',
+      mode: 'cost',
+      modeSource: 'session',
+      modeLever: 'model',
+      modeSourceTier: 'medium',
+    });
+  });
+
+  it('rejects initial advice after a mode change and generates from the current matrix', async () => {
+    const s = priced();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const classify = vi.fn<Classify>(async (target, context) => {
+      await gate;
+      return classifierResponse(target, context, 'high');
+    });
+    s.registry.classify = classify;
+    const pending = consume(s.stream(userContext()));
+    await vi.waitFor(() => expect(classify).toHaveBeenCalled());
+    s.state.modeOverride = 'cost';
+    release();
+    await pending;
+    // balanced advice would run primary; the same advice on the cost matrix, fallback
+    expect(routed(s)).toBe('small');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      advisor: 'classifier-fallback',
+      mode: 'cost',
+      modeSource: 'session',
+      modeLever: 'model',
+      modeSourceTier: 'low',
+    });
+  });
+
+  it('rejects initial advice after a mode change that leaves the advised cell unchanged', async () => {
+    const s = priced(undefined, { model: 'test/small', thinking: 'low' });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const classify = vi.fn<Classify>(async (target, context) => {
+      await gate;
+      return classifierResponse(target, context, 'low');
+    });
+    s.registry.classify = classify;
+    const pending = consume(s.stream(userContext()));
+    await vi.waitFor(() => expect(classify).toHaveBeenCalled());
+    s.state.modeOverride = 'cost';
+    release();
+    await pending;
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      advisor: 'classifier-fallback',
+      mode: 'cost',
+    });
+  });
+
+  it('discards a background review started before a mode change', async () => {
+    const s = priced();
+    const answer = { tier: 'medium' };
+    const classify = vi.fn<Classify>(async (target, context) =>
+      classifierResponse(target, context, answer.tier),
+    );
+    s.registry.classify = classify;
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            {
+              type: 'toolCall',
+              name: 'read',
+              id: `call-${target.id}-${Math.random()}`,
+              arguments: {},
+            },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      { role: 'user', content: 'Implement the retry behavior.', timestamp: 20 },
+    ];
+    const advance = async () => {
+      const { result } = await consume(s.stream({ messages }));
+      messages.push(result);
+      const call = result.content.find((part) => part.type === 'toolCall');
+      if (call?.type !== 'toolCall') throw new Error('Expected a tool call');
+      messages.push({
+        role: 'toolResult',
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{ type: 'text', text: 'step result' }],
+        isError: false,
+        timestamp: 21 + messages.length,
+      });
+      return result.model;
+    };
+    expect(await advance()).toBe('fallback');
+    answer.tier = 'high';
+    expect(await advance()).toBe('fallback');
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(classify).toHaveBeenCalledTimes(2);
+    s.state.modeOverride = 'cost';
+    // a consumed stale review would run primary (balanced) or fallback (cost high)
+    expect(await advance()).toBe('small');
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      reasonCode: 'baseline',
+      mode: 'cost',
+    });
+  });
+});
+
+describe('routing mode on an unchanged tool route', () => {
+  it('records the new mode when a mode change leaves the route unchanged', async () => {
+    const s = setup();
+    s.state.pinnedTierByProfile = {};
+    s.state.currentConfig = normalizeConfig({
+      profiles: {
+        balanced: {
+          baselineTier: 'low',
+          low: { model: 'test/small', thinking: 'low' },
+        },
+      },
+    }).config;
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            { type: 'toolCall', name: 'read', id: 'call-1', arguments: {} },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      { role: 'user', content: 'Read the file.', timestamp: 20 },
+    ];
+    const { result } = await consume(s.stream({ messages }));
+    expect(s.state.lastDecision?.mode).toBe('balanced');
+    messages.push(result, {
+      role: 'toolResult',
+      toolCallId: 'call-1',
+      toolName: 'read',
+      content: [{ type: 'text', text: 'contents' }],
+      isError: false,
+      timestamp: 22,
+    });
+    s.state.modeOverride = 'cost';
+    await consume(s.stream({ messages }));
+    expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('small');
+    expect(s.state.lastDecision).toMatchObject({
+      mode: 'cost',
+      modeSource: 'session',
+      modeLever: 'none',
+      thinking: 'low',
+    });
   });
 });
