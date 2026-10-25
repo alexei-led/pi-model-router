@@ -216,7 +216,31 @@ const toolLoop: Context['messages'] = [
   ]),
 ];
 
+const freezeFixture = (value: unknown): void => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeFixture(child);
+    Object.freeze(value);
+  }
+};
+const fixtureConfigs = new Map<
+  string,
+  {
+    config: ReturnType<typeof normalizeConfig>['config'];
+    profileName: string;
+    profile: NonNullable<
+      ReturnType<typeof normalizeConfig>['config']['profiles'][string]
+    >;
+  }
+>();
 const configFor = (key: ProfileKey, outcome: Outcome, modifier: Modifier) => {
+  // Every route still runs through request preparation; immutable declarations need normalization only once.
+  const cacheKey = JSON.stringify([
+    key,
+    outcome !== 'none',
+    modifier === 'budget',
+  ]);
+  const cached = fixtureConfigs.get(cacheKey);
+  if (cached) return cached;
   const { config, profile }: { config: ConfigFile; profile: string } =
     PROFILES[key];
   const normalized = normalizeConfig({
@@ -224,11 +248,14 @@ const configFor = (key: ProfileKey, outcome: Outcome, modifier: Modifier) => {
     advisor: { ...config.advisor, enabled: outcome !== 'none', model: JEV },
     ...(modifier === 'budget' ? { maxSessionBudget: 1 } : {}),
   }).config;
-  return {
+  const fixture = {
     config: normalized,
     profileName: profile,
     profile: required(normalized.profiles[profile]),
   };
+  freezeFixture(normalized);
+  fixtureConfigs.set(cacheKey, fixture);
+  return fixture;
 };
 const thinkingOverridesFor = (
   modifier: Modifier,

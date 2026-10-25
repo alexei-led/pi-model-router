@@ -41,6 +41,7 @@ import {
   ROUTER_UI_POLICY_CONTROLS,
 } from '../types';
 import { validateRouterUIControls } from './controls';
+import { routePreferences } from './preview';
 
 const thinkingFields = {
   high: 'thinkingHigh',
@@ -177,6 +178,7 @@ export const createRouterUIRuntime = (
   const pendingRoutes = new Map<string, Map<string, PendingRouterUIRoute>>();
   let sessionPending: RouterUIPendingControls | undefined;
   const globalFields = new Set<keyof RouterUIControls>([
+    'mode',
     'advisor',
     'timeout',
     'budget',
@@ -242,6 +244,7 @@ export const createRouterUIRuntime = (
     const thinking = state.thinkingByProfile[profile];
     const policy = effectivePolicy(config, modeOf(profile).mode);
     return {
+      mode: state.modeOverride,
       pin: state.pinnedTierByProfile[profile] ?? 'auto',
       baseline: config.profiles[profile]?.baselineTier ?? 'auto',
       budget: config.maxSessionBudget,
@@ -659,6 +662,37 @@ export const createRouterUIRuntime = (
     const catalog = chatModelCatalog();
     const activeControls = controls(profile);
     const queuedControls = pendingValue(profile);
+    const preference = (
+      candidate: RouterProfile | undefined,
+      value: RouterUIControls,
+    ) =>
+      routePreferences({
+        profile: candidate,
+        find: registry
+          ? (provider, id) => registry.find(provider, id)
+          : undefined,
+        mode: modeForProfile(config, profile, value.mode),
+        pin: value.pin,
+        thinkingOverrides: thinkingOf(value),
+        activityRouting: activityRouting === 'on',
+        budgetExceeded:
+          config.maxSessionBudget !== undefined &&
+          (state.accumulatedCost ?? 0) >= config.maxSessionBudget,
+      });
+    const preferred = preference(configured, activeControls);
+    const queuedRoutes = pendingRoutes.get(profile);
+    const futureProfile = queuedRoutes
+      ? profileWithRouteOverrides(
+          profile,
+          new Map(
+            [...queuedRoutes].map(([key, change]) => [key, change.value]),
+          ),
+        )
+      : configured;
+    const pendingPreferred =
+      queuedControls || queuedRoutes
+        ? preference(futureProfile, queuedControls ?? activeControls)
+        : undefined;
     const pendingEffortFor = (tier: RouterTier) =>
       queuedControls
         ? queuedControls[thinkingFields[tier]]
@@ -700,6 +734,10 @@ export const createRouterUIRuntime = (
           tier,
           current,
           generic,
+          preferred: preferred(activity, tier),
+          ...(pendingPreferred
+            ? { pendingPreferred: pendingPreferred(activity, tier) }
+            : {}),
           ...(pendingRoute ? { pending: pendingRoute } : {}),
           effectiveThinking:
             activityRouting === 'off' &&
@@ -748,6 +786,7 @@ export const createRouterUIRuntime = (
       reuse: last?.reuse,
       bypassReason: last?.bypassReason,
       reason: last?.reasonCode,
+      costRecovery: last?.costRecovery,
       failure:
         sameProfile && lifecycle === 'failed' ? 'request-failed' : undefined,
       lifecycle: !state.routerEnabled
@@ -1015,6 +1054,7 @@ export const createRouterUIRuntime = (
         )
       : undefined;
     state.currentConfig = { ...nextConfig, advisor };
+    state.modeOverride = applying.mode;
 
     if (applying.pin === 'auto') delete state.pinnedTierByProfile[profile];
     else state.pinnedTierByProfile[profile] = applying.pin;
@@ -1088,6 +1128,11 @@ export const createRouterUIRuntime = (
   return {
     adapters,
     activatePending,
+    hasPending: () =>
+      sessionPending !== undefined ||
+      (state.selectedProfile !== undefined &&
+        (pending.has(state.selectedProfile) ||
+          pendingRoutes.has(state.selectedProfile))),
     reset,
     beginRequest,
     recordAdvice,

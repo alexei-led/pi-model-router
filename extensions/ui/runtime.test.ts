@@ -1167,3 +1167,168 @@ describe('built-in route tuning', () => {
     ).toBe('high');
   });
 });
+
+describe('Settings session mode', () => {
+  it('queues mode without changing the active route, then activates it across profiles', async () => {
+    const { state, runtime } = setup();
+    expect(
+      await runtime.adapters.applyControls({
+        profile: 'auto',
+        action: 'apply',
+        changes: [{ key: 'mode', before: undefined, after: 'cost' }],
+      }),
+    ).toBe('applied');
+    expect(runtime.adapters.getSnapshot().mode).toEqual({
+      mode: 'balanced',
+      source: 'default',
+    });
+    expect(runtime.adapters.getSnapshot().pendingControls?.mode).toBe('cost');
+    expect(runtime.activatePending()).toBe(true);
+    expect(runtime.adapters.getSnapshot().mode).toEqual({
+      mode: 'cost',
+      source: 'session',
+    });
+    expect(runtime.adapters.getSnapshot().controls.costSensitivity).toBe(0.8);
+    state.currentConfig.profiles.other = required(
+      state.currentConfig.profiles.auto,
+    );
+    state.selectedProfile = 'other';
+    expect(runtime.adapters.getSnapshot().mode).toEqual({
+      mode: 'cost',
+      source: 'session',
+    });
+  });
+  it('clears a session override to inherit the project mode', async () => {
+    const { state, runtime } = setup();
+    state.currentConfig.projectMode = 'quality';
+    await runtime.adapters.applyControls({
+      profile: 'auto',
+      action: 'apply',
+      changes: [{ key: 'mode', before: undefined, after: 'cost' }],
+    });
+    runtime.activatePending();
+    await runtime.adapters.applyControls({
+      profile: 'auto',
+      action: 'apply',
+      changes: [{ key: 'mode', before: 'cost', after: undefined }],
+    });
+    runtime.activatePending();
+    expect(runtime.adapters.getSnapshot().mode).toEqual({
+      mode: 'quality',
+      source: 'project',
+    });
+  });
+  it('rejects an externally changed mode instead of overwriting it on activation', async () => {
+    const { state, runtime } = setup();
+    await runtime.adapters.applyControls({
+      profile: 'auto',
+      action: 'apply',
+      changes: [{ key: 'mode', before: undefined, after: 'cost' }],
+    });
+    Object.assign(state, { modeOverride: 'quality' });
+    expect(runtime.activatePending()).toBe(false);
+    expect(runtime.adapters.getSnapshot().mode.mode).toBe('quality');
+  });
+});
+
+describe('mode-adjusted route previews', () => {
+  const configured = () => {
+    const f = setup();
+    f.state.currentConfig = normalizeConfig({
+      profiles: {
+        auto: {
+          micro: { model: 'scope/gpt-6-luna', thinking: 'low' },
+          low: { model: 'scope/gpt-6-luna', thinking: 'high' },
+          medium: { model: 'scope/gpt-6.1-sol', thinking: 'medium' },
+          high: { model: 'scope/gpt-6.1-sol', thinking: 'high' },
+        },
+      },
+    }).config;
+    f.state.currentModelRegistry.find = (provider, id) =>
+      model(id, {
+        provider,
+        contextWindow: 128000,
+        thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
+        cost: {
+          input: id === 'gpt-6-luna' ? 0.1 : 2,
+          output: 10,
+          cacheRead: 0.1,
+          cacheWrite: 1,
+        },
+      });
+    return f;
+  };
+  it.each([
+    ['cost', 'scope/gpt-6-luna', 'high'],
+    ['balanced', 'scope/gpt-6.1-sol', 'high'],
+    ['quality', 'scope/gpt-6.1-sol', 'xhigh'],
+  ] as const)(
+    'previews %s without changing configured or actual routes',
+    (mode, target, effort) => {
+      const { state, runtime } = configured();
+      Object.assign(state, { modeOverride: mode });
+      const snapshot = runtime.adapters.getSnapshot();
+      const cell = required(
+        snapshot.routeCells.find(
+          (cell) => cell.activity === 'debug' && cell.tier === 'medium',
+        ),
+      );
+      expect(cell.current).toMatchObject({
+        model: 'scope/gpt-6.1-sol',
+        thinking: 'high',
+      });
+      expect(cell.preferred).toMatchObject({
+        status: 'eligible',
+        route: { model: target, thinking: effort },
+        mode: { mode, source: 'session' },
+      });
+      expect(snapshot.actual).toBeUndefined();
+    },
+  );
+  it('previews a queued mode while keeping the active preview separate', async () => {
+    const { runtime } = configured();
+    await runtime.adapters.applyControls({
+      profile: 'auto',
+      action: 'apply',
+      changes: [{ key: 'mode', before: undefined, after: 'cost' }],
+    });
+    const cell = required(
+      runtime.adapters
+        .getSnapshot()
+        .routeCells.find(
+          (cell) => cell.activity === 'debug' && cell.tier === 'medium',
+        ),
+    );
+    expect(cell.preferred?.route?.model).toBe('scope/gpt-6.1-sol');
+    expect(cell.pendingPreferred?.route?.model).toBe('scope/gpt-6-luna');
+  });
+  it('shows pin and effort bypasses instead of pretending a mode changed the route', () => {
+    const { state, runtime } = configured();
+    Object.assign(state, { modeOverride: 'quality' });
+    Object.assign(state.pinnedTierByProfile, { auto: 'medium' });
+    let cell = required(
+      runtime.adapters
+        .getSnapshot()
+        .routeCells.find(
+          (cell) => cell.activity === 'debug' && cell.tier === 'medium',
+        ),
+    );
+    expect(cell.preferred).toMatchObject({
+      bypass: 'pin',
+      route: { model: 'scope/gpt-6.1-sol', thinking: 'medium' },
+    });
+    state.pinnedTierByProfile = {};
+    state.thinkingByProfile.auto = { medium: 'low' };
+    cell = required(
+      runtime.adapters
+        .getSnapshot()
+        .routeCells.find(
+          (cell) => cell.activity === 'debug' && cell.tier === 'medium',
+        ),
+    );
+    expect(cell.preferred).toMatchObject({
+      bypass: 'effort',
+      route: { thinking: 'low' },
+    });
+  });
+});

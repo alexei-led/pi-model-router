@@ -538,7 +538,9 @@ const routerExtension = (pi: ExtensionAPI) => {
     else ctx.ui.notify(text, 'info');
   });
 
-  pi.on('before_agent_start', async (_event, ctx) => {
+  const activatePendingAtUserBoundary = async (
+    ctx: ExtensionContext,
+  ): Promise<void> => {
     if (!ownsContext(ctx)) return;
     const epoch = requestEpoch;
     if (!routerUI.activatePending()) {
@@ -568,6 +570,16 @@ const routerExtension = (pi: ExtensionAPI) => {
     }
     persistState();
     actions.updateStatus(ctx);
+  };
+  pi.on('before_agent_start', async (event, ctx) => {
+    // Pi 1.4 also emits this hook for custom turns; earlier supported Pi emits only user prompts.
+    if ('messageType' in event && event.messageType !== 'user') return;
+    await activatePendingAtUserBoundary(ctx);
+  });
+  // Consumed steering/follow-up users do not emit before_agent_start. Pi awaits message_end handlers before continuing.
+  pi.on('message_end', async (event, ctx) => {
+    if (event.message.role === 'user' && routerUI.hasPending())
+      await activatePendingAtUserBoundary(ctx);
   });
   pi.on('session_shutdown', (_event, ctx) => {
     if (!ownsContext(ctx)) return;

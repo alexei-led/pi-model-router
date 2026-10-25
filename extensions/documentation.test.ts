@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
-import { mergeConfig, normalizeConfig, normalizeTierConfig } from './config';
+import {
+  mergeConfig,
+  normalizeConfig,
+  normalizeTierConfig,
+  projectRouterConfig,
+} from './config';
 import { isObjectRecord } from './domain';
+import { effectivePolicy, modeForProfile } from './modes';
 import { required } from './test/fixtures';
 
 const jsonExamples = (path: string) =>
@@ -51,4 +57,37 @@ it('activity-tuning examples change effort, reset a cell and independently disab
   expect(off.warnings).toEqual([]);
   expect(off.config.activityRouting).toBe('off');
   expect(off.config.profiles.auto?.activities?.debug?.medium).toBeDefined();
+});
+
+it('routing-mode examples set profile/project precedence and a user-owned policy patch', () => {
+  const base = required(jsonExamples('../docs/user-guide.md')[0]);
+  const examples = jsonExamples('../docs/routing-modes.md');
+  const profile = normalizeConfig(mergeConfig(base, required(examples[0])));
+  expect(profile.warnings).toEqual([]);
+  expect(modeForProfile(profile.config, 'auto', undefined)).toEqual({
+    mode: 'quality',
+    source: 'profile',
+  });
+  const project = normalizeConfig(
+    mergeConfig(
+      mergeConfig(base, required(examples[0])),
+      projectRouterConfig(required(examples[1]), []),
+    ),
+  );
+  expect(project.warnings).toEqual([]);
+  expect(modeForProfile(project.config, 'auto', undefined)).toEqual({
+    mode: 'cost',
+    source: 'project',
+  });
+  expect(modeForProfile(project.config, 'auto', 'balanced')).toEqual({
+    mode: 'balanced',
+    source: 'session',
+  });
+  const policy = normalizeConfig(mergeConfig(base, required(examples[2])));
+  expect(policy.warnings).toEqual([]);
+  expect(effectivePolicy(policy.config, 'cost')).toMatchObject({
+    costSensitivity: 0.7,
+    escalationHoldTurns: 0,
+  });
+  expect(effectivePolicy(policy.config, 'quality').escalationHoldTurns).toBe(4);
 });

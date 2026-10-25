@@ -30,6 +30,7 @@ const getDecisionFlags = (decision: RoutingDecision): string[] => {
   if (decision.activity) flags.push(`activity=${decision.activity}`);
   else if (decision.routeCell)
     flags.push(`availability-cell=${decision.routeCell}`);
+  if (decision.costRecovery) flags.push('cost-recovery');
   if (decision.isFallback) flags.push('fallback');
   if (decision.isBudgetForced) flags.push('budget-limit');
   if (decision.isGenerationFailed) flags.push('failed');

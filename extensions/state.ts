@@ -93,6 +93,8 @@ const isDecision = (value: unknown): value is RoutingDecision =>
   (value.activity === undefined || isRouterActivity(value.activity)) &&
   (value.routeCell === undefined || isRouterActivity(value.routeCell)) &&
   (value.escalatedFrom === undefined || isRouterTier(value.escalatedFrom)) &&
+  (value.costRecovery === undefined ||
+    typeof value.costRecovery === 'boolean') &&
   isFiniteNumber(value.timestamp) &&
   ['profile', 'targetProvider', 'targetModelId', 'targetLabel'].every(
     (key) => typeof value[key] === 'string',
@@ -420,6 +422,7 @@ export const snapshotDecision = (
   mode: isRouterMode(decision.mode) ? decision.mode : undefined,
   modeSource: MODE_SOURCES.find((source) => source === decision.modeSource),
   modeLever: MODE_LEVERS.find((lever) => lever === decision.modeLever),
+  costRecovery: decision.costRecovery === true ? true : undefined,
   modeSourceTier: isRouterTier(decision.modeSourceTier)
     ? decision.modeSourceTier
     : undefined,

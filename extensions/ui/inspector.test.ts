@@ -133,6 +133,7 @@ describe('Signal Panel', () => {
       expect(f.draft.dirty()).not.toHaveLength(0);
       f.panel.handleInput('\t');
       f.panel.handleInput('\t');
+      f.panel.handleInput('\t');
       const lines = f.panel.render(40);
       expect(lines.join('\n')).toContain('›Apply');
       expect(lines.join('\n')).toContain('Enter');
@@ -462,7 +463,7 @@ describe('ui/inspector.ts', () => {
     const f = fixture();
     f.panel.selectTab('settings');
     f.panel.advanced = true;
-    for (let i = 0; i < 3; i++) f.panel.handleInput('\t');
+    for (let i = 0; i < 4; i++) f.panel.handleInput('\t');
     f.panel.handleInput('\x0b'); // Input starts at column zero: delete to end
     f.panel.handleInput('0');
     expect(f.draft.draft.budget).toBe(0);
@@ -614,7 +615,7 @@ describe('native editable route cells in Routes', () => {
     const overview = browseRoutePages(f.panel, 56);
     expect(overview).toContain('Routes · sparse per-cell session overrides');
     expect(overview).toContain('Configured effort: low');
-    expect(overview).toContain('Effective effort now: high');
+    expect(overview).toContain('Mapped configured effort: high');
     expect(overview).toContain('applies to every');
     expect(overview).toContain('activity; clear it to use this cell effort.');
     f.panel.handleInput('\t'); // Model
@@ -1043,3 +1044,26 @@ it.each([true, false])(
     f.panel.dispose();
   },
 );
+
+it('exposes session mode beside pin and keeps Apply/Undo scoped to the queued change', async () => {
+  const f = fixture();
+  f.panel.selectTab('settings');
+  expect(f.panel.render(80).join('\n')).toContain(
+    'Session mode: inherit (project/profile)',
+  );
+  f.panel.handleInput('\t');
+  f.panel.handleInput('\t');
+  f.panel.handleInput('\x1b[C');
+  expect(f.draft.draft.mode).toBe('cost');
+  expect(f.panel.render(80).join('\n')).toContain(
+    'Draft mode: inherit (project/profile) → cost',
+  );
+  expect(f.panel.render(80).join('\n')).toContain('Session mode: cost');
+  await f.draft.apply();
+  expect(f.adapters.getSnapshot().pendingControls?.mode).toBe('cost');
+  expect(f.adapters.getSnapshot().mode.mode).toBe('balanced');
+  await f.draft.undo();
+  expect(f.adapters.getSnapshot().pendingControls?.mode).toBeUndefined();
+  expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
+  f.panel.dispose();
+});

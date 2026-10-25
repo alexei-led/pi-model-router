@@ -185,3 +185,57 @@ describe('escalation hold', () => {
     expect(update(first.state, other, 'medium').floor).toBe('high');
   });
 });
+
+describe('cost-mode recovery at the tier ceiling', () => {
+  const messages = [user(), fail(), edit(), fail()];
+  it('arms a bounded high-tier recovery only when explicitly enabled', () => {
+    const recovered = updateEscalation(
+      {},
+      { messages, incumbent: 'high', holdTurns: 1, recoverCostHigh: true },
+    );
+    expect(recovered).toMatchObject({
+      floor: 'high',
+      costRecovery: true,
+      state: { floor: 'high', costRecovery: true },
+    });
+    expect(
+      updateEscalation({}, { messages, incumbent: 'high', holdTurns: 1 }).floor,
+    ).toBeUndefined();
+    expect(
+      updateEscalation(recovered.state, {
+        messages: [...messages, user('next')],
+        incumbent: undefined,
+        holdTurns: 1,
+      }).costRecovery,
+    ).toBe(true);
+    expect(
+      updateEscalation(recovered.state, {
+        messages: [...messages, user('next'), user('expired')],
+        incumbent: undefined,
+        holdTurns: 1,
+      }).costRecovery,
+    ).toBe(false);
+  });
+  it('re-arms for the same failure in a new user turn, without renewing the current turn indefinitely', () => {
+    const first = updateEscalation(
+      {},
+      { messages, incumbent: 'high', holdTurns: 0, recoverCostHigh: true },
+    );
+    const same = updateEscalation(first.state, {
+      messages,
+      incumbent: 'high',
+      holdTurns: 0,
+      recoverCostHigh: true,
+    });
+    expect(same.state).toBe(first.state);
+    const next = [user('a different goal'), fail(), edit(), fail()];
+    const again = updateEscalation(first.state, {
+      messages: next,
+      incumbent: 'high',
+      holdTurns: 0,
+      recoverCostHigh: true,
+    });
+    expect(again.costRecovery).toBe(true);
+    expect(again.state.anchor).not.toBe(first.state.anchor);
+  });
+});

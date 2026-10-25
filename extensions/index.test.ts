@@ -17,7 +17,7 @@ import {
   model,
   typeSafeClassifierRegistry,
 } from './test/fixtures';
-import type { RawRouterConfig } from './types';
+import type { RawRouterConfig, RouterUIAdapters } from './types';
 import * as ui from './ui';
 
 const stateMocks = vi.hoisted(() => ({
@@ -135,6 +135,101 @@ describe('index.ts (orchestrator)', () => {
       await command.handler(args, ctx as unknown as ExtensionCommandContext);
     expect(ctx.ui.notify).toHaveBeenCalled();
   };
+
+  it.each(['steering', 'follow-up'])(
+    'activates queued Settings mode only when a %s user message is consumed',
+    async (kind) => {
+      routerExtension(mockPi);
+      const ctx = buildMockCtx();
+      Object.assign(ctx.sessionManager, { getSessionId: () => 'owner' });
+      for (const handler of handlersFor('session_start'))
+        await handler({ reason: 'new' }, ctx);
+      let adapters: RouterUIAdapters | undefined;
+      const inspector = vi
+        .spyOn(ui, 'openRouterInspector')
+        .mockImplementation(async (_context, runtime) => {
+          adapters = runtime;
+          expect(
+            await runtime.applyControls({
+              profile: 'balanced',
+              action: 'apply',
+              changes: [{ key: 'mode', before: undefined, after: 'cost' }],
+            }),
+          ).toBe('applied');
+          return undefined;
+        });
+      try {
+        const command = mockPi.registerCommand.mock.calls.find(
+          ([name]) => name === 'router',
+        )?.[1];
+        if (!command) throw new Error('Missing router command');
+        await command.handler(
+          'settings',
+          ctx as unknown as ExtensionCommandContext,
+        );
+        if (!adapters) throw new Error('Missing UI adapter');
+        const emit = async (event: string, data: Record<string, unknown>) => {
+          for (const handler of eventListeners[event] ?? [])
+            await handler(data, ctx);
+        };
+        await emit('input', {
+          text: 'queued goal',
+          source: 'interactive',
+          streamingBehavior: kind === 'steering' ? 'steer' : 'followUp',
+        });
+        await emit('before_agent_start', {
+          messageType: 'custom',
+          message: { role: 'custom', content: 'Custom extension turn' },
+        });
+        await emit('message_end', {
+          message: { role: 'custom', content: 'Custom extension turn' },
+        });
+        await emit('message_end', { message: message() });
+        await emit('message_end', {
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool',
+            toolName: 'bash',
+            content: [{ type: 'text', text: 'ok' }],
+            isError: false,
+            timestamp: 1,
+          },
+        });
+        expect(adapters.getSnapshot().mode.mode).toBe('balanced');
+        expect(adapters.getSnapshot().pendingControls?.mode).toBe('cost');
+        const foreign = buildMockCtx();
+        Object.assign(foreign.sessionManager, {
+          getSessionId: () => 'foreign',
+        });
+        for (const handler of eventListeners.message_end ?? [])
+          await handler(
+            {
+              message: {
+                role: 'user',
+                content: 'Foreign owner goal',
+                timestamp: 2,
+              },
+            },
+            foreign,
+          );
+        expect(adapters.getSnapshot().mode.mode).toBe('balanced');
+        expect(adapters.getSnapshot().pendingControls?.mode).toBe('cost');
+        await emit('message_end', {
+          message: { role: 'user', content: `${kind} goal`, timestamp: 2 },
+        });
+        expect(adapters.getSnapshot().mode).toEqual({
+          mode: 'cost',
+          source: 'session',
+        });
+        expect(adapters.getSnapshot().pendingControls).toBeUndefined();
+        expect(mockPi.appendEntry.mock.calls.at(-1)?.[1]).toMatchObject({
+          modeOverride: 'cost',
+        });
+      } finally {
+        inspector.mockRestore();
+      }
+    },
+  );
 
   it('keeps an in-flight response and its cost when the selected model leaves the router', async () => {
     routerExtension(mockPi);

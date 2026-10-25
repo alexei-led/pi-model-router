@@ -14,7 +14,7 @@ A tier is not a tool-permission boundary or a spending limit.
 Already have an OpenAI or Claude profile? You do not need to copy an activity matrix.
 
 1. Update the router.
-2. Run `/router reload`.
+2. Restart Pi or run `/reload` to load the updated extension.
 3. Select your profile with `/router profile <name>`.
 4. Run `/router status`.
 5. Open `/router routes`.
@@ -199,7 +199,7 @@ Project `.pi/model-router.json` can tune cells and set `activityRouting`.
 It cannot choose, enable or approve a classifier, or change `activityPreset`.
 Use only project files you trust: explicit project routes can name other providers.
 
-[Routing modes](user-guide.md#choose-a-routing-mode) transform effective cells before advice.
+[Routing modes](routing-modes.md) transform effective cells before advice.
 Manual effort overrides and pins retain their existing priority.
 The router revalidates availability, input support and context fit before selection.
 Unsupported effort maps to the nearest supported level in Pi.

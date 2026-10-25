@@ -1,8 +1,11 @@
+import { isRouterMode } from '../domain';
 import type { RouterUIControls } from '../types';
 
 export const validateRouterUIControls = (
   controls: Readonly<RouterUIControls>,
 ): string | undefined => {
+  if (controls.mode !== undefined && !isRouterMode(controls.mode))
+    return 'Mode must be cost, balanced, quality or inherited.';
   if (
     controls.budget !== undefined &&
     (!Number.isFinite(controls.budget) || controls.budget <= 0)
