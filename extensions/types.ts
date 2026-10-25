@@ -37,6 +37,7 @@ export interface ModelDefinition {
 }
 
 export interface RoutedTierConfig {
+  activitySource?: 'builtin' | undefined;
   model: string;
   /** False for normalization defaults; omitted on legacy in-memory profiles. */
   thinkingExplicit?: boolean | undefined;
@@ -131,9 +132,12 @@ export interface ModeProvenance {
   readonly lever: ModeLever;
   /** Tier whose configured route the cell uses after the transform. */
   readonly sourceTier: RouterTier;
+  readonly recovery?: boolean | undefined;
 }
 
 export interface RouterProfile {
+  activityPreset?: 'auto' | 'off' | undefined;
+  activityPresetFamily?: 'openai' | 'anthropic' | undefined;
   mode?: RouterMode | undefined;
   /** Effective, re-normalized sparse overrides; omitted tiers use the generic cell. */
   activities?:
@@ -311,6 +315,7 @@ export const ROUTING_REASON_CODES = [
   'fallback',
   'budget',
   'escalation',
+  'cost-recovery',
   'legacy',
 ] as const;
 export type RoutingReasonCode = (typeof ROUTING_REASON_CODES)[number];
@@ -414,6 +419,7 @@ export interface RoutingDecision {
   modeLever?: ModeLever | undefined;
   /** Configured tier whose route a mode lever used. */
   modeSourceTier?: RouterTier | undefined;
+  costRecovery?: boolean | undefined;
   routingLatencyMs?: number | undefined;
   errorClass?: RoutingErrorClass | undefined;
   advisor?: AdvisorOutcome | undefined;
@@ -517,6 +523,7 @@ export type RouterUILifecycle =
 
 /** Flat fields make compare-and-set undo independent of unrelated edits. */
 export interface RouterUIControls {
+  mode?: RouterMode | undefined;
   pin: RouterPin;
   baseline: RouterPin;
   budget: number | undefined;
@@ -532,7 +539,7 @@ export interface RouterUIControls {
   thinkingMicro: ThinkingLevel | undefined;
 }
 export type RouterUIControlChange = {
-  [K in keyof RouterUIControls]: {
+  [K in keyof RouterUIControls]-?: {
     key: K;
     before: RouterUIControls[K];
     after: RouterUIControls[K];
@@ -553,6 +560,7 @@ export interface RouterUIRoute {
 }
 /** Effective configured override, not advice or an observed generation. */
 export type RouterUIActivityCell = {
+  source?: 'builtin' | undefined;
   activity: RouterActivity;
   configured: Readonly<RoutePair>;
   fallbacks: readonly string[];
@@ -574,18 +582,38 @@ export interface RouterUIChatModel {
   efforts: readonly ThinkingLevel[];
 }
 export interface RouterUIRouteCellState {
-  state: 'inherited' | 'override' | 'missing';
+  state: 'inherited' | 'builtin' | 'override' | 'missing';
   /** Opaque CAS token for normalized capability metadata; never rendered. */
   revision?: string | undefined;
   model?: string | undefined;
   thinking?: ThinkingLevel | undefined;
   fallbacks: readonly string[];
 }
+export type RouterUIRoutePreference = {
+  mode: ResolvedMode;
+} & (
+  | {
+      status: 'eligible';
+      route: Readonly<RoutePair>;
+      lever: ModeLever;
+      sourceTier: RouterTier;
+      bypass?: 'pin' | 'effort' | 'activity-off' | undefined;
+      fallback?: boolean | undefined;
+    }
+  | {
+      status: 'unknown' | 'unavailable';
+      route?: undefined;
+    }
+);
+
 export interface RouterUIRouteCell {
   activity: RouterActivity;
   tier: RouterTier;
   /** Current effective profile configuration, before queued UI changes. */
   current: RouterUIRouteCellState;
+  /** Normal text-only preference, before transient switch/recovery holds. */
+  preferred?: RouterUIRoutePreference | undefined;
+  pendingPreferred?: RouterUIRoutePreference | undefined;
   /** Next-user-boundary route value, when a transaction is already queued. */
   pending?: RouterUIRouteCellState | undefined;
   /** Configured generic route used by reset-to-generic. */
@@ -665,6 +693,7 @@ export interface RouterUISnapshot {
   reuse?: RoutingDecision['reuse'];
   bypassReason?: BypassReason | undefined;
   reason?: RoutingReasonCode | undefined;
+  costRecovery?: boolean | undefined;
   failure?: 'request-failed' | undefined;
   actual?: RouterUIRoute | undefined;
   advised?: RouterUIRoute | undefined;
@@ -682,6 +711,7 @@ export interface RouterUISnapshot {
   eligible: Readonly<Partial<Record<RouterTier, RouterUIRoute>>>;
   activityRouting: ActivityRouting;
   activityCells: readonly RouterUIActivityCell[];
+  activityPreset?: string | undefined;
   routeCells: readonly RouterUIRouteCell[];
   privacy: {
     advisorEnabled: boolean;
@@ -731,7 +761,7 @@ export interface RouterUIRuntimeState {
   readonly routerEnabled: boolean;
   readonly pinnedTierByProfile: RouterPinByProfile;
   readonly thinkingByProfile: RouterThinkingByProfile;
-  readonly modeOverride?: RouterMode | undefined;
+  modeOverride?: RouterMode | undefined;
   readonly lastDecision: RoutingDecision | undefined;
   readonly debugHistory: readonly RoutingDecision[];
   readonly debugEnabled?: boolean;

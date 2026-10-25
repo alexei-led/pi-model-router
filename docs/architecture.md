@@ -48,6 +48,8 @@ Every configured classifier uses Pi's public classifier registry and authenticat
 
 ## Route selection
 
+Configuration normalization adds [built-in activity presets](activity-routing.md) only to absent cells in recognized homogeneous profiles. Explicit cells retain generic inheritance. A built-in model change carries declared fallbacks, but not another target's capability limits. Generated target identities cannot be redirected by canonical-looking alias keys. Preset provenance is configuration/UI metadata, not additional classifier authority.
+
 ```mermaid
 flowchart TD
     Start["Validate request and eligible routes"] --> Policy["Continuation, pin, budget, then candidate count"]
@@ -110,7 +112,9 @@ pairs, and the advice fence contains the mode, so advice made under another
 mode cannot match. After advice, the matrix is rebuilt from the live mode, so
 only the current mode's cells generate. [Mode behavior](user-guide.md#choose-a-routing-mode).
 
-`escalation.ts` hashes a failing tool's name and normalized output. A repeated
+`escalation.ts` hashes a failing tool's name and normalized output. A validated cost-transformed high continuation can arm a balanced-high recovery, scoped by native branch ancestry, configuration identity and routing policy. The high cells are rebuilt before reuse/advice, and the recovery state enters the cache policy fence. Subsequent continuations retain the recovered immutable plan. Pins, manual effort, budgets and Google continuation constraints still win. This runtime-only hold is not persisted.
+
+`escalation.ts` also handles ordinary tier escalation. A repeated
 signature with a successful `edit`/`write` between, in one user turn, sets a
 floor one tier above the incumbent. The floor is anchored to a hash of the
 failing turn's user message (timestamp and content) and holds while that message
@@ -242,12 +246,15 @@ This diagnostic comparison does not itself select routes. `switch-policy.ts` sep
 A restored branch does not restore a server cache. Same-model effort changes without explicit metadata do not imply cache preservation.
 The [evaluation](evaluation.md#cost-method) states the cost assumptions and evidence limits.
 
+Queued controls activate at an owned user boundary: `before_agent_start` handles ordinary prompts, and the awaited user `message_end` handles consumed steering/follow-up messages. Input queueing, assistant messages and tool results do not activate them. Both paths share atomic validation, logical-model refresh and persistence.
+
 ## Module ownership
 
 | Module | Responsibility |
 | --- | --- |
 | `index.ts` | Wire Pi lifecycle hooks, extension state, branch restoration, commands, provider, and UI. |
 | `config.ts` | Load, merge, validate, and normalize configuration. |
+| `activity-presets.ts` | Exact-ID family recognition and complete built-in activity route declarations. No auth or provider transport. |
 | `domain.ts` | Parse canonical model references and validate pure tier, effort, and pin values; no config I/O. |
 | `routing.ts` | Build immutable eligible cell plans and apply baseline, pin, budget, input, context-fit, and effort policy. |
 | `modes.ts` | Resolve the routing mode and effective switch policy; transform a route pair for cost or quality. |
@@ -264,6 +271,7 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 | `switch-policy.ts` | Evaluate catalog switch estimates, exact-model effort/cache metadata, confidence override and cost holds. |
 | `state.ts` | Validate, copy, and persist allowlisted branch-safe snapshots. |
 | `commands.ts` | Register router commands and completions. |
+| `ui/preview.ts` | Project current and queued text-only preferences through the same matrix builder as generation. No auth or request-context attestation. |
 | `ui.ts` | Format and publish the route strip and expose the native inspector entrypoint. |
 | `ui/runtime.ts` | Own transient snapshots, queued control transactions, observations, and capability revalidation. |
 | `ui/controls.ts` | Validate control edits without terminal dependencies. |

@@ -279,6 +279,7 @@ describe('/router status', () => {
     expect(text).toContain('Pin: balanced:high');
     expect(text).toContain('$0.0500 / $10.00');
     expect(text).toContain('/router settings');
+    expect(text).toContain('Activity preset: none (unrecognized routes)');
     expect(text.split('\n').length).toBeLessThanOrEqual(7);
     expect(text).toContain('Last: medium → openai/gpt-4o-mini (medium)');
     expect(text).toContain('Warning 1');

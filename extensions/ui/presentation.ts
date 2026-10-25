@@ -3,6 +3,7 @@ import type {
   RouterUIAdviceObservation,
   RouterUIHistoryEntry,
   RouterUIRoute,
+  RouterUIRoutePreference,
   RouterUISnapshot,
 } from '../types';
 
@@ -15,24 +16,62 @@ export const formatRoute = (route: RouterUIRoute | undefined): string =>
     ? `${route.tier} → ${route.provider}/${route.model} · effort ${route.thinking}${route.activity ? ` · activity ${route.activity}` : route.routeCell ? ` · availability cell ${route.routeCell}` : ''}`
     : 'unknown / no observed generation';
 
+export const activityLabel = (
+  route: Pick<RouterUIRoute, 'activity' | 'routeCell'>,
+): string =>
+  route.activity ?? (route.routeCell ? `available ${route.routeCell}` : 'base');
+
 export const activityRoutingSummary = (snapshot: RouterUISnapshot): string =>
-  `Activity routing: ${snapshot.activityRouting} · ${snapshot.activityCells.length} override cells · session Routes editor`;
+  `Activity routing: ${snapshot.activityRouting} · ${snapshot.activityCells.length} activity cells${snapshot.activityPreset ? ` · preset ${snapshot.activityPreset} · ${snapshot.activityCells.filter((cell) => cell.source === 'builtin').length} built-in` : ''} · session Routes editor`;
+
+export const preferenceLine = (
+  value: RouterUIRoutePreference,
+  label = 'Preferred',
+): string => {
+  const mode = `${value.mode.mode} (${value.mode.source})`;
+  if (value.status !== 'eligible')
+    return `${label} · ${mode}: ${value.status === 'unknown' ? 'unknown (no registry)' : 'no text-eligible route'}`;
+  const detail =
+    value.bypass === 'pin'
+      ? `pin ${value.route.tier}; generic route`
+      : value.bypass === 'effort'
+        ? 'tier effort override'
+        : value.bypass === 'activity-off'
+          ? 'activity routing off; generic route'
+          : value.lever === 'model'
+            ? `model from ${value.sourceTier}`
+            : value.lever === 'effort'
+              ? 'effort step'
+              : 'configured pair';
+  return `${label} · ${mode}: ${value.route.model} · effort ${value.route.thinking} · ${detail}${value.fallback ? ' · declared fallback' : ''}`;
+};
 
 export const activityRouteLines = (snapshot: RouterUISnapshot): string[] => [
   'Unlisted cells use generic tiers, if configured.',
   ...(snapshot.activityCells.length
-    ? snapshot.activityCells.flatMap((cell) => [
-        `${cell.activity}/${cell.configured.tier}: configured ${cell.configured.model} · requested effort ${cell.configured.thinking}`,
-        `  ${
-          cell.availability === 'eligible'
-            ? `Text eligible: ${cell.eligible.provider}/${cell.eligible.model} · effort ${cell.eligible.thinking}`
-            : cell.availability === 'disabled'
-              ? 'Excluded (activity routing off)'
-              : cell.availability === 'unknown'
-                ? 'Text eligibility unknown (no registry)'
-                : 'No text-eligible attempt'
-        } · configured fallbacks: ${cell.fallbacks.join(' → ') || 'none'}`,
-      ])
+    ? snapshot.activityCells.flatMap((cell) => {
+        const preview = snapshot.routeCells.find(
+          (entry) =>
+            entry.activity === cell.activity &&
+            entry.tier === cell.configured.tier,
+        );
+        return [
+          `${cell.activity}/${cell.configured.tier}: configured ${cell.configured.model} · requested effort ${cell.configured.thinking}${cell.source === 'builtin' ? ' · built-in preset' : ''}`,
+          `  ${
+            cell.availability === 'eligible'
+              ? `Text eligible: ${cell.eligible.provider}/${cell.eligible.model} · effort ${cell.eligible.thinking}`
+              : cell.availability === 'disabled'
+                ? 'Excluded (activity routing off)'
+                : cell.availability === 'unknown'
+                  ? 'Text eligibility unknown (no registry)'
+                  : 'No text-eligible attempt'
+          } · configured fallbacks: ${cell.fallbacks.join(' → ') || 'none'}`,
+          ...(preview?.preferred ? [preferenceLine(preview.preferred)] : []),
+          ...(preview?.pendingPreferred
+            ? [preferenceLine(preview.pendingPreferred, 'Queued preferred')]
+            : []),
+        ];
+      })
     : ['No configured activity overrides.']),
 ];
 
@@ -75,6 +114,7 @@ export const routeReason = (snapshot: RouterUISnapshot): string => {
   if (snapshot.lifecycle === 'fallback') return 'Explicit generation fallback';
   if (snapshot.lifecycle === 'budget')
     return 'Over soft budget → eligible baseline';
+  if (snapshot.costRecovery) return 'Cost recovery · balanced high route';
   if (snapshot.reason === 'escalation')
     return 'Repeated tool failure · escalated one tier';
   if (

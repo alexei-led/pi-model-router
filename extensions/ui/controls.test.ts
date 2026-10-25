@@ -111,3 +111,15 @@ describe('UI control validation', () => {
     ).toBeUndefined();
   });
 });
+
+it.each([undefined, 'cost', 'balanced', 'quality'] as const)(
+  'accepts the session mode %s',
+  (mode) => {
+    expect(validateRouterUIControls({ ...controls, mode })).toBeUndefined();
+  },
+);
+it('rejects an unsupported mode at the UI adapter boundary', () => {
+  const invalid = { ...controls };
+  Reflect.set(invalid, 'mode', 'unsupported');
+  expect(validateRouterUIControls(invalid)).toContain('Mode must be');
+});

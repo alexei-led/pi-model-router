@@ -133,6 +133,7 @@ describe('Signal Panel', () => {
       expect(f.draft.dirty()).not.toHaveLength(0);
       f.panel.handleInput('\t');
       f.panel.handleInput('\t');
+      f.panel.handleInput('\t');
       const lines = f.panel.render(40);
       expect(lines.join('\n')).toContain('›Apply');
       expect(lines.join('\n')).toContain('Enter');
@@ -369,7 +370,7 @@ describe('ui/inspector.ts', () => {
     const text = f.panel.render(80).join('\n');
     expect(text).toContain('Actual generation · fallback');
     expect(text).toContain('Proposed · high');
-    expect(text).toContain('generic · medium · effort high');
+    expect(text).toContain('base · medium · effort high');
     expect(f.draft.draft.pin).toBe('high');
     f.panel.dispose();
   });
@@ -462,7 +463,7 @@ describe('ui/inspector.ts', () => {
     const f = fixture();
     f.panel.selectTab('settings');
     f.panel.advanced = true;
-    for (let i = 0; i < 3; i++) f.panel.handleInput('\t');
+    for (let i = 0; i < 4; i++) f.panel.handleInput('\t');
     f.panel.handleInput('\x0b'); // Input starts at column zero: delete to end
     f.panel.handleInput('0');
     expect(f.draft.draft.budget).toBe(0);
@@ -614,7 +615,7 @@ describe('native editable route cells in Routes', () => {
     const overview = browseRoutePages(f.panel, 56);
     expect(overview).toContain('Routes · sparse per-cell session overrides');
     expect(overview).toContain('Configured effort: low');
-    expect(overview).toContain('Effective effort now: high');
+    expect(overview).toContain('Mapped configured effort: high');
     expect(overview).toContain('applies to every');
     expect(overview).toContain('activity; clear it to use this cell effort.');
     f.panel.handleInput('\t'); // Model
@@ -753,7 +754,7 @@ describe('read-only activity routes in Routes', () => {
     f.panel.selectTab('settings');
     const normal = f.panel.render(80).join('\n');
     expect(normal).toContain(
-      'Activity routing: on · 2 override cells · session Routes editor',
+      'Activity routing: on · 2 activity cells · session Routes editor',
     );
     expect(normal).not.toContain('code/medium');
     expect(normal).not.toContain(' | Apply');
@@ -1003,4 +1004,66 @@ describe('route metadata and classifier input safety', () => {
     expect(f.draft.draft.advisor).toBe('fixture/text');
     f.panel.dispose();
   });
+});
+
+it.each([true, false])(
+  'reset-to-generic suppresses a built-in cell when the physical pair is identical=%s',
+  async (identical) => {
+    const f = fixture();
+    f.update({
+      routeCells: [
+        {
+          activity: 'code',
+          tier: 'high',
+          current: {
+            state: 'builtin',
+            model: 'test/strong',
+            thinking: 'high',
+            fallbacks: [],
+          },
+          generic: {
+            state: 'inherited',
+            model: identical ? 'test/strong' : 'test/base',
+            thinking: 'high',
+            fallbacks: [],
+          },
+        },
+      ],
+    });
+    f.draft.resetRoute('code', 'high');
+    expect(f.draft.routeState('code', 'high')).toMatchObject({
+      state: 'inherited',
+      model: identical ? 'test/strong' : 'test/base',
+    });
+    expect(f.adapters.applyRoutes).not.toHaveBeenCalled();
+    await f.draft.applyRoutes();
+    expect(f.adapters.applyRoutes).toHaveBeenCalledOnce();
+    expect(
+      vi.mocked(f.adapters.applyRoutes).mock.calls[0]?.[0].changes[0]?.after,
+    ).toBeUndefined();
+    f.panel.dispose();
+  },
+);
+
+it('exposes session mode beside pin and keeps Apply/Undo scoped to the queued change', async () => {
+  const f = fixture();
+  f.panel.selectTab('settings');
+  expect(f.panel.render(80).join('\n')).toContain(
+    'Session mode: inherit (project/profile)',
+  );
+  f.panel.handleInput('\t');
+  f.panel.handleInput('\t');
+  f.panel.handleInput('\x1b[C');
+  expect(f.draft.draft.mode).toBe('cost');
+  expect(f.panel.render(80).join('\n')).toContain(
+    'Draft mode: inherit (project/profile) → cost',
+  );
+  expect(f.panel.render(80).join('\n')).toContain('Session mode: cost');
+  await f.draft.apply();
+  expect(f.adapters.getSnapshot().pendingControls?.mode).toBe('cost');
+  expect(f.adapters.getSnapshot().mode.mode).toBe('balanced');
+  await f.draft.undo();
+  expect(f.adapters.getSnapshot().pendingControls?.mode).toBeUndefined();
+  expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
+  f.panel.dispose();
 });

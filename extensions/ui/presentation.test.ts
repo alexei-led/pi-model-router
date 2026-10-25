@@ -5,6 +5,7 @@ import type {
   RouterUISnapshot,
 } from '../types';
 import {
+  activityLabel,
   activityRouteLines,
   activityRoutingSummary,
   advisorName,
@@ -213,7 +214,7 @@ it('distinguishes classified activity from local availability-cell provenance', 
 describe('activity override presentation', () => {
   it('shows mode, generic inheritance and an explicit empty state', () => {
     expect(activityRoutingSummary(snapshot)).toBe(
-      'Activity routing: on · 0 override cells · session Routes editor',
+      'Activity routing: on · 0 activity cells · session Routes editor',
     );
     expect(activityRouteLines(snapshot)).toEqual([
       'Unlisted cells use generic tiers, if configured.',
@@ -423,4 +424,12 @@ describe('routing observability', () => {
     expect(historyStatus(enabled)).toContain('no decisions retained yet');
     expect(historyStatus(value)).toContain('last 50 observations');
   });
+});
+
+it.each([
+  [{}, 'base'],
+  [{ routeCell: 'code' as const }, 'available code'],
+  [{ activity: 'debug' as const, routeCell: 'debug' as const }, 'debug'],
+])('labels activity provenance %j as %s', (route, label) => {
+  expect(activityLabel(route)).toBe(label);
 });

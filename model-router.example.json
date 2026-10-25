@@ -41,13 +41,17 @@
   "maxSessionBudget": 1,
   "models": {
     "strong": {
-      "model": "anthropic/claude-haiku-5-5",
+      "model": "anthropic/claude-opus-5-5",
       "contextWindow": 200000,
       "effortCacheSharing": "unknown"
     },
     "fast": {
       "model": "anthropic/claude-haiku-5-5",
       "contextWindow": 200000,
+      "effortCacheSharing": "unknown"
+    },
+    "worker": {
+      "model": "anthropic/claude-sonnet-5-5",
       "effortCacheSharing": "unknown"
     }
   },
@@ -63,7 +67,7 @@
         "thinking": "high"
       },
       "medium": {
-        "model": "strong",
+        "model": "worker",
         "thinking": "medium"
       },
       "low": {
@@ -88,7 +92,8 @@
             "fallbacks": []
           }
         }
-      }
+      },
+      "activityPreset": "auto"
     },
     "work": {
       "mode": "cost",
@@ -106,6 +111,30 @@
       "low": {
         "model": "fast",
         "thinking": "low"
+      },
+      "activityPreset": "auto"
+    },
+    "openai": {
+      "activityPreset": "auto",
+      "mode": "balanced",
+      "advisor": {
+        "models": ["typesafe/jev-1.14.0"]
+      },
+      "micro": {
+        "model": "openai-codex/gpt-6-luna",
+        "thinking": "off"
+      },
+      "low": {
+        "model": "openai-codex/gpt-6-luna",
+        "thinking": "high"
+      },
+      "medium": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "thinking": "medium"
+      },
+      "high": {
+        "model": "openai-codex/gpt-6.1-sol",
+        "thinking": "high"
       }
     }
   }

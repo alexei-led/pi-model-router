@@ -68,6 +68,7 @@ describe('state.ts', () => {
       { lastDecision: { ...decision, advisor: 'remote' } },
       { modeOverride: 'thrifty' },
       { lastDecision: { ...decision, escalatedFrom: 'ultra' } },
+      { lastDecision: { ...decision, costRecovery: 'invalid' } },
     ])
       expect(isRouterPersistedState({ ...valid, ...invalid })).toBe(false);
   });
@@ -622,4 +623,24 @@ describe('activity snapshots and native ownership', () => {
       }),
     ).toBe(false);
   });
+});
+
+it('persists the local recovery diagnostic but never incidental recovery scope or provider text', () => {
+  const raw = {
+    ...decision,
+    costRecovery: true,
+    reasonCode: 'cost-recovery' as const,
+    recoveryScope: {
+      config: { token: 'fixture-private' },
+      branch: ['branch-private'],
+    },
+  };
+  const saved = snapshotDecision(raw);
+  expect(saved.costRecovery).toBe(true);
+  expect(saved.reasonCode).toBe('cost-recovery');
+  expect(JSON.stringify(saved)).not.toMatch(
+    /fixture-private|branch-private|recoveryScope/u,
+  );
+  Reflect.set(raw, 'costRecovery', 'provider explanation');
+  expect(snapshotDecision(raw).costRecovery).toBeUndefined();
 });

@@ -381,8 +381,9 @@ export const parseActivity = (
 };
 
 const ACTIVITY_CRITERIA: Record<RouterActivity | 'uncertain', string> = {
-  code: 'Implement or modify executable code and its tests in an established direction.',
-  debug: 'Diagnose and fix an observed failure or unexpected behavior.',
+  code: 'Implement or modify executable code and tests in an established direction. An observed failure with an unknown cause is debug, even when its fix is requested.',
+  debug:
+    'Diagnose an observed failure or unexpected behavior, usually including its fix. Errors, panics and failing tests with an unknown cause are debug, not code or ops.',
   explore:
     'Investigate, locate or understand existing code, facts or behavior without a primary implementation goal.',
   plan: 'Design an approach or architecture, decide tradeoffs or sequence work before implementation.',

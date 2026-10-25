@@ -410,6 +410,7 @@ const applyModeToCell = (
   mode: RouterMode,
   budgetExceeded: boolean,
   contextTokens: number,
+  recoverCostHigh = false,
 ): ModeCell => {
   const configAt = (tier: RouterTier) => cellProfile[tier] ?? generic[tier];
   const resolved = { ...generic, ...cellProfile };
@@ -428,8 +429,10 @@ const applyModeToCell = (
   for (const tier of ROUTER_TIERS) {
     // A manual effort override is a deliberate choice; the mode leaves it alone.
     if (!cellProfile[tier] || thinkingOverrides?.[tier]) continue;
+    const recovery =
+      recoverCostHigh && mode === 'cost' && tier === 'high' && !budgetExceeded;
     const result = transformRoute({
-      mode,
+      mode: recovery ? 'balanced' : mode,
       tier,
       routeAt: (target) => {
         const pair = primaries.find((entry) => entry.tier === target);
@@ -457,6 +460,7 @@ const applyModeToCell = (
       mode,
       lever: result.lever,
       sourceTier: result.sourceTier,
+      ...(recovery ? { recovery: true } : {}),
     });
     if (result.lever === 'none') continue;
     next[tier] = configAt(result.sourceTier);
@@ -478,7 +482,11 @@ export const buildRouteMatrix = (
   thinkingOverrides?: RouterThinkingByTier,
   activityRouting = true,
   pinnedTier?: RouterTier,
-  mode?: { mode: RouterMode; budgetExceeded: boolean },
+  mode?: {
+    mode: RouterMode;
+    budgetExceeded: boolean;
+    recoverCostHigh?: boolean;
+  },
 ): RouteMatrix => {
   const cells = [
     { cell: undefined, profile },
@@ -501,6 +509,7 @@ export const buildRouteMatrix = (
             mode.mode,
             mode.budgetExceeded,
             contextTokens,
+            mode.recoverCostHigh,
           )
         : { profile: cell.profile, thinkingOverrides, provenance: {} };
     return {

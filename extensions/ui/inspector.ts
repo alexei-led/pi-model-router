@@ -23,6 +23,7 @@ import type {
 import { ROUTER_ACTIVITIES, ROUTER_TIERS, ROUTER_UI_VIEWS } from '../types';
 import { validateRouterUIControls } from './controls';
 import {
+  activityLabel,
   activityRouteLines,
   activityRoutingSummary,
   advisorName,
@@ -31,6 +32,7 @@ import {
   formatMode,
   historyStatus,
   policySourceNote,
+  preferenceLine,
   formatRoute as route,
   routeMix,
   routeReason,
@@ -42,6 +44,7 @@ import {
 
 const keys = [
   'pin',
+  'mode',
   'baseline',
   'budget',
   'advisor',
@@ -60,6 +63,7 @@ const tabs = ROUTER_UI_VIEWS.map(
 );
 const classifierFields = ['advisor', 'timeout', 'reviewEveryRequests'] as const;
 const fieldNames: Record<keyof RouterUIControls, string> = {
+  mode: 'Session mode',
   pin: 'Pin tier',
   baseline: 'Baseline',
   budget: 'Soft budget ($)',
@@ -79,38 +83,43 @@ const display = (value: unknown): string =>
 const money = (value: number | undefined): string =>
   value === undefined ? 'unknown (not free)' : `$${value.toFixed(4)}`;
 const controlDisplay = (key: keyof RouterUIControls, value: unknown): string =>
-  key === 'reviewEveryRequests' && value === 0
-    ? 'off'
-    : key === 'reviewEveryRequests' || key === 'costHorizon'
-      ? `${String(value)} requests`
-      : (key === 'costSensitivity' || key === 'strongAdviceConfidence') &&
-          typeof value === 'number'
-        ? `${Math.round(value * 100)}%`
-        : display(value);
+  key === 'mode' && value === undefined
+    ? 'inherit (project/profile)'
+    : key === 'reviewEveryRequests' && value === 0
+      ? 'off'
+      : key === 'reviewEveryRequests' || key === 'costHorizon'
+        ? `${String(value)} requests`
+        : (key === 'costSensitivity' || key === 'strongAdviceConfidence') &&
+            typeof value === 'number'
+          ? `${Math.round(value * 100)}%`
+          : display(value);
 const controlChoices = (
   field: keyof RouterUIControls,
   snapshot: RouterUISnapshot,
   draft: RouterUIControls,
 ): (string | number | undefined)[] => {
   const choices: (string | number | undefined)[] =
-    field === 'advisor'
-      ? [
-          undefined,
-          ...new Set(
-            snapshot.classifiers
-              .filter((model) => model.textInput)
-              .map((model) => model.model),
-          ),
-        ]
-      : field.startsWith('thinking')
-        ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
-        : field === 'reviewEveryRequests'
-          ? [0, 2, 4, 8]
-          : field === 'costHorizon'
-            ? [1, 3, 5, 10]
-            : field === 'costSensitivity' || field === 'strongAdviceConfidence'
-              ? [0, 0.25, 0.5, 0.75, 0.9, 0.95, 1]
-              : ['auto', ...ROUTER_TIERS];
+    field === 'mode'
+      ? [undefined, 'cost', 'balanced', 'quality']
+      : field === 'advisor'
+        ? [
+            undefined,
+            ...new Set(
+              snapshot.classifiers
+                .filter((model) => model.textInput)
+                .map((model) => model.model),
+            ),
+          ]
+        : field.startsWith('thinking')
+          ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+          : field === 'reviewEveryRequests'
+            ? [0, 2, 4, 8]
+            : field === 'costHorizon'
+              ? [1, 3, 5, 10]
+              : field === 'costSensitivity' ||
+                  field === 'strongAdviceConfidence'
+                ? [0, 0.25, 0.5, 0.75, 0.9, 0.95, 1]
+                : ['auto', ...ROUTER_TIERS];
   return choices.includes(draft[field]) ? choices : [draft[field], ...choices];
 };
 
@@ -408,7 +417,7 @@ export class RouterUIDraft {
     const before = cloneRouteState(
       existing?.before ?? cell.pending ?? cell.current,
     );
-    if (before.state !== 'override') {
+    if (before.state !== 'override' && before.state !== 'builtin') {
       this.routeChanges.delete(key);
       return;
     }
@@ -670,7 +679,7 @@ export class RouterUIInspector implements Component {
     if (this.currentTab() !== 'settings') return [];
     return this.advanced
       ? keys.filter((key) => !classifierFields.some((field) => field === key))
-      : ['pin'];
+      : ['pin', 'mode'];
   };
   private actions = (): string[] => [
     ...(this.currentTab() === 'now' ? ['Why this route?'] : []),
@@ -1020,7 +1029,14 @@ export class RouterUIInspector implements Component {
       selected(2, `Configured effort: ${state.thinking ?? 'not configured'}`),
       `Cell state: ${state.state}${pending ? ' · queued' : ''}${draft ? ' · draft' : ''}`,
       `Current configuration: ${current?.model ?? 'not configured'} · effort ${current?.thinking ?? '—'} · ${current?.state ?? 'missing'}`,
-      `Effective effort now: ${effective ?? 'unknown / unavailable'}`,
+      `Mapped configured effort: ${effective ?? 'unknown / unavailable'}`,
+      ...(cell?.preferred
+        ? [preferenceLine(cell.preferred, 'Current preferred')]
+        : []),
+      ...(cell?.pendingPreferred
+        ? [preferenceLine(cell.pendingPreferred, 'Queued preferred')]
+        : []),
+      'Preferred is a text-only preview, before switch and recovery holds.',
       ...(tierOverride
         ? [
             this.theme.fg(
@@ -1183,6 +1199,7 @@ export class RouterUIInspector implements Component {
     return [
       this.theme.fg('accent', 'Configured routes · not actual generation'),
       activityRoutingSummary(s),
+      `Mode: ${formatMode(s)} · preferred text-only routes below`,
       '',
       'Activity'.padEnd(9) +
         ['micro', 'low', 'med', 'high'].map((tier) => tier.padEnd(6)).join(''),
@@ -1196,11 +1213,13 @@ export class RouterUIInspector implements Component {
               );
               const state = this.editor.routeState(activity, tier);
               const marker =
-                state.state === 'override'
-                  ? 'O'
-                  : state.state === 'inherited'
-                    ? 'I'
-                    : '—';
+                state.state === 'builtin'
+                  ? 'B'
+                  : state.state === 'override'
+                    ? 'O'
+                    : state.state === 'inherited'
+                      ? 'I'
+                      : '—';
               const draft = dirty.some(
                 (entry) => entry.activity === activity && entry.tier === tier,
               );
@@ -1213,7 +1232,7 @@ export class RouterUIInspector implements Component {
             .join(''),
       ),
       '',
-      'I inherited · O override · — missing',
+      'B built-in · I inherited · O override · — missing',
       '* draft · + queued for next user turn',
       'Edit cell opens model, effort and ordered fallback details.',
       '',
@@ -1270,7 +1289,7 @@ export class RouterUIInspector implements Component {
           ? [
               this.theme.fg(
                 'success',
-                (actual.activity ?? 'generic') +
+                activityLabel(actual) +
                   ' · ' +
                   actual.tier +
                   ' · effort ' +
@@ -1323,9 +1342,11 @@ export class RouterUIInspector implements Component {
       ];
     }
     return [
-      muted(`Mode: ${formatMode(s)} · change with /router mode`),
+      muted(
+        `Mode: ${formatMode(s)} · queued selector below; /router mode changes next request`,
+      ),
       muted(activityRoutingSummary(s)),
-      muted('Pin / effort / baseline: this profile.'),
+      muted('Pin / effort / baseline: this profile. Mode: session-wide.'),
       muted('Budget / switch policy: session-wide.'),
       muted('Classifier selection and deadline: Classifier tab.'),
       muted('Apply queues the next user turn; not tool turns.'),
@@ -1441,7 +1462,7 @@ export class RouterUIInspector implements Component {
           .dirty()
           .flatMap((change) =>
             wrapTextWithAnsi(
-              `Draft ${change.key}: ${display(change.before)} → ${display(change.after)}`,
+              `Draft ${change.key}: ${controlDisplay(change.key, change.before)} → ${controlDisplay(change.key, change.after)}`,
               w,
             ),
           );

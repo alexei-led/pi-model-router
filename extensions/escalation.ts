@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Message } from '@earendil-works/pi-ai';
-import type { RouterTier } from './types';
+import type { RouterConfig, RouterTier } from './types';
 import { ROUTER_TIERS } from './types';
 
 /**
@@ -75,6 +75,12 @@ export interface EscalationState {
   /** The user message that started the failing turn. */
   readonly anchor?: string;
   readonly holdTurns?: number;
+  readonly costRecovery?: boolean;
+  readonly recoveryScope?: {
+    readonly config: RouterConfig;
+    readonly policy: string;
+    readonly branch: readonly string[];
+  };
 }
 
 const tierAbove = (tier: RouterTier): RouterTier | undefined => {
@@ -87,7 +93,7 @@ const tierAbove = (tier: RouterTier): RouterTier | undefined => {
  * and holds that floor for `holdTurns` further user turns. The hold applies
  * only while the failing turn's user message is in the context, so another
  * branch or a compaction that drops it releases the floor. A signature
- * escalates once; at the top tier it stays unconsumed.
+ * escalates once. At high it stays unconsumed unless cost recovery is explicitly enabled for a validated continuation.
  */
 export const updateEscalation = (
   state: EscalationState,
@@ -95,15 +101,24 @@ export const updateEscalation = (
     messages: readonly Message[];
     incumbent: RouterTier | undefined;
     holdTurns: number;
+    recoverCostHigh?: boolean;
   },
-): { state: EscalationState; floor: RouterTier | undefined } => {
+): {
+  state: EscalationState;
+  floor: RouterTier | undefined;
+  costRecovery?: boolean;
+} => {
   const users = input.messages.filter((message) => message.role === 'user');
   const signature = repeatedFailure(input.messages);
-  const floor =
-    signature && signature !== state.signature && input.incumbent
-      ? tierAbove(input.incumbent)
-      : undefined;
   const current = users.at(-1);
+  const recover = input.recoverCostHigh === true && input.incumbent === 'high';
+  const newFailure =
+    signature !== state.signature ||
+    (recover && current !== undefined && userKey(current) !== state.anchor);
+  const floor =
+    signature && newFailure && input.incumbent
+      ? (tierAbove(input.incumbent) ?? (recover ? 'high' : undefined))
+      : undefined;
   const next =
     signature && floor && current
       ? {
@@ -111,6 +126,7 @@ export const updateEscalation = (
           floor,
           anchor: userKey(current),
           holdTurns: input.holdTurns,
+          ...(recover ? { costRecovery: true } : {}),
         }
       : state;
   // Only the hold window can contain the anchor; hash nothing without a hold.
@@ -119,5 +135,9 @@ export const updateEscalation = (
     users
       .slice(-((next.holdTurns ?? 0) + 1))
       .some((message) => userKey(message) === next.anchor);
-  return { state: next, floor: held ? next.floor : undefined };
+  return {
+    state: next,
+    floor: held ? next.floor : undefined,
+    ...(next.costRecovery ? { costRecovery: held } : {}),
+  };
 };

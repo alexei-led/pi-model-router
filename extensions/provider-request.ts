@@ -10,7 +10,7 @@ import { runClassifierDetailed } from './classifier';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
 import { hasImageAttachment } from './context';
 import { parseCanonicalModelRef } from './domain';
-import { updateEscalation } from './escalation';
+import { type EscalationState, updateEscalation } from './escalation';
 import { effectivePolicy } from './modes';
 import {
   createClassifierFlightKey,
@@ -154,7 +154,7 @@ const modeFields = (
   plan: RoutePlan,
 ): Pick<
   RoutingDecision,
-  'mode' | 'modeSource' | 'modeLever' | 'modeSourceTier'
+  'mode' | 'modeSource' | 'modeLever' | 'modeSourceTier' | 'costRecovery'
 > =>
   plan.mode
     ? {
@@ -164,6 +164,7 @@ const modeFields = (
         )?.source,
         modeLever: plan.mode.lever,
         modeSourceTier: plan.mode.sourceTier,
+        ...(plan.mode.recovery ? { costRecovery: true } : {}),
       }
     : {};
 
@@ -176,6 +177,33 @@ const decisionForPlan = (
   routeCell: plan.cell,
   ...modeFields(input, plan),
 });
+
+const branchExtends = (
+  ancestor: readonly string[],
+  branch: readonly string[],
+): boolean =>
+  ancestor.length > 0 &&
+  branch.length > 0 &&
+  branch.every((id) => typeof id === 'string' && id.length > 0) &&
+  ancestor.every(
+    (id, index) =>
+      typeof id === 'string' && id.length > 0 && branch[index] === id,
+  );
+
+const recoveryScopeMatches = (
+  state: EscalationState,
+  input: RequestRouteInput,
+  policy: string,
+): boolean => {
+  const scope = state.recoveryScope;
+  return (
+    !!scope &&
+    scope.config === input.config &&
+    scope.policy === policy &&
+    input.getCurrentMode().mode === 'cost' &&
+    branchExtends(scope.branch, input.identity.branch)
+  );
+};
 
 const canReuseContinuation = (
   input: RequestRouteInput,
@@ -191,12 +219,7 @@ const canReuseContinuation = (
     record.policy !== policy ||
     record.config !== input.config ||
     record.decision.profile !== input.profileName ||
-    input.identity.branch.length === 0 ||
-    !input.identity.branch.every(
-      (id) => typeof id === 'string' && id.length > 0,
-    ) ||
-    record.branch.length === 0 ||
-    !record.branch.every((id, index) => input.identity.branch[index] === id) ||
+    !branchExtends(record.branch, input.identity.branch) ||
     assistant.provider !== record.decision.targetProvider ||
     assistant.model !== record.decision.targetModelId ||
     !matrix.plans.some(
@@ -729,12 +752,15 @@ const continueCompatibleRoute = (
         pair.model === priorRef &&
         (mustContinueGoogle || pair.tier === previous?.tier),
     );
+  // A mode change can alter effort or model. Do not invent another activity to reuse a model.
   const match =
     compatible.find(
       ({ plan, pair }) =>
         plan.cell === previous?.routeCell &&
         pair.thinking === previous?.thinking,
-    ) ?? compatible[0];
+    ) ??
+    compatible.find(({ plan }) => plan.cell === previous?.routeCell) ??
+    (mustContinueGoogle ? compatible[0] : undefined);
   if (!match && mustContinueGoogle)
     throw new Error('No compatible route for Google tool continuation.');
   if (!match) return selected;
@@ -744,7 +770,10 @@ const continueCompatibleRoute = (
       ...decisionForPair(input.profileName, match.pair, 'continuation'),
       routeCell: match.plan.cell,
       ...modeFields(input, match.plan),
-      activity: previous?.activity,
+      activity:
+        match.plan.cell === previous?.routeCell
+          ? previous?.activity
+          : undefined,
       advisor: selected.decision.advisor,
       bypassReason: selected.decision.bypassReason,
     },
@@ -760,6 +789,7 @@ const applyEscalation = (
   selected: SelectedRoute,
   matrix: RouteMatrix,
   budget: boolean,
+  policy: string,
 ): SelectedRoute => {
   const { state, floor } = updateEscalation(input.cache.escalation(), {
     messages: input.context.messages,
@@ -768,6 +798,11 @@ const applyEscalation = (
       .escalationHoldTurns,
   });
   input.cache.setEscalation(state);
+  if (
+    state.costRecovery &&
+    (!recoveryScopeMatches(state, input, policy) || budget)
+  )
+    return selected;
   if (!floor || tierRank(selected.plan.tier) >= tierRank(floor))
     return selected;
   const plan = [...ROUTER_TIERS]
@@ -809,24 +844,6 @@ export const prepareRouterRequest = async (
   const budget =
     input.config.maxSessionBudget !== undefined &&
     input.accumulatedCost >= input.config.maxSessionBudget;
-  const matrixFor = (tokens: number, mode = input.mode.mode) =>
-    buildRouteMatrix(
-      input.profile,
-      (provider, id) => input.registry.find(provider, id),
-      imageAttached,
-      tokens,
-      input.thinkingOverrides,
-      input.config.activityRouting !== 'off',
-      input.pinnedTier,
-      { mode, budgetExceeded: budget },
-    );
-  const matrix = matrixFor(contextTokens);
-  let currentMatrix = matrix;
-  // After advice, rebuild from the live mode so only the current matrix generates.
-  const available = () => {
-    currentMatrix = matrixFor(contextTokens, input.getCurrentMode().mode);
-    return currentMatrix;
-  };
   const toolContinuation = input.context.messages.at(-1)?.role === 'toolResult';
   const latest = input.context.messages.findLast(
     (entry) => entry.role === 'assistant',
@@ -835,7 +852,7 @@ export const prepareRouterRequest = async (
   const mustContinueGoogle = priorAssistant
     ? requiresGoogleContinuation(priorAssistant)
     : false;
-  const policy = JSON.stringify([
+  const basePolicy = JSON.stringify([
     input.mode.mode,
     input.profileName,
     input.profile,
@@ -845,10 +862,96 @@ export const prepareRouterRequest = async (
     input.config.activityRouting,
     budget,
   ]);
+  const held = updateEscalation(input.cache.escalation(), {
+    messages: input.context.messages,
+    incumbent: undefined,
+    holdTurns: 0,
+  });
+  let recovering =
+    held.costRecovery === true &&
+    recoveryScopeMatches(held.state, input, basePolicy) &&
+    !budget &&
+    !input.pinnedTier &&
+    !(toolContinuation && mustContinueGoogle);
+  const matrixFor = (tokens: number, mode = input.mode.mode) =>
+    buildRouteMatrix(
+      input.profile,
+      (provider, id) => input.registry.find(provider, id),
+      imageAttached,
+      tokens,
+      input.thinkingOverrides,
+      input.config.activityRouting !== 'off',
+      input.pinnedTier,
+      { mode, budgetExceeded: budget, recoverCostHigh: recovering },
+    );
+  let matrix = matrixFor(contextTokens);
+  let currentMatrix = matrix;
+  const available = () => {
+    currentMatrix = matrixFor(contextTokens, input.getCurrentMode().mode);
+    return currentMatrix;
+  };
   const turn = input.identity.turn;
-  const continuationRoute = toolContinuation
+  let policy = JSON.stringify([basePolicy, recovering]);
+  let continuationRoute = toolContinuation
     ? canReuseContinuation(input, matrix, policy, priorAssistant)
     : undefined;
+  if (
+    continuationRoute &&
+    !input.pinnedTier &&
+    !budget &&
+    !mustContinueGoogle &&
+    continuationRoute.plan.tier === 'high' &&
+    continuationRoute.plan.mode?.mode === 'cost' &&
+    continuationRoute.plan.mode.lever !== 'none'
+  ) {
+    const recovery = updateEscalation(input.cache.escalation(), {
+      messages: input.context.messages,
+      incumbent: 'high',
+      recoverCostHigh: true,
+      holdTurns: effectivePolicy(input.config, 'cost').escalationHoldTurns,
+    });
+    if (recovery.costRecovery && recovery.state !== input.cache.escalation()) {
+      recovering = true;
+      const recoveredMatrix = matrixFor(
+        contextTokens,
+        input.getCurrentMode().mode,
+      );
+      const prior = continuationRoute;
+      const plan =
+        recoveredMatrix.plans.find(
+          (entry) => entry.tier === 'high' && entry.cell === prior.plan.cell,
+        ) ??
+        recoveredMatrix.plans.find(
+          (entry) => entry.tier === 'high' && !entry.cell,
+        );
+      if (plan?.mode?.recovery) {
+        input.cache.setEscalation({
+          ...recovery.state,
+          recoveryScope: {
+            config: input.config,
+            policy: basePolicy,
+            branch: [...input.identity.branch],
+          },
+        });
+        matrix = recoveredMatrix;
+        currentMatrix = matrix;
+        policy = JSON.stringify([basePolicy, recovering]);
+        continuationRoute = {
+          plan,
+          decision: {
+            ...decisionForPlan(input, plan, 'cost-recovery'),
+            activity: prior.decision.activity,
+            advisor: 'bypassed',
+            bypassReason: 'tool-continuation',
+          },
+        };
+      } else {
+        // An ineligible recovery proposal must not reset a valid running task to baseline.
+        recovering = false;
+      }
+    }
+  }
+
   let selected = toolContinuation
     ? continuationRoute
     : turn
@@ -891,7 +994,13 @@ export const prepareRouterRequest = async (
       mustContinueGoogle,
     );
   if (!input.pinnedTier && !(toolContinuation && mustContinueGoogle))
-    selected = applyEscalation(input, selected, currentMatrix, budget);
+    selected = applyEscalation(
+      input,
+      selected,
+      currentMatrix,
+      budget,
+      basePolicy,
+    );
   if (toolContinuation && !mustContinueGoogle)
     scheduleBackgroundReview(
       input,

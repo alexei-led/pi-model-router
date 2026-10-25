@@ -15,7 +15,12 @@ import {
   isRoutingReasonCode,
   ROUTER_TIERS,
 } from './types';
-import { formatMode, routeReason, routerTone } from './ui/presentation';
+import {
+  activityLabel,
+  formatMode,
+  routeReason,
+  routerTone,
+} from './ui/presentation';
 
 export { openRouterInspector } from './ui/inspector';
 
@@ -25,6 +30,7 @@ const getDecisionFlags = (decision: RoutingDecision): string[] => {
   if (decision.activity) flags.push(`activity=${decision.activity}`);
   else if (decision.routeCell)
     flags.push(`availability-cell=${decision.routeCell}`);
+  if (decision.costRecovery) flags.push('cost-recovery');
   if (decision.isFallback) flags.push('fallback');
   if (decision.isBudgetForced) flags.push('budget-limit');
   if (decision.isGenerationFailed) flags.push('failed');
@@ -319,7 +325,7 @@ export const formatDecision = (decision: RoutingDecision): string => {
   const advisor = formatAdvisorDetail(decision);
   const generation = formatGenerationDetail(decision);
   const switchCost = decision.switchCost
-    ? `switch ${decision.switchCost.reason} · horizon ${decision.switchCost.horizonRequests} · stay ${decision.switchCost.stayUsd === undefined ? 'unknown' : `$${decision.switchCost.stayUsd.toFixed(4)}`} · target ${decision.switchCost.switchUsd === undefined ? 'unknown' : `$${decision.switchCost.switchUsd.toFixed(4)}`}${decision.proposedRoute ? ` · proposed ${decision.proposedRoute.tier}/${decision.proposedRoute.activity ?? 'generic'} ${decision.proposedRoute.model} [${decision.proposedRoute.thinking}]` : ''}`
+    ? `switch ${decision.switchCost.reason} · horizon ${decision.switchCost.horizonRequests} · stay ${decision.switchCost.stayUsd === undefined ? 'unknown' : `$${decision.switchCost.stayUsd.toFixed(4)}`} · target ${decision.switchCost.switchUsd === undefined ? 'unknown' : `$${decision.switchCost.switchUsd.toFixed(4)}`}${decision.proposedRoute ? ` · proposed ${decision.proposedRoute.tier}/${decision.proposedRoute.activity ?? 'base'} ${decision.proposedRoute.model} [${decision.proposedRoute.thinking}]` : ''}`
     : undefined;
   const mode = decision.mode
     ? ` {mode ${decision.mode}${decision.modeSource ? ` (${decision.modeSource})` : ''}${decision.modeLever && decision.modeLever !== 'none' ? ` · ${decision.modeLever} lever from ${decision.modeSourceTier ?? decision.tier}` : ''}}`
@@ -375,9 +381,9 @@ export const updateRouterUIStrip = (
       return truncateToWidth(`Router / ${snapshot.profile} · ${state}`, width);
     const detail =
       width >= 70
-        ? ` · ${route.activity ?? 'generic'} · ${route.tier} · effort ${route.thinking}`
+        ? ` · ${activityLabel(route)} · ${route.tier} · effort ${route.thinking}`
         : width >= 30
-          ? ` · ${route.activity ?? 'generic'}`
+          ? ` · ${activityLabel(route)}`
           : '';
     const modelWidth = Math.max(1, width - visibleWidth(suffix + detail));
     const model =

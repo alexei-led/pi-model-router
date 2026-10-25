@@ -1,6 +1,6 @@
 {
   "name": "@alexeiled/pi-model-router",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "type": "module",
   "files": [
     "extensions",
@@ -75,9 +75,12 @@
     "@earendil-works/pi-ai": "^1.1.0",
     "@earendil-works/pi-coding-agent": "^1.1.0",
     "@earendil-works/pi-tui": "^1.1.0",
-    "@vitest/coverage-v8": "5.0.1",
+    "@vitest/coverage-v8": "5.0.5",
     "knip": "6.40.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "5.0.5"
+  },
+  "overrides": {
+    "undici": "8.12.2"
   }
 }
