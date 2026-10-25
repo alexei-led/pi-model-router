@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.17.0] - 2026-10-25
+
+### Summary
+
+Recognized OpenAI and Claude profiles receive built-in activity routes. Settings now selects modes and previews preferred routes.
+
+### Changes
+
+- Add seven-activity, four-tier defaults. Exact family recognition preserves provider IDs. Unknown or mixed profiles retain explicit routes.
+- Explicit sparse cells retain generic inheritance. `null` restores the base route. User-level `activityPreset: "off"` disables defaults.
+- Mark built-ins `B`, rename strip `generic` to `base`, and distinguish configured, current/queued preferred and actual routes.
+- Add a session mode selector beside Pin. Apply queues the next user message, including consumed steering/follow-ups. `/router mode` still changes the next request. Activated modes survive resume, not `/new`.
+- Recover a validated cost-transformed high tool route after the same failure repeats with a successful edit/write between. Temporarily restore its balanced high cell without changing the logical mode. Keep pins, manual effort, budgets, native branch/configuration fences and Google continuation constraints.
+- Avoid switching to an unrelated activity merely to reuse a model after a mode change.
+- Add generated preset/mode tables, executable tuning examples and native acceptance records. Defaults remain derived policy, not measured quality equivalence or savings.
+
+### Upgrade
+
+1. Before upgrading, set `profiles.<name>.activityPreset` to `"off"` to opt out of the new defaults. Otherwise recognized profiles activate defaults, which can introduce models and increase spending.
+2. Restart Pi or run `/reload` after updating the package. `/router reload` reloads configuration, not extension code.
+3. Check `/router status`, Routes and classifier readiness. Defaults do not grant classifier consent or account access.
+
+See [activity tuning](docs/activity-routing.md), [routing modes](docs/routing-modes.md) and [release readiness](docs/testing/release-017-readiness.md), including the separate Pi-host dependency advisory.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.16.0...v0.17.0)
+
 ## [0.16.0] - 2026-10-21
 
 ### Summary

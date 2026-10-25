@@ -25,6 +25,8 @@ npm publish --dry-run --access public
 
 `prepublishOnly` runs these four quality gates. The CI workflow runs the same gates on Node.js 22.19.0 and 24.15.0. The publication dry run also invokes `prepublishOnly`, so it repeats the gates. Neither dry run establishes OIDC access or creates a release.
 
+The repository's root dependency overrides protect its development and fixture graph only. They do not patch a user's separately installed Pi runtime. Audit that host separately before making runtime security claims. Revisit the Undici override when Pi accepts a patched version. See the [0.17 readiness record](testing/release-017-readiness.md) for the audited versions and remaining host limitation.
+
 5. Inspect the package contents.
 
 The package contains production extensions, the manifest, example configuration, README, changelog, and license.
