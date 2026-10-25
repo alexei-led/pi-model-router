@@ -15,7 +15,7 @@ Optional advice uses any text-capable classifier registered in Pi. The router us
 - **Fewer manual changes.** One profile can combine fast, low-cost routes with stronger models.
 - **Control over cost and quality.** You choose the models, effort levels, fallback order, and baseline. You can pin a route at any time.
 - **Routing modes.** `cost`, `balanced` or `quality` moves each route one step cheaper or stronger, per profile, project or session. [Choose a mode](docs/user-guide.md#choose-a-routing-mode).
-- **Activity-specific routes.** Optional sparse code/debug/explore/plan/review/ops/docs overrides share one consent-gated classifier operation. [Configure activity routes](docs/user-guide.md#activity-routes).
+- **Built-in activity routes.** Recognized OpenAI and Claude profiles get defaults for code, debug, explore, plan, review, ops and docs. Tune one cell or opt out. [Defaults and tuning](docs/activity-routing.md).
 - **Adaptive tool loops.** Periodic background reviews assess current work without delaying generation. Eligible recommendations can change tier, activity and effort between requests, with explicit switch-cost controls.
 - **Visible decisions.** A compact Signal Panel shows actual activity, model and effort. Held proposals stay distinct. Open `/router` for native bars/sparklines, observed usage and session controls.
 

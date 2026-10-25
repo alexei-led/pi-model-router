@@ -129,6 +129,11 @@ export const registerCommands = (
   const showStatus = (ctx: ExtensionContext) => {
     const profile = state.selectedProfile;
     const config = state.currentConfig;
+    const configured = profile ? config.profiles[profile] : undefined;
+    const preset =
+      configured?.activityPreset === 'off'
+        ? 'off'
+        : (configured?.activityPresetFamily ?? 'none (unrecognized routes)');
     const cost =
       `$${state.accumulatedCost.toFixed(4)}` +
       (config.maxSessionBudget
@@ -139,7 +144,7 @@ export const registerCommands = (
     const lines = [
       `Router: ${state.routerEnabled ? 'on' : 'off'} · profile ${profile ?? 'none'} · available: ${profileNames(config).join(', ')}`,
       `Pin: ${formatPinSummary(state.pinnedTierByProfile)} · effort: ${formatThinkingSummary(state.thinkingByProfile)}`,
-      `${modeLine()} · activity routing: ${config.activityRouting ?? 'on'} (configuration)`,
+      `${modeLine()} · activity routing: ${config.activityRouting ?? 'on'} (configuration) · Activity preset: ${preset}`,
       `Recorded catalog cost: ${cost} (not billing; excludes advice)`,
       ...(last && state.routerEnabled
         ? [

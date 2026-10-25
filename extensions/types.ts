@@ -37,6 +37,7 @@ export interface ModelDefinition {
 }
 
 export interface RoutedTierConfig {
+  activitySource?: 'builtin' | undefined;
   model: string;
   /** False for normalization defaults; omitted on legacy in-memory profiles. */
   thinkingExplicit?: boolean | undefined;
@@ -134,6 +135,8 @@ export interface ModeProvenance {
 }
 
 export interface RouterProfile {
+  activityPreset?: 'auto' | 'off' | undefined;
+  activityPresetFamily?: 'openai' | 'anthropic' | undefined;
   mode?: RouterMode | undefined;
   /** Effective, re-normalized sparse overrides; omitted tiers use the generic cell. */
   activities?:
@@ -553,6 +556,7 @@ export interface RouterUIRoute {
 }
 /** Effective configured override, not advice or an observed generation. */
 export type RouterUIActivityCell = {
+  source?: 'builtin' | undefined;
   activity: RouterActivity;
   configured: Readonly<RoutePair>;
   fallbacks: readonly string[];
@@ -574,7 +578,7 @@ export interface RouterUIChatModel {
   efforts: readonly ThinkingLevel[];
 }
 export interface RouterUIRouteCellState {
-  state: 'inherited' | 'override' | 'missing';
+  state: 'inherited' | 'builtin' | 'override' | 'missing';
   /** Opaque CAS token for normalized capability metadata; never rendered. */
   revision?: string | undefined;
   model?: string | undefined;
@@ -682,6 +686,7 @@ export interface RouterUISnapshot {
   eligible: Readonly<Partial<Record<RouterTier, RouterUIRoute>>>;
   activityRouting: ActivityRouting;
   activityCells: readonly RouterUIActivityCell[];
+  activityPreset?: string | undefined;
   routeCells: readonly RouterUIRouteCell[];
   privacy: {
     advisorEnabled: boolean;

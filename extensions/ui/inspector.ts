@@ -23,6 +23,7 @@ import type {
 import { ROUTER_ACTIVITIES, ROUTER_TIERS, ROUTER_UI_VIEWS } from '../types';
 import { validateRouterUIControls } from './controls';
 import {
+  activityLabel,
   activityRouteLines,
   activityRoutingSummary,
   advisorName,
@@ -408,7 +409,7 @@ export class RouterUIDraft {
     const before = cloneRouteState(
       existing?.before ?? cell.pending ?? cell.current,
     );
-    if (before.state !== 'override') {
+    if (before.state !== 'override' && before.state !== 'builtin') {
       this.routeChanges.delete(key);
       return;
     }
@@ -1196,11 +1197,13 @@ export class RouterUIInspector implements Component {
               );
               const state = this.editor.routeState(activity, tier);
               const marker =
-                state.state === 'override'
-                  ? 'O'
-                  : state.state === 'inherited'
-                    ? 'I'
-                    : '—';
+                state.state === 'builtin'
+                  ? 'B'
+                  : state.state === 'override'
+                    ? 'O'
+                    : state.state === 'inherited'
+                      ? 'I'
+                      : '—';
               const draft = dirty.some(
                 (entry) => entry.activity === activity && entry.tier === tier,
               );
@@ -1213,7 +1216,7 @@ export class RouterUIInspector implements Component {
             .join(''),
       ),
       '',
-      'I inherited · O override · — missing',
+      'B built-in · I inherited · O override · — missing',
       '* draft · + queued for next user turn',
       'Edit cell opens model, effort and ordered fallback details.',
       '',
@@ -1270,7 +1273,7 @@ export class RouterUIInspector implements Component {
           ? [
               this.theme.fg(
                 'success',
-                (actual.activity ?? 'generic') +
+                activityLabel(actual) +
                   ' · ' +
                   actual.tier +
                   ' · effort ' +

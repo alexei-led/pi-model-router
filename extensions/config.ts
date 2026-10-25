@@ -4,6 +4,10 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
+  activityPresetFor,
+  presetActivityDeclarations,
+} from './activity-presets';
+import {
   DEFAULT_CLASSIFIER_CONTEXT,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CONTEXT_WINDOW,
@@ -131,6 +135,10 @@ export const mergeConfig = (
     mergedProfiles[name] = {
       mode: mergeRawValue(existing.mode, profile.mode),
       activities: mergeActivities(existing.activities, profile.activities),
+      activityPreset: mergeRawValue(
+        existing.activityPreset,
+        profile.activityPreset,
+      ),
       baselineTier: mergeRawValue(existing.baselineTier, profile.baselineTier),
       high: mergeRawValue(existing.high, profile.high),
       medium: mergeRawValue(existing.medium, profile.medium),
@@ -276,6 +284,7 @@ export const normalizeTierConfig = (
   tier: RouterTier,
   warnings: string[],
   models?: Record<string, ModelDefinition>,
+  canonicalTarget?: string,
 ): RoutedTierConfig | undefined => {
   if (!isObjectRecord(value)) {
     return undefined;
@@ -290,7 +299,10 @@ export const normalizeTierConfig = (
     return undefined;
   }
 
-  const resolved = resolveModelRef(rawModel, models);
+  let resolved = resolveModelRef(rawModel, models);
+  // Built-in identities are canonical. Explicit fallback aliases still resolve below.
+  if (canonicalTarget && resolved.canonicalRef !== canonicalTarget)
+    resolved = { canonicalRef: canonicalTarget };
   const aliasDefinition = resolved.definition;
   let parsedModel: string;
   try {
@@ -415,6 +427,30 @@ export const normalizeTierConfig = (
   };
 };
 
+// File-layer merging can leave undefined placeholders. They are absent, not preset opt-outs.
+const declaredFields = (
+  record: Record<string, unknown>,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== undefined),
+  );
+
+const presetModelReference = (
+  target: string,
+  generic: Record<string, unknown>,
+  models: Record<string, ModelDefinition>,
+): string => {
+  if (
+    typeof generic.model === 'string' &&
+    resolveModelRef(generic.model, models).canonicalRef === target
+  )
+    return generic.model;
+  const aliases = Object.entries(models).filter(
+    ([, definition]) => definition.model === target,
+  );
+  return aliases.length === 1 ? (aliases[0]?.[0] ?? target) : target;
+};
+
 /** Merge raw declarations, not another target's alias-derived capability metadata. */
 const normalizeActivities = (
   raw: unknown,
@@ -422,7 +458,24 @@ const normalizeActivities = (
   profileName: string,
   warnings: string[],
   models: Record<string, ModelDefinition>,
+  defaults?: unknown,
 ): RouterProfile['activities'] => {
+  const explicit = raw;
+  // Existing sparse user cells keep their original generic inheritance contract.
+  // Only absent cells receive presets; file layers still merge field by field.
+  if (raw === undefined) raw = defaults;
+  else if (isObjectRecord(raw) && isObjectRecord(defaults)) {
+    const explicitRecord = raw;
+    const presetRecord = defaults;
+    const combined = { ...presetRecord, ...declaredFields(explicitRecord) };
+    for (const activity of ROUTER_ACTIVITIES) {
+      const base = presetRecord[activity];
+      const next = explicitRecord[activity];
+      if (isObjectRecord(base) && isObjectRecord(next))
+        combined[activity] = { ...base, ...declaredFields(next) };
+    }
+    raw = combined;
+  }
   if (raw === undefined) return undefined;
   if (!isObjectRecord(raw)) {
     warnings.push(
@@ -455,16 +508,41 @@ const normalizeActivities = (
     const tiers: Partial<Record<RouterTier, RoutedTierConfig>> = {};
     for (const tier of ROUTER_TIERS) {
       const override = overrides[tier];
-      if (override === undefined) continue;
+      if (override === undefined || override === null) continue;
       if (!isObjectRecord(override)) {
         warnings.push(
           `Profile "${profileName}" activity ${activity} ${tier} must be an object. Ignored.`,
         );
         continue;
       }
+      const explicitActivity = isObjectRecord(explicit)
+        ? explicit[activity]
+        : undefined;
+      const isExplicit =
+        isObjectRecord(explicitActivity) &&
+        explicitActivity[tier] !== undefined;
+      const genericTier = isObjectRecord(generic[tier]) ? generic[tier] : {};
+      const genericRef =
+        typeof genericTier.model === 'string'
+          ? resolveModelRef(genericTier.model, models).canonicalRef
+          : undefined;
+      const changesTarget = !isExplicit && genericRef !== override.model;
+      // A built-in model change must not carry another model's capability ceiling.
+      // Generation fallbacks are explicit operator intent; preserve their order.
+      const inherited = changesTarget
+        ? { fallbacks: genericTier.fallbacks }
+        : genericTier;
+      const builtinTarget =
+        !isExplicit && typeof override.model === 'string'
+          ? override.model
+          : undefined;
+      const modelRef = builtinTarget
+        ? presetModelReference(builtinTarget, genericTier, models)
+        : undefined;
       const merged = {
-        ...(isObjectRecord(generic[tier]) ? generic[tier] : {}),
+        ...inherited,
         ...override,
+        ...(modelRef ? { model: modelRef } : {}),
       };
       const config = normalizeTierConfig(
         merged,
@@ -472,8 +550,13 @@ const normalizeActivities = (
         tier,
         warnings,
         models,
+        builtinTarget,
       );
-      if (config) tiers[tier] = config;
+      if (config)
+        tiers[tier] = {
+          ...config,
+          ...(!isExplicit ? { activitySource: 'builtin' as const } : {}),
+        };
     }
     if (Object.keys(tiers).length) activities[activity] = tiers;
   }
@@ -782,6 +865,49 @@ const normalizeSwitchPolicy = (
   return effectiveSwitchPolicy;
 };
 
+const normalizeProfileActivities = (
+  profileRecord: Record<string, unknown>,
+  generic: RouterProfile,
+  name: string,
+  warnings: string[],
+  normalizedModels: Record<string, ModelDefinition>,
+): Pick<
+  RouterProfile,
+  'activities' | 'activityPreset' | 'activityPresetFamily'
+> => {
+  const activityPreset =
+    profileRecord.activityPreset === undefined ||
+    profileRecord.activityPreset === 'auto'
+      ? 'auto'
+      : 'off';
+  if (
+    profileRecord.activityPreset !== undefined &&
+    profileRecord.activityPreset !== 'auto' &&
+    profileRecord.activityPreset !== 'off'
+  )
+    warnings.push(
+      `Profile "${name}" activityPreset must be auto or off. Using off.`,
+    );
+  const preset =
+    activityPreset === 'auto' ? activityPresetFor(generic) : undefined;
+  const activities = normalizeActivities(
+    profileRecord.activities,
+    profileRecord,
+    name,
+    warnings,
+    normalizedModels,
+    preset
+      ? presetActivityDeclarations(generic, preset.family, preset.provider)
+      : undefined,
+  );
+
+  return {
+    activityPreset,
+    ...(preset ? { activityPresetFamily: preset.family } : {}),
+    ...(activities ? { activities } : {}),
+  };
+};
+
 export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   const warnings: string[] = [];
 
@@ -830,13 +956,14 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       hasModels ? normalizedModels : undefined,
     );
 
-    const activities = normalizeActivities(
-      profileRecord.activities,
+    const activitySettings = normalizeProfileActivities(
       profileRecord,
+      { high, medium, low, micro },
       name,
       warnings,
       normalizedModels,
     );
+    const activities = activitySettings.activities;
     if (!high && !medium && !low && !micro && !activities) {
       warnings.push(`Profile "${name}" has no valid tiers. Skipped.`);
       continue;
@@ -891,7 +1018,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       );
     normalizedProfiles[name] = {
       ...(isRouterMode(profileRecord.mode) ? { mode: profileRecord.mode } : {}),
-      ...(activities ? { activities } : {}),
+      ...activitySettings,
       ...(baselineTier ? { baselineTier } : {}),
       high,
       medium,

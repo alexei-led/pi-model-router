@@ -17,43 +17,78 @@ repeated tool failure with an edit between.
 
 | Modifier | Classifier | Activity | cost | balanced | quality | Reason |
 | --- | --- | --- | --- | --- | --- | --- |
-| plain | none | - | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | baseline |
-| plain | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | classifier |
-| plain | medium | code | medium claude-haiku-5-5/medium (effort) | medium claude-haiku-5-5/high | medium claude-haiku-5-5/xhigh (effort) | classifier |
-| plain | medium | debug, explore, plan, review, ops, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | classifier |
+| plain | none | - | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | baseline |
+| plain | high | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| plain | high | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | classifier |
+| plain | high | explore | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | classifier |
+| plain | high | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| plain | high | docs | high claude-haiku-5-5/low (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | classifier |
+| plain | high | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| plain | medium | code | medium claude-sonnet-5-5/high (model from low) | medium claude-opus-5-5/high | medium claude-opus-5-5/xhigh (effort) | classifier |
+| plain | medium | debug, plan, review | medium claude-sonnet-5-5/high (model from low) | medium claude-opus-5-5/medium | medium claude-opus-5-5/high (effort) | classifier |
+| plain | medium | explore | medium claude-haiku-5-5/high (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | classifier |
+| plain | medium | ops | medium claude-haiku-5-5/medium (effort) | medium claude-haiku-5-5/high | medium claude-haiku-5-5/xhigh (effort) | classifier |
 | plain | medium | docs | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | medium claude-haiku-5-5/medium (effort) | classifier |
-| plain | low | code, debug, explore, plan, review, ops, docs, uncertain | low claude-haiku-5-5/low | low claude-haiku-5-5/low | low claude-haiku-5-5/medium (effort) | classifier |
-| plain | micro | code, debug, explore, plan, review, ops, docs, uncertain | micro claude-haiku-5-5/low | micro claude-haiku-5-5/low | micro claude-haiku-5-5/low | classifier |
-| plain | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | baseline |
-| plain | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | baseline |
-| pin-medium | none | - | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | pinned |
-| pin-medium | high | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | pinned |
-| pin-medium | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | pinned |
-| pin-medium | low | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | pinned |
-| pin-medium | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | pinned |
-| pin-medium | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | pinned |
-| pin-medium | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/medium | pinned |
-| effort-low | none | - | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | baseline |
-| effort-low | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/low | high claude-haiku-5-5/low | high claude-haiku-5-5/low | classifier |
-| effort-low | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | classifier |
-| effort-low | low | code, debug, explore, plan, review, ops, docs, uncertain | low claude-haiku-5-5/low | low claude-haiku-5-5/low | low claude-haiku-5-5/low | classifier |
+| plain | medium | uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | classifier |
+| plain | low | code, debug, plan, review | low claude-sonnet-5-5/medium (effort) | low claude-sonnet-5-5/high | low claude-sonnet-5-5/xhigh (effort) | classifier |
+| plain | low | explore, ops, docs | low claude-haiku-5-5/medium (effort) | low claude-haiku-5-5/high | low claude-haiku-5-5/xhigh (effort) | classifier |
+| plain | low | uncertain | low claude-haiku-5-5/low | low claude-haiku-5-5/low | low claude-haiku-5-5/medium (effort) | classifier |
+| plain | micro | code, explore, ops, docs | micro claude-haiku-5-5/medium | micro claude-haiku-5-5/medium | micro claude-haiku-5-5/medium | classifier |
+| plain | micro | debug, plan, review | micro claude-haiku-5-5/high | micro claude-haiku-5-5/high | micro claude-haiku-5-5/high | classifier |
+| plain | micro | uncertain | micro claude-haiku-5-5/low | micro claude-haiku-5-5/low | micro claude-haiku-5-5/low | classifier |
+| plain | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | baseline |
+| plain | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | baseline |
+| pin-medium | none | - | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
+| pin-medium | high | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
+| pin-medium | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
+| pin-medium | low | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
+| pin-medium | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
+| pin-medium | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
+| pin-medium | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
+| effort-low | none | - | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | baseline |
+| effort-low | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-opus-5-5/low | high claude-opus-5-5/low | high claude-opus-5-5/low | classifier |
+| effort-low | medium | code, debug, plan, review | medium claude-opus-5-5/low | medium claude-opus-5-5/low | medium claude-opus-5-5/low | classifier |
+| effort-low | medium | explore, uncertain | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | classifier |
+| effort-low | medium | ops, docs | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | classifier |
+| effort-low | low | code, debug, plan, review | low claude-sonnet-5-5/low | low claude-sonnet-5-5/low | low claude-sonnet-5-5/low | classifier |
+| effort-low | low | explore, ops, docs, uncertain | low claude-haiku-5-5/low | low claude-haiku-5-5/low | low claude-haiku-5-5/low | classifier |
 | effort-low | micro | code, debug, explore, plan, review, ops, docs, uncertain | micro claude-haiku-5-5/low | micro claude-haiku-5-5/low | micro claude-haiku-5-5/low | classifier |
-| effort-low | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | baseline |
-| effort-low | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | baseline |
-| budget | none | - | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
-| budget | high | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
-| budget | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
-| budget | low | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
-| budget | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
-| budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
-| budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
-| escalation | none | - | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | classifier |
-| escalation | medium | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | low | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from low |
-| escalation | micro | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from micro |
-| escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
+| effort-low | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | baseline |
+| effort-low | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | baseline |
+| budget | none | - | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
+| budget | high | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
+| budget | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
+| budget | low | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
+| budget | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
+| budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
+| budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
+| escalation | none | - | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | high | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| escalation | high | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | classifier |
+| escalation | high | explore | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | classifier |
+| escalation | high | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| escalation | high | docs | high claude-haiku-5-5/low (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | classifier |
+| escalation | high | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| escalation | medium | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | medium | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | escalation from medium |
+| escalation | medium | explore | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from medium |
+| escalation | medium | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | medium | docs | high claude-haiku-5-5/low (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from medium |
+| escalation | medium | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | low | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from low |
+| escalation | low | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | escalation from low |
+| escalation | low | explore | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from low |
+| escalation | low | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from low |
+| escalation | low | docs | high claude-haiku-5-5/low (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from low |
+| escalation | low | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from low |
+| escalation | micro | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from micro |
+| escalation | micro | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | escalation from micro |
+| escalation | micro | explore | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from micro |
+| escalation | micro | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from micro |
+| escalation | micro | docs | high claude-haiku-5-5/low (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from micro |
+| escalation | micro | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from micro |
+| escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
 
 ## reference/work
 
@@ -87,24 +122,34 @@ repeated tool failure with an edit between.
 | budget | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
 | budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
 | budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-haiku-5-5/low (effort) | medium claude-haiku-5-5/medium | medium claude-haiku-5-5/high (effort) | budget |
-| escalation | none | - | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | medium | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | low | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | micro | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
-| escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (effort) | high claude-haiku-5-5/high | high claude-haiku-5-5/xhigh (effort) | escalation from medium |
+| escalation | none | - | high claude-haiku-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | medium | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | low | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | micro | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high claude-haiku-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
 
 ## user/claude
 
 | Modifier | Classifier | Activity | cost | balanced | quality | Reason |
 | --- | --- | --- | --- | --- | --- | --- |
 | plain | none | - | medium claude-sonnet-5-5/low (effort) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | baseline |
-| plain | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
-| plain | medium | code | medium claude-sonnet-5-5/low (effort) | medium claude-opus-5-5/medium | medium claude-opus-5-5/high (effort) | classifier |
-| plain | medium | debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low (effort) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | classifier |
-| plain | low | code, debug, explore, plan, review, ops, docs, uncertain | low claude-sonnet-5-5/low | low claude-sonnet-5-5/low | low claude-sonnet-5-5/medium (effort) | classifier |
-| plain | micro | code, debug, explore, plan, review, ops, docs, uncertain | micro claude-haiku-4-5/off | micro claude-haiku-4-5/off | micro claude-haiku-4-5/off | classifier |
+| plain | high | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| plain | high | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | classifier |
+| plain | high | explore, docs | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | classifier |
+| plain | high | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| plain | high | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| plain | medium | code, debug, plan, review | medium claude-sonnet-5-5/high (model from low) | medium claude-opus-5-5/medium | medium claude-opus-5-5/high (effort) | classifier |
+| plain | medium | explore, docs | medium claude-haiku-5-5/high (model from low) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | classifier |
+| plain | medium | ops | medium claude-haiku-5-5/medium (effort) | medium claude-haiku-5-5/high | medium claude-haiku-5-5/xhigh (effort) | classifier |
+| plain | medium | uncertain | medium claude-sonnet-5-5/low (effort) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | classifier |
+| plain | low | code, debug, plan, review | low claude-sonnet-5-5/medium (effort) | low claude-sonnet-5-5/high | low claude-sonnet-5-5/xhigh (effort) | classifier |
+| plain | low | explore, ops, docs | low claude-haiku-5-5/medium (effort) | low claude-haiku-5-5/high | low claude-haiku-5-5/xhigh (effort) | classifier |
+| plain | low | uncertain | low claude-sonnet-5-5/low | low claude-sonnet-5-5/low | low claude-sonnet-5-5/medium (effort) | classifier |
+| plain | micro | code, explore, ops, docs | micro claude-haiku-5-5/medium | micro claude-haiku-5-5/medium | micro claude-haiku-5-5/medium | classifier |
+| plain | micro | debug, plan, review | micro claude-haiku-5-5/high | micro claude-haiku-5-5/high | micro claude-haiku-5-5/high | classifier |
+| plain | micro | uncertain | micro claude-haiku-4-5/off | micro claude-haiku-4-5/off | micro claude-haiku-4-5/off | classifier |
 | plain | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low (effort) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | baseline |
 | plain | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low (effort) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | baseline |
 | pin-medium | none | - | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
@@ -116,10 +161,13 @@ repeated tool failure with an edit between.
 | pin-medium | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/medium | pinned |
 | effort-low | none | - | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | baseline |
 | effort-low | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-opus-5-5/low | high claude-opus-5-5/low | high claude-opus-5-5/low | classifier |
-| effort-low | medium | code | medium claude-opus-5-5/low | medium claude-opus-5-5/low | medium claude-opus-5-5/low | classifier |
-| effort-low | medium | debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | classifier |
-| effort-low | low | code, debug, explore, plan, review, ops, docs, uncertain | low claude-sonnet-5-5/low | low claude-sonnet-5-5/low | low claude-sonnet-5-5/low | classifier |
-| effort-low | micro | code, debug, explore, plan, review, ops, docs, uncertain | micro claude-haiku-4-5/low | micro claude-haiku-4-5/low | micro claude-haiku-4-5/low | classifier |
+| effort-low | medium | code, debug, plan, review | medium claude-opus-5-5/low | medium claude-opus-5-5/low | medium claude-opus-5-5/low | classifier |
+| effort-low | medium | explore, docs, uncertain | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | classifier |
+| effort-low | medium | ops | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | medium claude-haiku-5-5/low | classifier |
+| effort-low | low | code, debug, plan, review, uncertain | low claude-sonnet-5-5/low | low claude-sonnet-5-5/low | low claude-sonnet-5-5/low | classifier |
+| effort-low | low | explore, ops, docs | low claude-haiku-5-5/low | low claude-haiku-5-5/low | low claude-haiku-5-5/low | classifier |
+| effort-low | micro | code, debug, explore, plan, review, ops, docs | micro claude-haiku-5-5/low | micro claude-haiku-5-5/low | micro claude-haiku-5-5/low | classifier |
+| effort-low | micro | uncertain | micro claude-haiku-4-5/low | micro claude-haiku-4-5/low | micro claude-haiku-4-5/low | classifier |
 | effort-low | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | baseline |
 | effort-low | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | medium claude-sonnet-5-5/low | baseline |
 | budget | none | - | medium claude-sonnet-5-5/low (effort) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
@@ -130,10 +178,26 @@ repeated tool failure with an edit between.
 | budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low (effort) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
 | budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium claude-sonnet-5-5/low (effort) | medium claude-sonnet-5-5/medium | medium claude-sonnet-5-5/high (effort) | budget |
 | escalation | none | - | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
-| escalation | high | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
-| escalation | medium | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
-| escalation | low | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from low |
-| escalation | micro | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from micro |
+| escalation | high | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| escalation | high | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | classifier |
+| escalation | high | explore, docs | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | classifier |
+| escalation | high | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| escalation | high | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | classifier |
+| escalation | medium | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | medium | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | escalation from medium |
+| escalation | medium | explore, docs | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from medium |
+| escalation | medium | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | medium | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
+| escalation | low | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from low |
+| escalation | low | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | escalation from low |
+| escalation | low | explore, docs | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from low |
+| escalation | low | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from low |
+| escalation | low | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from low |
+| escalation | micro | code | high claude-opus-5-5/medium (effort) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from micro |
+| escalation | micro | debug, plan, review | high claude-opus-5-5/high (effort) | high claude-opus-5-5/xhigh | high claude-opus-5-5/max (effort) | escalation from micro |
+| escalation | micro | explore, docs | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/medium | high claude-opus-5-5/high (effort) | escalation from micro |
+| escalation | micro | ops | high claude-haiku-5-5/high (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from micro |
+| escalation | micro | uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from micro |
 | escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
 | escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high claude-sonnet-5-5/medium (model from medium) | high claude-opus-5-5/high | high claude-opus-5-5/xhigh (effort) | escalation from medium |
 
@@ -142,11 +206,17 @@ repeated tool failure with an edit between.
 | Modifier | Classifier | Activity | cost | balanced | quality | Reason |
 | --- | --- | --- | --- | --- | --- | --- |
 | plain | none | - | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | baseline |
-| plain | high | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | classifier |
-| plain | medium | code | medium gpt-6-luna/medium (model from low) | medium gpt-6-luna/high | medium gpt-6-luna/xhigh (effort) | classifier |
-| plain | medium | debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | classifier |
-| plain | low | code, debug, explore, plan, review, ops, docs, uncertain | low gpt-6-luna/low (effort) | low gpt-6-luna/medium | low gpt-6-luna/high (effort) | classifier |
-| plain | micro | code, debug, explore, plan, review, ops, docs, uncertain | micro gpt-6-luna/off | micro gpt-6-luna/off | micro gpt-6-luna/off | classifier |
+| plain | high | code, explore, ops | high gpt-6-luna/high (model from medium) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
+| plain | high | debug, plan, review, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | classifier |
+| plain | high | docs | high gpt-6.1-sol/medium (effort) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
+| plain | medium | code, explore, ops | medium gpt-6-luna/medium (effort) | medium gpt-6-luna/high | medium gpt-6-luna/xhigh (effort) | classifier |
+| plain | medium | debug, plan, review | medium gpt-6-luna/high (model from low) | medium gpt-6.1-sol/high | medium gpt-6.1-sol/xhigh (effort) | classifier |
+| plain | medium | docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | classifier |
+| plain | low | code, debug, plan, review | low gpt-6-luna/medium (effort) | low gpt-6-luna/high | low gpt-6-luna/xhigh (effort) | classifier |
+| plain | low | explore, ops, docs, uncertain | low gpt-6-luna/low (effort) | low gpt-6-luna/medium | low gpt-6-luna/high (effort) | classifier |
+| plain | micro | code, explore, ops, docs | micro gpt-6-luna/low | micro gpt-6-luna/low | micro gpt-6-luna/low | classifier |
+| plain | micro | debug, plan, review | micro gpt-6-luna/medium | micro gpt-6-luna/medium | micro gpt-6-luna/medium | classifier |
+| plain | micro | uncertain | micro gpt-6-luna/off | micro gpt-6-luna/off | micro gpt-6-luna/off | classifier |
 | plain | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | baseline |
 | plain | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | baseline |
 | pin-medium | none | - | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
@@ -158,8 +228,8 @@ repeated tool failure with an edit between.
 | pin-medium | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
 | effort-low | none | - | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | baseline |
 | effort-low | high | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/low | high gpt-6.1-sol/low | high gpt-6.1-sol/low | classifier |
-| effort-low | medium | code | medium gpt-6-luna/low | medium gpt-6-luna/low | medium gpt-6-luna/low | classifier |
-| effort-low | medium | debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | classifier |
+| effort-low | medium | code, explore, ops | medium gpt-6-luna/low | medium gpt-6-luna/low | medium gpt-6-luna/low | classifier |
+| effort-low | medium | debug, plan, review, docs, uncertain | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | classifier |
 | effort-low | low | code, debug, explore, plan, review, ops, docs, uncertain | low gpt-6-luna/low | low gpt-6-luna/low | low gpt-6-luna/low | classifier |
 | effort-low | micro | code, debug, explore, plan, review, ops, docs, uncertain | micro gpt-6-luna/low | micro gpt-6-luna/low | micro gpt-6-luna/low | classifier |
 | effort-low | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | baseline |
@@ -172,9 +242,17 @@ repeated tool failure with an edit between.
 | budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
 | budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
 | escalation | none | - | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |
-| escalation | high | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | classifier |
-| escalation | medium | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |
-| escalation | low | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from low |
-| escalation | micro | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from micro |
+| escalation | high | code, explore, ops | high gpt-6-luna/high (model from medium) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
+| escalation | high | debug, plan, review, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | classifier |
+| escalation | high | docs | high gpt-6.1-sol/medium (effort) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
+| escalation | medium | code, explore, ops | high gpt-6-luna/high (model from medium) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
+| escalation | medium | debug, plan, review, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |
+| escalation | medium | docs | high gpt-6.1-sol/medium (effort) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
+| escalation | low | code, explore, ops | high gpt-6-luna/high (model from medium) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from low |
+| escalation | low | debug, plan, review, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from low |
+| escalation | low | docs | high gpt-6.1-sol/medium (effort) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from low |
+| escalation | micro | code, explore, ops | high gpt-6-luna/high (model from medium) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from micro |
+| escalation | micro | debug, plan, review, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from micro |
+| escalation | micro | docs | high gpt-6.1-sol/medium (effort) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from micro |
 | escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |
 | escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |

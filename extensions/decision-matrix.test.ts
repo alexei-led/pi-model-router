@@ -479,9 +479,9 @@ describe('golden routing decision matrix', () => {
       }),
     );
     expect(differing).toEqual({
-      'reference/personal': { cells: 245, cost: 130, quality: 139 },
+      'reference/personal': { cells: 245, cost: 137, quality: 139 },
       'reference/work': { cells: 245, cost: 147, quality: 147 },
-      'user/claude': { cells: 245, cost: 131, quality: 139 },
+      'user/claude': { cells: 245, cost: 138, quality: 139 },
       'user/openai': { cells: 245, cost: 139, quality: 139 },
     });
   });
@@ -534,7 +534,17 @@ describe('starting from the balanced medium model', () => {
             const [cost, balanced, quality] = await Promise.all(
               ROUTER_MODES.map(route),
             );
-            expect(atMost(required(cost), required(balanced))).toBe(true);
+            expect(
+              atMost(required(cost), required(balanced)),
+              JSON.stringify({
+                key,
+                outcome,
+                takeover: messages === takeover,
+                restored: !!lastDecision,
+                cost,
+                balanced,
+              }),
+            ).toBe(true);
             expect(atMost(required(balanced), required(quality))).toBe(true);
           }
     },

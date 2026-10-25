@@ -343,7 +343,11 @@ export const createRouterUIRuntime = (
     const generic = profile?.[tier];
     const declaration = override ?? generic;
     if (!declaration) return { state: 'missing', fallbacks: [] };
-    const stateValue = override ? 'override' : 'inherited';
+    const stateValue = override
+      ? override.activitySource === 'builtin'
+        ? 'builtin'
+        : 'override'
+      : 'inherited';
     try {
       const { provider, modelId } = parseCanonicalModelRef(declaration.model);
       return {
@@ -620,6 +624,9 @@ export const createRouterUIRuntime = (
           return [
             {
               activity,
+              ...(declaration.activitySource
+                ? { source: declaration.activitySource }
+                : {}),
               configured: resolveRoutePair(
                 cell,
                 tier,
@@ -695,7 +702,8 @@ export const createRouterUIRuntime = (
           generic,
           ...(pendingRoute ? { pending: pendingRoute } : {}),
           effectiveThinking:
-            activityRouting === 'off' && current.state === 'override'
+            activityRouting === 'off' &&
+            (current.state === 'override' || current.state === 'builtin')
               ? undefined
               : mappedEffort(
                   current,
@@ -705,7 +713,7 @@ export const createRouterUIRuntime = (
                 ),
           pendingEffectiveThinking:
             activityRouting === 'off' &&
-            (pendingRoute ?? current).state === 'override'
+            ['override', 'builtin'].includes((pendingRoute ?? current).state)
               ? undefined
               : mappedEffort(
                   pendingRoute ?? current,
@@ -773,6 +781,10 @@ export const createRouterUIRuntime = (
       eligible,
       activityRouting,
       activityCells,
+      activityPreset:
+        configured?.activityPreset === 'off'
+          ? 'off'
+          : (configured?.activityPresetFamily ?? 'none (unrecognized routes)'),
       routeCells,
       privacy: {
         advisorEnabled: config.advisor?.enabled === true,

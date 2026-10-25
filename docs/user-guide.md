@@ -17,9 +17,9 @@ This example uses illustrative model references. Replace them with models and ef
 {
   "profiles": {
     "auto": {
-      "baselineTier": "high",
-      "high": { "model": "openai/gpt-6-astra", "thinking": "high" },
-      "low": { "model": "openai/gpt-6-luna", "thinking": "low" }
+      "baselineTier": "medium",
+      "medium": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" },
+      "low": { "model": "openai-codex/gpt-6-luna", "thinking": "high" }
     }
   }
 }
@@ -34,8 +34,8 @@ With this profile and no active advisor or pin, the completed route has this
 illustrative two-line strip:
 
 ```text
-gpt-6-astra · high · effort high · last
-Local eligible baseline · auto
+gpt-6.1-sol · base · medium · effort medium · last
+Local eligible baseline · auto · balanced (default)
 ```
 
 The baseline is the configured default, not a tier inferred from prompt words.
@@ -47,6 +47,7 @@ The first profile above does not enable one.
 | Field | Meaning |
 | --- | --- |
 | Model ID | The actual generation target, not just the advisor's choice. |
+| Activity / `base` | Validated activity, or the base route without an activity choice. [Read activity labels](activity-routing.md#understand-the-display). |
 | Tier / effort | The configured tier and reasoning effort that ran. Narrow strips omit secondary fields first. |
 | `last` | The last completed route, not a currently running request. |
 | Advisor name | The configured Pi classifier model reference. |
@@ -68,7 +69,7 @@ Use `/router routes`, `/router classifier`, `/router usage` or `/router settings
 | Tab | What it shows and controls |
 | --- | --- |
 | **Now** | Actual physical model, activity, tier and effort. Up to four recent retained model/effort transitions, with local reasons. Held proposals and queued controls stay separate from actual generation. **Why this route?** expands budget and route details. |
-| **Routes** | Activity × tier grid: `I` inherited, `O` override, `—` missing, `*` draft, `+` queued. **Edit cell** opens the existing activity/tier, searchable physical-model and supported-effort selectors. Configured routes are not advice or actual generation. |
+| **Routes** | Activity × tier grid: `B` built-in, `I` inherited, `O` override, `—` missing, `*` draft, `+` queued. **Edit cell** opens the existing activity/tier, searchable physical-model and supported-effort selectors. Configured routes are not advice or actual generation. |
 | **Classifier** | Exact selected and active classifier, enablement, profile approval, registration/text-input problems and last observed operation. Model, deadline and review interval are session controls. Credentials and approval are read-only. |
 | **Usage** | Retained generation count, model switches versus effort-only changes, known-cost coverage and route mix. **Details** exposes advisor, HTTP, cache and other diagnostics. A prominent logging-off message explains empty history. |
 | **Settings** | Pin first. **Advanced** exposes baseline, soft budget, tier-wide effort and switch-cost policy. Route editing and classifier controls live in their own tabs. |
@@ -82,7 +83,7 @@ or infer a switch before the retained window. It is not a lifetime switching cou
 ### Routes and pending edits
 
 The grid promotes sparse activity routes without hiding them behind Settings.
-The editor labels inherited versus overridden cells, preserves ordered fallbacks,
+The editor labels built-in, inherited and overridden cells, preserves ordered fallbacks,
 and can reset a cell to generic inheritance. Confirming an unchanged target does
 not erase its capability metadata. Use **Apply routes** or **Discard routes**.
 
@@ -344,6 +345,7 @@ The [complete example](../model-router.example.json) shows aliases, tier/activit
 
 | Field | Behavior |
 | --- | --- |
+| `profiles.<name>.activityPreset` | User-only `"auto"` by default. `"off"` disables built-in cells while retaining explicit activity routes. [Tuning and precedence](activity-routing.md). |
 | `activityRouting` | `"on"` by default; `"off"` excludes activity overrides entirely. These are the only modes; there is no shadow mode. |
 | `maxSessionBudget` | Soft threshold for reported generation cost. Unpinned requests skip advisors and prefer eligible medium-or-lower tiers after this threshold. |
 | `advisor` | User-only Pi classifier model, approval, bounded context, deadline, probability settings and in-loop review interval. See [classifier setup](classifier-advisor.md). |
@@ -364,53 +366,12 @@ The initial classifier deadline defaults to 10 seconds. An unavailable model, re
 
 ## Activity routes
 
-Use sparse `profiles.<name>.activities.<activity>.<tier>` overrides to specialize
-models, effort or fallback chains. The seven activities are `code`, `debug`,
-`explore`, `plan`, `review`, `ops` and `docs`. `uncertain` is an advisor answer,
-not a configurable activity. For example:
+Recognized OpenAI and Claude profiles now receive complete built-in activity presets.
+Existing profiles activate them on reload. Your explicit activity cells keep their generic inheritance and take priority.
 
-```json
-{
-  "activityRouting": "on",
-  "profiles": {
-    "auto": {
-      "medium": {
-        "model": "openai/gpt-6-astra",
-        "thinking": "medium",
-        "fallbacks": ["openai/gpt-6-luna"]
-      },
-      "activities": {
-        "code": { "medium": { "thinking": "high" } },
-        "docs": {
-          "medium": {
-            "model": "openai/gpt-6-luna",
-            "thinking": "low",
-            "fallbacks": []
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-Replace these illustrative references with registered models. Each sparse cell
-inherits generic tier declarations; an explicit fallback list **replaces** the
-inherited list, including `[]` to remove it. Model aliases and target capability
-metadata are resolved again for the resulting target, not copied from the old
-model's alias. Unspecified activities/tiers use the generic route.
-
-Activity routing does not enable an advisor or grant consent. Without authorized
-advice, routing remains deterministic: prefer eligible generic cells in baseline
-order, then activity cells only if no generic cell is eligible. The last-resort
-activity order is the list above, independent of JSON key order. Above budget,
-first exclude high when any eligible medium-or-lower cell exists. Pins always
-use the generic tier and bypass activity advice; an unavailable generic pin
-errors even if a specialization could run.
-
-Each new task or user-role steering message can receive initial advice. During a valid tool loop, periodic background reviews use the current task goal and bounded recent loop progress. They never delay the current generation; a completed result can change the route on the next request only, then expires. A held, failed or stale review keeps the eligible incumbent. Pins, budget limits, invalid continuations and Google thought-signature constraints retain their existing safeguards. Only a meaningful eligible override adds an activity question. See [independent classifier answers](classifier-advisor.md#bounds-and-selection). Each selected cell's ordered fallback chain remains immutable for that generation request. Logs/inspector routes distinguish
-`activity` (validated advice) from `availability cell` (local provenance, not
-an inferred activity). `/router status` reports the configuration mode.
+Start with [activity routing: defaults and tuning](activity-routing.md).
+It covers the complete matrices, recognition, migration, per-cell changes, reset, opt-out and troubleshooting.
+The native Routes editor can try changes without editing files.
 
 ## Read costs and cache data
 

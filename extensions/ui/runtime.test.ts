@@ -1116,3 +1116,54 @@ describe('live classifier provenance', () => {
     expect(runtime.adapters.getSnapshot().history).toEqual([]);
   });
 });
+
+describe('built-in route tuning', () => {
+  it('shows preset provenance and resets a built-in cell to generic for the session', async () => {
+    const { state, runtime } = setup();
+    state.currentConfig = normalizeConfig({
+      profiles: {
+        auto: {
+          medium: { model: 'openai/gpt-6.1-sol', thinking: 'medium' },
+        },
+      },
+    }).config;
+    const snapshot = runtime.adapters.getSnapshot();
+    expect(snapshot.activityPreset).toBe('openai');
+    expect(snapshot.activityCells).toHaveLength(7);
+    expect(
+      snapshot.activityCells.every((cell) => cell.source === 'builtin'),
+    ).toBe(true);
+    const cell = required(
+      snapshot.routeCells.find(
+        (c) => c.activity === 'debug' && c.tier === 'medium',
+      ),
+    );
+    expect(cell.current).toMatchObject({ state: 'builtin', thinking: 'high' });
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'debug',
+            tier: 'medium',
+            before: cell.current,
+            after: undefined,
+          },
+        ],
+      }),
+    ).toBe('applied');
+    expect(
+      runtime.adapters
+        .getSnapshot()
+        .routeCells.find((c) => c.activity === 'debug' && c.tier === 'medium')
+        ?.pending,
+    ).toMatchObject({ state: 'inherited', thinking: 'medium' });
+    runtime.activatePending();
+    expect(
+      state.currentConfig.profiles.auto?.activities?.debug?.medium,
+    ).toBeUndefined();
+    expect(
+      state.currentConfig.profiles.auto?.activities?.plan?.medium?.thinking,
+    ).toBe('high');
+  });
+});

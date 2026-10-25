@@ -15,14 +15,19 @@ export const formatRoute = (route: RouterUIRoute | undefined): string =>
     ? `${route.tier} → ${route.provider}/${route.model} · effort ${route.thinking}${route.activity ? ` · activity ${route.activity}` : route.routeCell ? ` · availability cell ${route.routeCell}` : ''}`
     : 'unknown / no observed generation';
 
+export const activityLabel = (
+  route: Pick<RouterUIRoute, 'activity' | 'routeCell'>,
+): string =>
+  route.activity ?? (route.routeCell ? `available ${route.routeCell}` : 'base');
+
 export const activityRoutingSummary = (snapshot: RouterUISnapshot): string =>
-  `Activity routing: ${snapshot.activityRouting} · ${snapshot.activityCells.length} override cells · session Routes editor`;
+  `Activity routing: ${snapshot.activityRouting} · ${snapshot.activityCells.length} activity cells${snapshot.activityPreset ? ` · preset ${snapshot.activityPreset} · ${snapshot.activityCells.filter((cell) => cell.source === 'builtin').length} built-in` : ''} · session Routes editor`;
 
 export const activityRouteLines = (snapshot: RouterUISnapshot): string[] => [
   'Unlisted cells use generic tiers, if configured.',
   ...(snapshot.activityCells.length
     ? snapshot.activityCells.flatMap((cell) => [
-        `${cell.activity}/${cell.configured.tier}: configured ${cell.configured.model} · requested effort ${cell.configured.thinking}`,
+        `${cell.activity}/${cell.configured.tier}: configured ${cell.configured.model} · requested effort ${cell.configured.thinking}${cell.source === 'builtin' ? ' · built-in preset' : ''}`,
         `  ${
           cell.availability === 'eligible'
             ? `Text eligible: ${cell.eligible.provider}/${cell.eligible.model} · effort ${cell.eligible.thinking}`

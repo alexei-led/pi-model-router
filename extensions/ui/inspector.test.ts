@@ -369,7 +369,7 @@ describe('ui/inspector.ts', () => {
     const text = f.panel.render(80).join('\n');
     expect(text).toContain('Actual generation · fallback');
     expect(text).toContain('Proposed · high');
-    expect(text).toContain('generic · medium · effort high');
+    expect(text).toContain('base · medium · effort high');
     expect(f.draft.draft.pin).toBe('high');
     f.panel.dispose();
   });
@@ -753,7 +753,7 @@ describe('read-only activity routes in Routes', () => {
     f.panel.selectTab('settings');
     const normal = f.panel.render(80).join('\n');
     expect(normal).toContain(
-      'Activity routing: on · 2 override cells · session Routes editor',
+      'Activity routing: on · 2 activity cells · session Routes editor',
     );
     expect(normal).not.toContain('code/medium');
     expect(normal).not.toContain(' | Apply');
@@ -1004,3 +1004,42 @@ describe('route metadata and classifier input safety', () => {
     f.panel.dispose();
   });
 });
+
+it.each([true, false])(
+  'reset-to-generic suppresses a built-in cell when the physical pair is identical=%s',
+  async (identical) => {
+    const f = fixture();
+    f.update({
+      routeCells: [
+        {
+          activity: 'code',
+          tier: 'high',
+          current: {
+            state: 'builtin',
+            model: 'test/strong',
+            thinking: 'high',
+            fallbacks: [],
+          },
+          generic: {
+            state: 'inherited',
+            model: identical ? 'test/strong' : 'test/base',
+            thinking: 'high',
+            fallbacks: [],
+          },
+        },
+      ],
+    });
+    f.draft.resetRoute('code', 'high');
+    expect(f.draft.routeState('code', 'high')).toMatchObject({
+      state: 'inherited',
+      model: identical ? 'test/strong' : 'test/base',
+    });
+    expect(f.adapters.applyRoutes).not.toHaveBeenCalled();
+    await f.draft.applyRoutes();
+    expect(f.adapters.applyRoutes).toHaveBeenCalledOnce();
+    expect(
+      vi.mocked(f.adapters.applyRoutes).mock.calls[0]?.[0].changes[0]?.after,
+    ).toBeUndefined();
+    f.panel.dispose();
+  },
+);

@@ -48,6 +48,8 @@ Every configured classifier uses Pi's public classifier registry and authenticat
 
 ## Route selection
 
+Configuration normalization adds [built-in activity presets](activity-routing.md) only to absent cells in recognized homogeneous profiles. Explicit cells retain generic inheritance. A built-in model change carries declared fallbacks, but not another target's capability limits. Generated target identities cannot be redirected by canonical-looking alias keys. Preset provenance is configuration/UI metadata, not additional classifier authority.
+
 ```mermaid
 flowchart TD
     Start["Validate request and eligible routes"] --> Policy["Continuation, pin, budget, then candidate count"]
@@ -248,6 +250,7 @@ The [evaluation](evaluation.md#cost-method) states the cost assumptions and evid
 | --- | --- |
 | `index.ts` | Wire Pi lifecycle hooks, extension state, branch restoration, commands, provider, and UI. |
 | `config.ts` | Load, merge, validate, and normalize configuration. |
+| `activity-presets.ts` | Exact-ID family recognition and complete built-in activity route declarations. No auth or provider transport. |
 | `domain.ts` | Parse canonical model references and validate pure tier, effort, and pin values; no config I/O. |
 | `routing.ts` | Build immutable eligible cell plans and apply baseline, pin, budget, input, context-fit, and effort policy. |
 | `modes.ts` | Resolve the routing mode and effective switch policy; transform a route pair for cost or quality. |

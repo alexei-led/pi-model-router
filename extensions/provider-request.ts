@@ -729,12 +729,15 @@ const continueCompatibleRoute = (
         pair.model === priorRef &&
         (mustContinueGoogle || pair.tier === previous?.tier),
     );
+  // A mode change can alter effort or model. Do not invent another activity to reuse a model.
   const match =
     compatible.find(
       ({ plan, pair }) =>
         plan.cell === previous?.routeCell &&
         pair.thinking === previous?.thinking,
-    ) ?? compatible[0];
+    ) ??
+    compatible.find(({ plan }) => plan.cell === previous?.routeCell) ??
+    (mustContinueGoogle ? compatible[0] : undefined);
   if (!match && mustContinueGoogle)
     throw new Error('No compatible route for Google tool continuation.');
   if (!match) return selected;
@@ -744,7 +747,10 @@ const continueCompatibleRoute = (
       ...decisionForPair(input.profileName, match.pair, 'continuation'),
       routeCell: match.plan.cell,
       ...modeFields(input, match.plan),
-      activity: previous?.activity,
+      activity:
+        match.plan.cell === previous?.routeCell
+          ? previous?.activity
+          : undefined,
       advisor: selected.decision.advisor,
       bypassReason: selected.decision.bypassReason,
     },
