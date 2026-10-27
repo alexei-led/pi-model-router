@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { expect, it, onTestFinished } from 'vitest';
 
 it.each([
-  ['openai', {}, 'gpt-6.1-sol', 'high'],
+  ['openai', {}, 'gpt-6.1-terra', 'xhigh'],
   ['anthropic', {}, 'claude-opus-5-5', 'medium'],
   [
     'openai',

@@ -56,6 +56,7 @@ const routeRevision = (route: RoutedTierConfig): string =>
     .update(
       JSON.stringify({
         model: route.model,
+        builtinModes: route.builtinModes,
         thinking: route.thinking,
         thinkingExplicit: route.thinkingExplicit,
         fallbacks: route.fallbacks,

@@ -29,7 +29,7 @@ it('the first-profile guide produces a recognized preset without enabling extern
   expect(config.profiles.auto).toMatchObject({
     activityPresetFamily: 'openai',
     baselineTier: 'medium',
-    medium: { model: 'openai-codex/gpt-6.1-sol', thinking: 'medium' },
+    medium: { model: 'openai-codex/gpt-6.1-terra', thinking: 'medium' },
   });
   expect(config.advisor?.enabled).not.toBe(true);
 });
@@ -40,7 +40,7 @@ it('activity-tuning examples change effort, reset a cell and independently disab
   const tuned = normalizeConfig(mergeConfig(base, required(examples[0])));
   expect(tuned.warnings).toEqual([]);
   expect(tuned.config.profiles.auto?.activities?.debug?.medium).toMatchObject({
-    model: 'openai-codex/gpt-6.1-sol',
+    model: 'openai-codex/gpt-6.1-terra',
     thinking: 'high',
   });
   expect(

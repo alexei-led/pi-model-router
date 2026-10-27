@@ -38,6 +38,8 @@ export interface ModelDefinition {
 
 export interface RoutedTierConfig {
   activitySource?: 'builtin' | undefined;
+  /** Runtime-only default-owned alternatives; never read from user JSON. */
+  builtinModes?: Partial<Record<RouterMode, RoutedTierConfig>> | undefined;
   model: string;
   /** False for normalization defaults; omitted on legacy in-memory profiles. */
   thinkingExplicit?: boolean | undefined;
@@ -130,7 +132,7 @@ export type ModeLever = (typeof MODE_LEVERS)[number];
 export interface ModeProvenance {
   readonly mode: RouterMode;
   readonly lever: ModeLever;
-  /** Tier whose configured route the cell uses after the transform. */
+  /** Lever source tier, or the owning tier for a normalized built-in preference. */
   readonly sourceTier: RouterTier;
   readonly recovery?: boolean | undefined;
 }

@@ -11,33 +11,33 @@ See [routing modes](routing-modes.md) for controls, precedence and recovery.
 | Activity | Tier | cost | balanced | quality |
 | --- | --- | --- | --- | --- |
 | code | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
-| code | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6-luna / xhigh |
-| code | medium | gpt-6-luna / high | gpt-6.1-sol / medium | gpt-6.1-sol / high |
-| code | high | gpt-6.1-sol / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| code | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
+| code | medium | gpt-6-luna / high | gpt-6.1-terra / xhigh | gpt-6.1-sol / high |
+| code | high | gpt-6.1-terra / xhigh | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
 | debug | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
-| debug | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6-luna / xhigh |
-| debug | medium | gpt-6-luna / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
-| debug | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / max |
+| debug | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
+| debug | medium | gpt-6-luna / high | gpt-6.1-terra / xhigh | gpt-6.1-sol / high |
+| debug | high | gpt-6.1-terra / xhigh | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
 | explore | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
-| explore | low | gpt-6-luna / low | gpt-6-luna / medium | gpt-6-luna / high |
-| explore | medium | gpt-6-luna / medium | gpt-6-luna / high | gpt-6-luna / xhigh |
-| explore | high | gpt-6-luna / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| explore | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
+| explore | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
+| explore | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
 | plan | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
-| plan | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6-luna / xhigh |
-| plan | medium | gpt-6-luna / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
-| plan | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / max |
+| plan | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
+| plan | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / high |
+| plan | high | gpt-6.1-terra / medium | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
 | review | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
-| review | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6-luna / xhigh |
-| review | medium | gpt-6-luna / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
-| review | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / max |
+| review | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
+| review | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / high |
+| review | high | gpt-6.1-terra / medium | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
 | ops | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
-| ops | low | gpt-6-luna / low | gpt-6-luna / medium | gpt-6-luna / high |
-| ops | medium | gpt-6-luna / medium | gpt-6-luna / high | gpt-6-luna / xhigh |
-| ops | high | gpt-6-luna / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| ops | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
+| ops | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
+| ops | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
 | docs | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
-| docs | low | gpt-6-luna / low | gpt-6-luna / medium | gpt-6-luna / high |
-| docs | medium | gpt-6-luna / medium | gpt-6.1-sol / medium | gpt-6.1-sol / high |
-| docs | high | gpt-6.1-sol / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| docs | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
+| docs | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
+| docs | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
 
 ## anthropic
 

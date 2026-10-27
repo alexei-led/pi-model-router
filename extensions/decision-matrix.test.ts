@@ -43,6 +43,12 @@ const catalog: Model<Api>[] = [
     cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
     contextWindow: 200_000,
   }),
+  model('gpt-6.1-terra', {
+    provider: 'openai-codex',
+    cost: { input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25 },
+    thinkingLevelMap: { minimal: null, ...extended },
+    contextWindow: 500_000,
+  }),
   model('gpt-6.1-sol', {
     provider: 'openai-codex',
     cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
@@ -71,6 +77,7 @@ const reference: ConfigFile = JSON.parse(
 const PROFILES = {
   'reference/personal': { config: reference, profile: 'personal' },
   'reference/work': { config: reference, profile: 'work' },
+  'reference/openai': { config: reference, profile: 'openai' },
   'user/claude': {
     profile: 'claude',
     config: {
@@ -508,8 +515,9 @@ describe('golden routing decision matrix', () => {
     expect(differing).toEqual({
       'reference/personal': { cells: 245, cost: 137, quality: 139 },
       'reference/work': { cells: 245, cost: 147, quality: 147 },
+      'reference/openai': { cells: 245, cost: 139, quality: 124 },
       'user/claude': { cells: 245, cost: 138, quality: 139 },
-      'user/openai': { cells: 245, cost: 139, quality: 139 },
+      'user/openai': { cells: 245, cost: 139, quality: 124 },
     });
   });
 });

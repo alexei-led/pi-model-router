@@ -328,7 +328,7 @@ export const formatDecision = (decision: RoutingDecision): string => {
     ? `switch ${decision.switchCost.reason} · horizon ${decision.switchCost.horizonRequests} · stay ${decision.switchCost.stayUsd === undefined ? 'unknown' : `$${decision.switchCost.stayUsd.toFixed(4)}`} · target ${decision.switchCost.switchUsd === undefined ? 'unknown' : `$${decision.switchCost.switchUsd.toFixed(4)}`}${decision.proposedRoute ? ` · proposed ${decision.proposedRoute.tier}/${decision.proposedRoute.activity ?? 'base'} ${decision.proposedRoute.model} [${decision.proposedRoute.thinking}]` : ''}`
     : undefined;
   const mode = decision.mode
-    ? ` {mode ${decision.mode}${decision.modeSource ? ` (${decision.modeSource})` : ''}${decision.modeLever && decision.modeLever !== 'none' ? ` · ${decision.modeLever} lever from ${decision.modeSourceTier ?? decision.tier}` : ''}}`
+    ? ` {mode ${decision.mode}${decision.modeSource ? ` (${decision.modeSource})` : ''}${decision.modeLever && decision.modeLever !== 'none' ? ` · ${decision.modeLever === 'model' && decision.modeSourceTier === decision.tier ? 'mode model preference' : `${decision.modeLever} lever from ${decision.modeSourceTier ?? decision.tier}`}` : ''}}`
     : '';
   const escalated = decision.escalatedFrom
     ? ` {escalated from ${decision.escalatedFrom}}`

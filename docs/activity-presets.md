@@ -8,13 +8,13 @@ See [activity routing](activity-routing.md) for setup, tuning, sources and limit
 
 | Activity | micro | low | medium | high |
 | --- | --- | --- | --- | --- |
-| code | gpt-6-luna / low | gpt-6-luna / high | gpt-6.1-sol / medium | gpt-6.1-sol / high |
-| debug | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
-| explore | gpt-6-luna / low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-sol / high |
-| plan | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
-| review | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
-| ops | gpt-6-luna / low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-sol / high |
-| docs | gpt-6-luna / low | gpt-6-luna / medium | gpt-6.1-sol / medium | gpt-6.1-sol / high |
+| code | gpt-6-luna / low | gpt-6-luna / high | gpt-6.1-terra / xhigh | gpt-6.1-sol / high |
+| debug | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / xhigh | gpt-6.1-sol / xhigh |
+| explore | gpt-6-luna / low | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / high |
+| plan | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / xhigh |
+| review | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / xhigh |
+| ops | gpt-6-luna / low | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / high |
+| docs | gpt-6-luna / low | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / high |
 
 ## anthropic
 

@@ -18,7 +18,7 @@ This example uses illustrative model references. Replace them with models and ef
   "profiles": {
     "auto": {
       "baselineTier": "medium",
-      "medium": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" },
+      "medium": { "model": "openai-codex/gpt-6.1-terra", "thinking": "medium" },
       "low": { "model": "openai-codex/gpt-6-luna", "thinking": "high" }
     }
   }
@@ -34,7 +34,7 @@ With this profile and no active advisor or pin, the completed route has this
 illustrative two-line strip:
 
 ```text
-gpt-6.1-sol · base · medium · effort medium · last
+gpt-6.1-terra · base · medium · effort medium · last
 Local eligible baseline · auto · balanced (default)
 ```
 
@@ -44,17 +44,24 @@ The first profile above does not enable one.
 
 ## Understand the result
 
-| Field | Meaning |
-| --- | --- |
-| Model ID | The actual generation target, not just the advisor's choice. |
-| Activity / `base` | Validated activity, or the base route without an activity choice. [Read activity labels](activity-routing.md#understand-the-display). |
-| Tier / effort | The configured tier and reasoning effort that ran. Narrow strips omit secondary fields first. |
-| `last` | The last completed route, not a currently running request. |
-| Advisor name | The configured Pi classifier model reference. |
-| `Tool route reused` | No new advisor request. Prior latency is not presented as a new request. |
-| `timed out → baseline` | Advice failed but an eligible generation baseline ran. |
-| `Explicit generation fallback` | Another configured generation target ran, possibly in the same tier. |
-| `Next user turn` | Applied controls waiting for a user turn; actual generation is unchanged. |
+| Field                          | Meaning                                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Model ID                       | The actual generation target, not just the advisor's choice.                                                                          |
+| Activity / `base`              | Validated activity, or the base route without an activity choice. [Read activity labels](activity-routing.md#understand-the-display). |
+| Tier / effort                  | The configured tier and reasoning effort that ran. Narrow strips omit secondary fields first.                                         |
+| `last`                         | The last completed route, not a currently running request.                                                                            |
+| Advisor name                   | The configured Pi classifier model reference.                                                                                         |
+| `Tool route reused`            | No new advisor request. Prior latency is not presented as a new request.                                                              |
+| `timed out → baseline`         | Advice failed but an eligible generation baseline ran.                                                                                |
+| `Explicit generation fallback` | Another configured generation target ran, possibly in the same tier.                                                                  |
+| `Next user turn`               | Applied controls waiting for a user turn; actual generation is unchanged.                                                             |
+
+With the legacy custom provider, Pi's logical `/thinking` selection and saved
+assistant-message `thinkingLevel` are not authoritative physical-effort records;
+the host can stamp the request's earlier logical level after streaming.
+Use router Now, the route strip and the recorded router decision for the routed
+effort. [Native wire/server verification](testing/terra-018-acceptance.md#real-openai-generation)
+checks this distinction.
 
 The strip uses two lines. Hide it with `/router widget` to use one compact footer
 status instead. The router never replaces Pi's footer or repeats its own route
@@ -66,13 +73,13 @@ generation failure uses the error color. Colors always have text labels.
 Open **`/router`** for five tabs: **Now · Routes · Classifier · Usage · Settings**.
 Use `/router routes`, `/router classifier`, `/router usage` or `/router settings` to open a tab directly.
 
-| Tab | What it shows and controls |
-| --- | --- |
-| **Now** | Actual physical model, activity, tier and effort. Up to four recent retained model/effort transitions, with local reasons. Held proposals and queued controls stay separate from actual generation. **Why this route?** expands budget and route details. |
-| **Routes** | Activity × tier grid: `B` built-in, `I` inherited, `O` override, `—` missing, `*` draft, `+` queued. **Edit cell** opens the existing activity/tier, searchable physical-model and supported-effort selectors. Configured routes are not advice or actual generation. |
-| **Classifier** | Exact selected and active classifier, enablement, profile approval, registration/text-input problems and last observed operation. Model, deadline and review interval are session controls. Credentials and approval are read-only. |
-| **Usage** | Retained generation count, model switches versus effort-only changes, known-cost coverage and route mix. **Details** exposes advisor, HTTP, cache and other diagnostics. A prominent logging-off message explains empty history. |
-| **Settings** | Pin and session mode first. **Advanced** exposes baseline, soft budget, tier-wide effort and switch-cost policy. Route editing and classifier controls live in their own tabs. |
+| Tab            | What it shows and controls                                                                                                                                                                                                                                            |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Now**        | Actual physical model, activity, tier and effort. Up to four recent retained model/effort transitions, with local reasons. Held proposals and queued controls stay separate from actual generation. **Why this route?** expands budget and route details.             |
+| **Routes**     | Activity × tier grid: `B` built-in, `I` inherited, `O` override, `—` missing, `*` draft, `+` queued. **Edit cell** opens the existing activity/tier, searchable physical-model and supported-effort selectors. Configured routes are not advice or actual generation. |
+| **Classifier** | Exact selected and active classifier, enablement, profile approval, registration/text-input problems and last observed operation. Model, deadline and review interval are session controls. Credentials and approval are read-only.                                   |
+| **Usage**      | Retained generation count, model switches versus effort-only changes, known-cost coverage and route mix. **Details** exposes advisor, HTTP, cache and other diagnostics. A prominent logging-off message explains empty history.                                      |
+| **Settings**   | Pin and session mode first. **Advanced** exposes baseline, soft budget, tier-wide effort and switch-cost policy. Route editing and classifier controls live in their own tabs.                                                                                        |
 
 The switch trail uses adjacent known generation targets in retained active-branch history.
 It does not count advisor-only reviews as generation, join transitions across unknown targets,
@@ -249,35 +256,35 @@ Use `/router thinking auto` to clear the override.
 
 ## Common problems
 
-| Symptom | Action |
-| --- | --- |
-| No eligible route | Make sure that the model exists in `/model` and supports the input. Check `reasoning` and `thinkingLevels` in the configuration. |
-| The baseline handles every request | Inspect `/router`. Enable an advisor for semantic selection, or clear a pin. |
-| Classifier does not run | Check registration, credentials, `advisor.enabled` and the active profile's exact approval. See [classifier troubleshooting](classifier-advisor.md#troubleshooting). |
-| Usage shows zero decisions | Run `/router log on`, then send a new request. Collection was off or history is empty; this is not a generation count. |
-| Old Jev/Clef configuration stopped selecting models | Replace retired settings with `advisor`; see [migration](#from-011x-to-012x). |
-| Old behavior after a provider extension change | Run `/reload` or start a new Pi session; `/router reload` only reloads router configuration. |
-| Provider context overflow | Reduce the active context. Text estimates cannot guarantee that images or a large tool turn fit. |
+| Symptom                                             | Action                                                                                                                                                               |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No eligible route                                   | Make sure that the model exists in `/model` and supports the input. Check `reasoning` and `thinkingLevels` in the configuration.                                     |
+| The baseline handles every request                  | Inspect `/router`. Enable an advisor for semantic selection, or clear a pin.                                                                                         |
+| Classifier does not run                             | Check registration, credentials, `advisor.enabled` and the active profile's exact approval. See [classifier troubleshooting](classifier-advisor.md#troubleshooting). |
+| Usage shows zero decisions                          | Run `/router log on`, then send a new request. Collection was off or history is empty; this is not a generation count.                                               |
+| Old Jev/Clef configuration stopped selecting models | Replace retired settings with `advisor`; see [migration](#from-011x-to-012x).                                                                                        |
+| Old behavior after a provider extension change      | Run `/reload` or start a new Pi session; `/router reload` only reloads router configuration.                                                                         |
+| Provider context overflow                           | Reduce the active context. Text estimates cannot guarantee that images or a large tool turn fit.                                                                     |
 
 ## Command reference
 
-| Command | Action |
-| --- | --- |
-| `/router` | Open Now, or return text outside TUI. |
-| `/router routes` | Open the configured route grid and per-cell editor. |
-| `/router classifier` | Open classifier readiness, selection and last-operation diagnostics. |
-| `/router usage` | Inspect retained decisions and known costs. |
-| `/router settings` | Inspect and edit session controls in TUI. |
-| `/router status` | Return short text status. |
-| `/router profile <name>` | Select a profile and enable the router. |
-| `/router off` | Restore the previous non-router model. |
-| `/router pin <tier\|auto>` | Pin a tier or return to automatic selection. |
-| `/router thinking <level\|auto>` | Override effort for the profile or clear the override. |
-| `/router mode [cost\|balanced\|quality\|default]` | Show the routing mode, set a session override, or clear it. |
-| `/router log [on\|off\|clear]` | Show recent decisions, control collection, or clear history. |
-| `/router widget` | Toggle the status widget. |
-| `/router reload` | Reload router configuration, not Pi provider extensions. |
-| `/router help` | Show command help. |
+| Command                                           | Action                                                               |
+| ------------------------------------------------- | -------------------------------------------------------------------- |
+| `/router`                                         | Open Now, or return text outside TUI.                                |
+| `/router routes`                                  | Open the configured route grid and per-cell editor.                  |
+| `/router classifier`                              | Open classifier readiness, selection and last-operation diagnostics. |
+| `/router usage`                                   | Inspect retained decisions and known costs.                          |
+| `/router settings`                                | Inspect and edit session controls in TUI.                            |
+| `/router status`                                  | Return short text status.                                            |
+| `/router profile <name>`                          | Select a profile and enable the router.                              |
+| `/router off`                                     | Restore the previous non-router model.                               |
+| `/router pin <tier\|auto>`                        | Pin a tier or return to automatic selection.                         |
+| `/router thinking <level\|auto>`                  | Override effort for the profile or clear the override.               |
+| `/router mode [cost\|balanced\|quality\|default]` | Show the routing mode, set a session override, or clear it.          |
+| `/router log [on\|off\|clear]`                    | Show recent decisions, control collection, or clear history.         |
+| `/router widget`                                  | Toggle the status widget.                                            |
+| `/router reload`                                  | Reload router configuration, not Pi provider extensions.             |
+| `/router help`                                    | Show command help.                                                   |
 
 Per-tier effort can be set in the profile configuration or as a session override in the inspector.
 The old bare profile shorthand returns a migration hint without switching. Use
@@ -285,13 +292,13 @@ explicit `profile <name>`, including profiles whose names match commands.
 
 ## Configuration reference
 
-| File | Purpose |
-| --- | --- |
-| `~/.pi/agent/model-router.json` | User configuration and external-advisor approval. A custom Pi agent directory changes this location. |
-| `.pi/model-router.json` | Project routes (`profiles.<name>` tier and activity cells, `baselineTier`), `activityRouting`, `ui` and `mode`. Other keys are ignored with a warning, including model aliases, `switchPolicy`, `modes`, `maxSessionBudget`, `debug` and all advisor settings. Project routes can still name any registered model, replace a same-named user profile's routes and set route capabilities; use project files only from repositories you trust. You can keep this file out of Git. |
-| `~/.pi/agent/models.json` | Pi-owned model and credential configuration, not router aliases or classifier approval. |
-| `~/.pi/agent/extensions/` | Optional Pi provider/catalog extensions. Changes require `/reload`. |
-| `~/.pi/agent/model-router-state.json` | Last selected profile. The extension manages this file. |
+| File                                  | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `~/.pi/agent/model-router.json`       | User configuration and external-advisor approval. A custom Pi agent directory changes this location.                                                                                                                                                                                                                                                                                                                                                                             |
+| `.pi/model-router.json`               | Project routes (`profiles.<name>` tier and activity cells, `baselineTier`), `activityRouting`, `ui` and `mode`. Other keys are ignored with a warning, including model aliases, `switchPolicy`, `modes`, `maxSessionBudget`, `debug` and all advisor settings. Project routes can still name any registered model, replace a same-named user profile's routes and set route capabilities; use project files only from repositories you trust. You can keep this file out of Git. |
+| `~/.pi/agent/models.json`             | Pi-owned model and credential configuration, not router aliases or classifier approval.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `~/.pi/agent/extensions/`             | Optional Pi provider/catalog extensions. Changes require `/reload`.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `~/.pi/agent/model-router-state.json` | Last selected profile. The extension manages this file.                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 CAUTION: Keep credentials out of Git. Selected conversation text can contain secrets even with bounded advisor context.
 
@@ -303,21 +310,21 @@ The router filters unavailable models and unsupported input before selection. An
 `baselineTier` prefers a configured tier. Without it, the preference is `medium`, `high`, `low`, then `micro`.
 The [complete example](../model-router.example.json) shows aliases, tier/activity routes and classifier approval. Its advisor starts disabled; follow [classifier setup](classifier-advisor.md#configure-a-model) before enabling it.
 
-| Field | Behavior |
-| --- | --- |
-| `profiles.<name>.activityPreset` | User-only `"auto"` by default. `"off"` disables built-in cells while retaining explicit activity routes. [Tuning and precedence](activity-routing.md). |
-| `activityRouting` | `"on"` by default; `"off"` excludes activity overrides entirely. These are the only modes; there is no shadow mode. |
-| `maxSessionBudget` | Soft threshold for reported generation cost. Unpinned requests skip advisors and prefer eligible medium-or-lower tiers after this threshold. |
-| `advisor` | User-only Pi classifier model, approval, bounded context, deadline, probability settings and in-loop review interval. See [classifier setup](classifier-advisor.md). |
-| `advisor.reviewEveryRequests` | Run a nonblocking classifier review every N valid tool-loop requests (default 4); 0 disables. A result applies only to the immediately following request. |
-| `switchPolicy.horizonRequests` | Cost-comparison horizon, 1–20 requests (default 5). |
-| `switchPolicy.costSensitivity` | 0 is opportunistic (accepts a larger estimated premium); 1 only accepts switches no more expensive than staying. Default 0.5. |
-| `switchPolicy.escalationHoldTurns` | User turns after the failing turn that keep a [repeated-failure escalation](#repeated-tool-failures), 0–20 (default 2). 0 limits it to the failing turn. `cost` and `quality` replace it unless `modes.<mode>.policy` sets it. |
-| `profiles.<name>.mode` | Routing mode for the profile: `cost`, `balanced` or `quality`. See [routing modes](#choose-a-routing-mode). |
-| `modes.<mode>.policy` | Switch-policy values for one mode, which replace the built-in mode values. |
-| `switchPolicy.strongAdviceConfidence` | Minimum relevant classifier confidence that can override estimated switch cost. Default 0.9. Tier and activity confidence are independent. |
-| `models` | Aliases with a `model` reference, optional `contextWindow`/`maxTokens`, and exact `effortCacheSharing: shared\|separate\|unknown` metadata. Omitted metadata means unknown. |
-| `ui.statusLine` | `compact` by default. `detailed` adds the full provider/model reference and recorded catalog cost, still within two widget lines. |
+| Field                                 | Behavior                                                                                                                                                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `profiles.<name>.activityPreset`      | User-only `"auto"` by default. `"off"` disables automatic activity/mode defaults while retaining explicit activity routes and legacy tier-mode transforms. [Tuning and precedence](activity-routing.md).                       |
+| `activityRouting`                     | `"on"` by default; `"off"` excludes activity overrides entirely. These are the only modes; there is no shadow mode.                                                                                                            |
+| `maxSessionBudget`                    | Soft threshold for reported generation cost. Unpinned requests skip advisors and prefer eligible medium-or-lower tiers after this threshold.                                                                                   |
+| `advisor`                             | User-only Pi classifier model, approval, bounded context, deadline, probability settings and in-loop review interval. See [classifier setup](classifier-advisor.md).                                                           |
+| `advisor.reviewEveryRequests`         | Run a nonblocking classifier review every N valid tool-loop requests (default 4); 0 disables. A result applies only to the immediately following request.                                                                      |
+| `switchPolicy.horizonRequests`        | Cost-comparison horizon, 1–20 requests (default 5).                                                                                                                                                                            |
+| `switchPolicy.costSensitivity`        | 0 is opportunistic (accepts a larger estimated premium); 1 only accepts switches no more expensive than staying. Default 0.5.                                                                                                  |
+| `switchPolicy.escalationHoldTurns`    | User turns after the failing turn that keep a [repeated-failure escalation](#repeated-tool-failures), 0–20 (default 2). 0 limits it to the failing turn. `cost` and `quality` replace it unless `modes.<mode>.policy` sets it. |
+| `profiles.<name>.mode`                | Routing mode for the profile: `cost`, `balanced` or `quality`. See [routing modes](#choose-a-routing-mode).                                                                                                                    |
+| `modes.<mode>.policy`                 | Switch-policy values for one mode, which replace the built-in mode values.                                                                                                                                                     |
+| `switchPolicy.strongAdviceConfidence` | Minimum relevant classifier confidence that can override estimated switch cost. Default 0.9. Tier and activity confidence are independent.                                                                                     |
+| `models`                              | Aliases with a `model` reference, optional `contextWindow`/`maxTokens`, and exact `effortCacheSharing: shared\|separate\|unknown` metadata. Omitted metadata means unknown.                                                    |
+| `ui.statusLine`                       | `compact` by default. `detailed` adds the full provider/model reference and recorded catalog cost, still within two widget lines.                                                                                              |
 
 Budgets and model capacities must be positive, finite numbers. Invalid values are ignored with a warning.
 The budget is not a spending cap. It excludes advisor costs, and a pin takes priority.
@@ -371,6 +378,20 @@ See the [required upstream contract](architecture.md#native-child-integration-bo
 
 ## Migration
 
+### From 0.17.x to 0.18.0
+
+Before upgrading, set `profiles.<name>.activityPreset: "off"` if you do not want
+new automatic defaults. Otherwise recognized OpenAI activities introduce Terra
+and model-first mode preferences on reload; spending and physical targets can change.
+Generic declarations and explicit activity cells remain user-owned.
+Only a generic ladder matching the new example gets automatic generic mode alternatives.
+See [the exact ownership and precedence](routing-modes.md#openai-default-preferences).
+
+Restart Pi or run `/reload` after updating the package. `/router reload` only
+reloads configuration. Check Routes and your exact provider's live catalog;
+registration under another provider does not grant access.
+No classifier consent, permission boundary or fallback provider is added.
+
 ### From 0.15.x to 0.16.0
 
 Restart Pi after upgrading. Configuration without `mode` routes as before
@@ -414,8 +435,6 @@ Run `/router log on` if the resumed session had collection off.
    lines; cache/probability diagnostics remain in `/router log`.
 
 The generic classifier migration is documented below.
-
-
 
 CAUTION: Do not load this fork and the upstream extension together. Both register the `router` provider.
 

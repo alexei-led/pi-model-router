@@ -14,7 +14,7 @@ Optional advice uses any text-capable classifier registered in Pi. The router us
 
 - **Fewer manual changes.** One profile can combine fast, low-cost routes with stronger models.
 - **Control over cost and quality.** You choose the models, effort levels, fallback order, and baseline. You can pin a route at any time.
-- **Routing modes.** `cost`, `balanced` or `quality` moves each route one step cheaper or stronger, per profile, project or session. [Choose a mode](docs/routing-modes.md).
+- **Routing modes.** `cost`, `balanced` or `quality` chooses a preferred model/effort pair, per profile, project or session. OpenAI defaults use Luna, Terra and Sol; custom routes keep deterministic transforms. [Choose a mode](docs/routing-modes.md).
 - **Built-in activity routes.** Recognized OpenAI and Claude profiles get defaults for code, debug, explore, plan, review, ops and docs. Tune one cell or opt out. [Defaults and tuning](docs/activity-routing.md).
 - **Adaptive tool loops.** Periodic background reviews assess current work without delaying generation. Eligible recommendations can change tier, activity and effort between requests, with explicit switch-cost controls.
 - **Visible decisions.** A compact Signal Panel shows actual activity, model and effort. Held proposals stay distinct. Open `/router` for native bars/sparklines, observed usage and session controls.
@@ -79,6 +79,16 @@ The model answers and calls tools. Periodic background reviews use bounded curre
 
 Recent records cover 1,967 Pi responses across 25 sessions. They show route use, not guaranteed savings.
 [See the chart, cost calculations, and limits →](docs/evaluation.md)
+
+## Upgrading to 0.18.0
+
+Recognized OpenAI activity defaults now use Terra at medium and cost/high.
+Quality defaults prefer a stronger model before more effort.
+**Physical models and spending can change on reload, even for existing profiles.**
+Generic user declarations and explicit activity overrides are not rewritten.
+Before upgrading, set `profiles.<name>.activityPreset: "off"` to retain legacy
+tier-mode behavior. Restart Pi or run `/reload` after updating; inspect Routes.
+See [default ownership, opt-outs and mode tables](docs/routing-modes.md#openai-default-preferences).
 
 ## Upgrading to 0.16.0
 

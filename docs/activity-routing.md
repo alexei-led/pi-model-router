@@ -34,9 +34,9 @@ Provider authentication still happens in Pi when a request runs.
 The default is `profiles.<name>.activityPreset: "auto"`.
 Recognition uses resolved model IDs, never profile names or provider-name patterns.
 
-| Preset | Recognized primary model IDs |
-| --- | --- |
-| OpenAI | `gpt-6-luna`, `gpt-6.1-sol`, predecessor `gpt-6-sol` |
+| Preset    | Recognized primary model IDs                                                          |
+| --------- | ------------------------------------------------------------------------------------- |
+| OpenAI    | `gpt-6-luna`, `gpt-6.1-terra`, `gpt-6.1-sol`, predecessor `gpt-6-sol`                 |
 | Anthropic | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, legacy `claude-haiku-4-5` |
 
 Every configured generic primary must belong to one family and use the **same exact Pi provider ID**.
@@ -49,21 +49,21 @@ For example, `openai-codex-work` never becomes `openai-codex-personal`.
 The router does not inspect credentials or attest which account a backend uses.
 
 **Upgrade notice:** recognized existing profiles receive defaults on reload.
-Defaults can introduce models not previously named in the profile, including Haiku 5.5 for a legacy Haiku 4.5 profile.
+Defaults can introduce models not previously named in the profile, including Terra for old OpenAI profiles and Haiku 5.5 for a legacy Haiku 4.5 profile. OpenAI medium activity cells now use Terra/xhigh for code/debug and Terra/medium otherwise; low activity cells use Luna/high. Mode-aware preferences can choose Terra or Sol before raising effort; see [mode ownership and precedence](routing-modes.md#openai-default-preferences).
 They can increase spending, even if the old profile used only a cheap model.
 Files are not rewritten. Use the opt-out below to retain tier-only behavior.
 
 ## Understand the display
 
-| Display | Meaning |
-| --- | --- |
-| `debug`, `code`, or another activity | A validated classifier activity selected this route. |
-| `base` | No activity-specific cell selected. This replaces the old `generic` label. |
-| An availability-cell label | A local eligibility fallback used an activity cell, not an inferred task label. |
-| `last` | The displayed generation finished. It is not a running request. |
-| `B` in Routes | Built-in preset cell. |
-| `O` in Routes | Explicit file or session cell. |
-| `I` in Routes | Inherits the generic tier, also called the base route. |
+| Display                              | Meaning                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------- |
+| `debug`, `code`, or another activity | A validated classifier activity selected this route.                            |
+| `base`                               | No activity-specific cell selected. This replaces the old `generic` label.      |
+| An availability-cell label           | A local eligibility fallback used an activity cell, not an inferred task label. |
+| `last`                               | The displayed generation finished. It is not a running request.                 |
+| `B` in Routes                        | Built-in preset cell.                                                           |
+| `O` in Routes                        | Explicit file or session cell.                                                  |
+| `I` in Routes                        | Inherits the generic tier, also called the base route.                          |
 
 `base` is normal with pins, disabled activity routing, uncertain advice or initial advice failure.
 A classifier activity can also use the selected tier's generic plan when its specialized cell is unavailable.
@@ -152,6 +152,7 @@ Set this **user-level profile** field:
 ```
 
 Use `"auto"` to enable automatic recognition again.
+Off also disables automatic generic mode preferences and restores legacy tier-mode transforms. Explicit activity cells remain active.
 Only `auto` and `off` are valid. An invalid value warns and uses `off`.
 Project files cannot change this field.
 
@@ -199,7 +200,7 @@ Project `.pi/model-router.json` can tune cells and set `activityRouting`.
 It cannot choose, enable or approve a classifier, or change `activityPreset`.
 Use only project files you trust: explicit project routes can name other providers.
 
-[Routing modes](routing-modes.md) transform effective cells before advice.
+[Routing modes](routing-modes.md) resolve default-owned model/effort alternatives or custom transforms before advice.
 Manual effort overrides and pins retain their existing priority.
 The router revalidates availability, input support and context fit before selection.
 Unsupported effort maps to the nearest supported level in Pi.
@@ -222,19 +223,20 @@ The soft budget skips advice and prefers eligible medium-or-lower tiers. It is n
 
 ## Troubleshoot
 
-| Symptom | Check | Fix |
-| --- | --- | --- |
-| All requests show `base` | Classifier tab and Routes grid | Enable and approve a registered classifier. Check for pins or disabled routing. |
-| Preset says `none (unrecognized routes)` | Primary canonical IDs and provider IDs | Use a supported homogeneous profile, or define explicit activity cells. |
-| A built-in cell says unavailable | Registered models for the exact provider | Register/access the target, add an explicit fallback, or override/suppress the cell. |
-| Changed effort does not run | Settings tier-wide override | Clear that override. Inspect actual mapped effort. |
-| Edited JSON has no effect | Configuration warnings and profile name | Correct the file and run `/router reload`. |
-| UI edit disappeared after reload | Session-only versus file-backed settings | Add the cell to user or project configuration for persistence. |
-| Activity is right but model is unexpected | Now tab, mode, fallback and held proposal | Inspect the actual cell and switch reason, not just the classifier answer. |
+| Symptom                                   | Check                                     | Fix                                                                                  |
+| ----------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| All requests show `base`                  | Classifier tab and Routes grid            | Enable and approve a registered classifier. Check for pins or disabled routing.      |
+| Preset says `none (unrecognized routes)`  | Primary canonical IDs and provider IDs    | Use a supported homogeneous profile, or define explicit activity cells.              |
+| A built-in cell says unavailable          | Registered models for the exact provider  | Register/access the target, add an explicit fallback, or override/suppress the cell. |
+| Changed effort does not run               | Settings tier-wide override               | Clear that override. Inspect actual mapped effort.                                   |
+| Edited JSON has no effect                 | Configuration warnings and profile name   | Correct the file and run `/router reload`.                                           |
+| UI edit disappeared after reload          | Session-only versus file-backed settings  | Add the cell to user or project configuration for persistence.                       |
+| Activity is right but model is unexpected | Now tab, mode, fallback and held proposal | Inspect the actual cell and switch reason, not just the classifier answer.           |
 
 ## Why these defaults?
 
 They are **derived starting policies**, not vendor-prescribed routing tables or measured quality equivalence.
 The complete mappings, effort controls and limitations are covered in the
-[model-card evidence note](research/2026-10-25-activity-presets.md).
+[Terra policy evidence](research/2026-10-27-terra-defaults.md) and the earlier
+[activity model-card evidence](research/2026-10-25-activity-presets.md).
 The [acceptance record](testing/activity-presets-acceptance.md) separates automated, synthetic and live checks.

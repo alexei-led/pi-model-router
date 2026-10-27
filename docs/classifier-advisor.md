@@ -10,16 +10,16 @@ A model appearing in the catalog does not prove that its credentials or server w
 
 ## Supported models
 
-| Classifier | Canonical reference | Setup |
-| --- | --- | --- |
-| Jev 1.14, pinned version | `typesafe/jev-1.14.0` | Register if absent; TypeSafe API key |
-| Jev, provider-managed alias | `typesafe/jev-latest` | Pi's built-in TypeSafe classifier; alias can change |
-| Clef | `cloudflare-workers-ai/@cf/cloudflare/clef` | Cloudflare API key and account ID |
-| Clef Flash | `cloudflare-workers-ai/@cf/cloudflare/clef-flash` | Same Cloudflare credentials |
-| Clef Omni | `cloudflare-workers-ai/@cf/cloudflare/clef-omni` | Register if absent; same Cloudflare credentials |
-| OpenAI Decisions | `openai/gpt-6-luna` | OpenAI API key, not ChatGPT/Codex subscription credentials |
-| Local Ollama / Nimble | `ollama/nimble` | Register classifier; Ollama 0.35+ running with Nimble downloaded |
-| Local llama.cpp | `llama.cpp/<registered-model-id>` | Connect and load a compatible model through Pi |
+| Classifier                  | Canonical reference                               | Setup                                                            |
+| --------------------------- | ------------------------------------------------- | ---------------------------------------------------------------- |
+| Jev 1.14, pinned version    | `typesafe/jev-1.14.0`                             | Register if absent; TypeSafe API key                             |
+| Jev, provider-managed alias | `typesafe/jev-latest`                             | Pi's built-in TypeSafe classifier; alias can change              |
+| Clef                        | `cloudflare-workers-ai/@cf/cloudflare/clef`       | Cloudflare API key and account ID                                |
+| Clef Flash                  | `cloudflare-workers-ai/@cf/cloudflare/clef-flash` | Same Cloudflare credentials                                      |
+| Clef Omni                   | `cloudflare-workers-ai/@cf/cloudflare/clef-omni`  | Register if absent; same Cloudflare credentials                  |
+| OpenAI Decisions            | `openai/gpt-6-luna`                               | OpenAI API key, not ChatGPT/Codex subscription credentials       |
+| Local Ollama / Nimble       | `ollama/nimble`                                   | Register classifier; Ollama 0.35+ running with Nimble downloaded |
+| Local llama.cpp             | `llama.cpp/<registered-model-id>`                 | Connect and load a compatible model through Pi                   |
 
 Other Pi-registered text classifiers work through the same path. The router
 does not limit selection to this table. It does not combine classifier answers
@@ -136,6 +136,7 @@ variables below. Local Ollama does not require a real API key.
   A remote endpoint override sends text to that server, not necessarily your machine.
   A regular Ollama chat model does not become a classifier because it can
   generate JSON. Catalog registration does not start the server or download weights.
+
 - **llama.cpp:** use Pi's `/login llama.cpp` and `/llama` controls.
   Select the exact classifier ID Pi registers for the connected model.
 
@@ -171,12 +172,12 @@ Merge these settings with your existing profiles, or adapt this complete example
         "thinking": "high"
       },
       "medium": {
-        "model": "openai-codex/gpt-6.1-sol",
+        "model": "openai-codex/gpt-6.1-terra",
         "thinking": "medium"
       },
       "low": {
         "model": "openai-codex/gpt-6-luna",
-        "thinking": "low"
+        "thinking": "high"
       }
     },
     "work": {
@@ -273,23 +274,23 @@ See [inspector controls and screenshots](user-guide.md#native-inspector).
 
 These are router defaults, not guaranteed model-specific optima.
 
-| User configuration field | Default | Meaning |
-| --- | --- | --- |
-| `advisor.enabled` | `false` | Enable only with explicit `true`; omitted advisor means no classifier calls |
-| `advisor.model` | None | Required exact Pi classifier reference when configuring an advisor |
-| `profiles.<name>.advisor.models` | None | Exact references approved for this profile; does not register or select models |
-| `advisor.timeoutMs` | `10000` | Total deadline, including retries; positive and at most 2147483647 ms |
-| `advisor.reviewEveryRequests` | `4` | Background review interval, 0–1000 requests; 0 disables reviews, not initial advice |
-| `advisor.confidenceThreshold` | `0.65` | Top-choice and activity confidence threshold, 0–1 |
-| `advisor.probabilityThreshold` | `0.8` | Cumulative tier-probability threshold, greater than 0 and at most 1 |
-| `advisor.maxStateTokens` | `3000` | Selected text budget, 1–24000 estimated tokens; typed request metadata adds overhead |
-| `advisor.maxRetries` | `1` | Pi retries, 0–4, inside the same deadline |
-| `advisor.temperature` | Unset | Optional positive finite value forwarded to Pi's classifier API |
-| `advisor.context.currentLoopMessages` | `8` | Current-loop message window, 0–40 messages |
-| `advisor.context.previousTurns` | `2` | Earlier dialogue turns, 0–20 |
-| `advisor.context.maxHistoryTokens` | `500` | History text sub-budget, 0–24000 tokens, within the total |
-| `advisor.context.toolResults` | `last-error` | `none`, `last`, `last-error` or opt-in `recent` |
-| `advisor.context.maxToolTokens` | `250` | Tool-result text sub-budget, 0–24000 tokens, within the total |
+| User configuration field              | Default      | Meaning                                                                              |
+| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------ |
+| `advisor.enabled`                     | `false`      | Enable only with explicit `true`; omitted advisor means no classifier calls          |
+| `advisor.model`                       | None         | Required exact Pi classifier reference when configuring an advisor                   |
+| `profiles.<name>.advisor.models`      | None         | Exact references approved for this profile; does not register or select models       |
+| `advisor.timeoutMs`                   | `10000`      | Total deadline, including retries; positive and at most 2147483647 ms                |
+| `advisor.reviewEveryRequests`         | `4`          | Background review interval, 0–1000 requests; 0 disables reviews, not initial advice  |
+| `advisor.confidenceThreshold`         | `0.65`       | Top-choice and activity confidence threshold, 0–1                                    |
+| `advisor.probabilityThreshold`        | `0.8`        | Cumulative tier-probability threshold, greater than 0 and at most 1                  |
+| `advisor.maxStateTokens`              | `3000`       | Selected text budget, 1–24000 estimated tokens; typed request metadata adds overhead |
+| `advisor.maxRetries`                  | `1`          | Pi retries, 0–4, inside the same deadline                                            |
+| `advisor.temperature`                 | Unset        | Optional positive finite value forwarded to Pi's classifier API                      |
+| `advisor.context.currentLoopMessages` | `8`          | Current-loop message window, 0–40 messages                                           |
+| `advisor.context.previousTurns`       | `2`          | Earlier dialogue turns, 0–20                                                         |
+| `advisor.context.maxHistoryTokens`    | `500`        | History text sub-budget, 0–24000 tokens, within the total                            |
+| `advisor.context.toolResults`         | `last-error` | `none`, `last`, `last-error` or opt-in `recent`                                      |
+| `advisor.context.maxToolTokens`       | `250`        | Tool-result text sub-budget, 0–24000 tokens, within the total                        |
 
 `debug` controls retained local history, not whether classification runs.
 The [complete reference configuration](../model-router.example.json) leaves
@@ -304,7 +305,7 @@ An initial user request makes one approved `modelRegistry.classify()` operation 
 
 Both initial choices and reviews use one approved `modelRegistry.classify()` operation. Normally it
 asks the existing typed `route` choice among eligible tier representatives and
-`uncertain`. Candidates show the routes after the [routing mode](user-guide.md#choose-a-routing-mode) is applied. [Built-in presets](activity-routing.md) supply specialization cells for recognized profiles without enabling or approving advice. With activity routing on and meaningful eligible specialization
+`uncertain`. Candidates show the prevalidated default-owned preferences or custom transforms after the [routing mode](user-guide.md#choose-a-routing-mode) is applied. [Built-in presets](activity-routing.md) supply specialization cells for recognized profiles without enabling or approving advice. With activity routing on and meaningful eligible specialization
 plans, it also asks a separate typed `activity` choice. These are independent
 answers in the same operation, not a multiplied joint distribution or a second
 advisor call. Pi may implement the operation using several bounded HTTP requests.
@@ -340,19 +341,19 @@ The router retains allowlisted local model identity, numeric usage/cost diagnost
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| `Classifier unavailable → baseline` | Check registration, Pi credentials, `advisor.enabled` and the active profile's exact approval. Initial advice failure uses the baseline; a failed background review keeps the eligible incumbent. |
-| Authentication or API error | Configure credentials in Pi, not router configuration. For OpenAI, use API-key authentication rather than ChatGPT/Codex subscription tokens. |
-| Timeout | Raise `advisor.timeoutMs` within its documented range, or choose a faster configured classifier. Local model loading also consumes the deadline. |
-| Model does not appear in Settings | Register it in Pi first, then `/reload` after adding a provider extension. The router cannot create a classifier from a name alone. |
-| Selecting a model still does not run it | The inspector cannot enable the advisor or grant approval. Update user configuration, then `/router reload`. |
-| Enabled and approved, but no classifier call | Check for a pin, an exceeded soft generation budget or only one effective eligible plan. These bypass advice. |
-| The model name does not change | Tiers can use one physical model with different effort. Inspect actual tier/effort in Now, not only Pi's logical `router/<profile>` label. |
-| Jev still uses 1.13 | Use the pinned `typesafe/jev-1.14.0` reference instead of assuming `jev-latest` resolves to 1.14. |
-| Ollama is listed but requests fail | Confirm the server is running, Nimble is downloaded, and the configured endpoint supports `/v1/systemone`. A catalog entry is not a server health check. |
-| Usage has zero retained decisions | Run `/router log on` and send a new request. Old history is not reconstructed. |
-| Legacy `jev` settings load but routing stays at baseline | Follow the [migration steps](user-guide.md#from-011x-to-012x). Retired provider settings do not enable the current advisor. |
-| Image classification was expected | The router intentionally sends text only. |
+| Symptom                                                  | Check                                                                                                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Classifier unavailable → baseline`                      | Check registration, Pi credentials, `advisor.enabled` and the active profile's exact approval. Initial advice failure uses the baseline; a failed background review keeps the eligible incumbent. |
+| Authentication or API error                              | Configure credentials in Pi, not router configuration. For OpenAI, use API-key authentication rather than ChatGPT/Codex subscription tokens.                                                      |
+| Timeout                                                  | Raise `advisor.timeoutMs` within its documented range, or choose a faster configured classifier. Local model loading also consumes the deadline.                                                  |
+| Model does not appear in Settings                        | Register it in Pi first, then `/reload` after adding a provider extension. The router cannot create a classifier from a name alone.                                                               |
+| Selecting a model still does not run it                  | The inspector cannot enable the advisor or grant approval. Update user configuration, then `/router reload`.                                                                                      |
+| Enabled and approved, but no classifier call             | Check for a pin, an exceeded soft generation budget or only one effective eligible plan. These bypass advice.                                                                                     |
+| The model name does not change                           | Tiers can use one physical model with different effort. Inspect actual tier/effort in Now, not only Pi's logical `router/<profile>` label.                                                        |
+| Jev still uses 1.13                                      | Use the pinned `typesafe/jev-1.14.0` reference instead of assuming `jev-latest` resolves to 1.14.                                                                                                 |
+| Ollama is listed but requests fail                       | Confirm the server is running, Nimble is downloaded, and the configured endpoint supports `/v1/systemone`. A catalog entry is not a server health check.                                          |
+| Usage has zero retained decisions                        | Run `/router log on` and send a new request. Old history is not reconstructed.                                                                                                                    |
+| Legacy `jev` settings load but routing stays at baseline | Follow the [migration steps](user-guide.md#from-011x-to-012x). Retired provider settings do not enable the current advisor.                                                                       |
+| Image classification was expected                        | The router intentionally sends text only.                                                                                                                                                         |
 
 Pi model reference: [Use classifier models](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/docs/models.md#use-classifier-models).

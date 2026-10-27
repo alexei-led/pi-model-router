@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import type {
   RouterUIHistoryEntry,
   RouterUIRoute,
@@ -15,6 +16,7 @@ import {
   formatRoute,
   historyStatus,
   observedRouteChanges,
+  preferenceLine,
   routeMix,
   routeReason,
   routerTone,
@@ -22,6 +24,18 @@ import {
   textBar,
   usageSummary,
 } from './presentation';
+
+it('labels a default-owned model preference without claiming another configured tier supplied it', () => {
+  expect(
+    preferenceLine({
+      status: 'eligible',
+      mode: { mode: 'quality', source: 'session' },
+      route: { tier: 'low', model: 'work/gpt-6.1-terra', thinking: 'medium' },
+      lever: 'model',
+      sourceTier: 'low',
+    }),
+  ).toContain('mode model preference');
+});
 
 const snapshot: RouterUISnapshot = {
   profile: 'auto',

@@ -1138,7 +1138,7 @@ describe('built-in route tuning', () => {
         (c) => c.activity === 'debug' && c.tier === 'medium',
       ),
     );
-    expect(cell.current).toMatchObject({ state: 'builtin', thinking: 'high' });
+    expect(cell.current).toMatchObject({ state: 'builtin', thinking: 'xhigh' });
     expect(
       await runtime.adapters.applyRoutes({
         profile: 'auto',
@@ -1164,7 +1164,7 @@ describe('built-in route tuning', () => {
     ).toBeUndefined();
     expect(
       state.currentConfig.profiles.auto?.activities?.plan?.medium?.thinking,
-    ).toBe('high');
+    ).toBe('medium');
   });
 });
 
@@ -1232,6 +1232,60 @@ describe('Settings session mode', () => {
 });
 
 describe('mode-adjusted route previews', () => {
+  it('strips builtin preferences from an explicit session cell edit and fences changed target metadata', async () => {
+    const { state, runtime } = setup();
+    const raw = {
+      profiles: {
+        auto: { low: { model: 'scope/gpt-6-luna', thinking: 'high' } },
+      },
+    };
+    state.currentConfig = normalizeConfig(raw).config;
+    state.currentModelRegistry.find = (provider, id) =>
+      model(id, { provider, thinkingLevelMap: { xhigh: 'xhigh' } });
+    state.currentModelRegistry.getModelsOfType = (() => [
+      model('gpt-6-luna', { provider: 'scope' }),
+    ]) as unknown as ExtensionContext['modelRegistry']['getModelsOfType'];
+    const cell = required(
+      runtime.adapters
+        .getSnapshot()
+        .routeCells.find((c) => c.activity === 'code' && c.tier === 'low'),
+    );
+    const revision = cell.current.revision;
+    expect(
+      state.currentConfig.profiles.auto?.activities?.code?.low?.builtinModes
+        ?.quality?.model,
+    ).toBe('scope/gpt-6.1-terra');
+    state.currentConfig = normalizeConfig({
+      ...raw,
+      models: {
+        terra: { model: 'scope/gpt-6.1-terra', thinkingLevels: ['high'] },
+      },
+    }).config;
+    const changed = required(
+      runtime.adapters
+        .getSnapshot()
+        .routeCells.find((c) => c.activity === 'code' && c.tier === 'low'),
+    );
+    expect(changed.current.revision).not.toBe(revision);
+    expect(
+      await runtime.adapters.applyRoutes({
+        profile: 'auto',
+        changes: [
+          {
+            activity: 'code',
+            tier: 'low',
+            before: changed.current,
+            after: { model: 'scope/gpt-6-luna', thinking: 'high' },
+          },
+        ],
+      }),
+    ).toBe('applied');
+    runtime.activatePending();
+    expect(
+      state.currentConfig.profiles.auto?.activities?.code?.low?.builtinModes,
+    ).toBeUndefined();
+  });
+
   const configured = () => {
     const f = setup();
     f.state.currentConfig = normalizeConfig({
@@ -1250,7 +1304,7 @@ describe('mode-adjusted route previews', () => {
         contextWindow: 128000,
         thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
         cost: {
-          input: id === 'gpt-6-luna' ? 0.1 : 2,
+          input: id === 'gpt-6-luna' ? 0.1 : id === 'gpt-6.1-terra' ? 1 : 2,
           output: 10,
           cacheRead: 0.1,
           cacheWrite: 1,
@@ -1260,8 +1314,8 @@ describe('mode-adjusted route previews', () => {
   };
   it.each([
     ['cost', 'scope/gpt-6-luna', 'high'],
-    ['balanced', 'scope/gpt-6.1-sol', 'high'],
-    ['quality', 'scope/gpt-6.1-sol', 'xhigh'],
+    ['balanced', 'scope/gpt-6.1-terra', 'xhigh'],
+    ['quality', 'scope/gpt-6.1-sol', 'high'],
   ] as const)(
     'previews %s without changing configured or actual routes',
     (mode, target, effort) => {
@@ -1274,8 +1328,8 @@ describe('mode-adjusted route previews', () => {
         ),
       );
       expect(cell.current).toMatchObject({
-        model: 'scope/gpt-6.1-sol',
-        thinking: 'high',
+        model: 'scope/gpt-6.1-terra',
+        thinking: 'xhigh',
       });
       expect(cell.preferred).toMatchObject({
         status: 'eligible',
@@ -1299,7 +1353,7 @@ describe('mode-adjusted route previews', () => {
           (cell) => cell.activity === 'debug' && cell.tier === 'medium',
         ),
     );
-    expect(cell.preferred?.route?.model).toBe('scope/gpt-6.1-sol');
+    expect(cell.preferred?.route?.model).toBe('scope/gpt-6.1-terra');
     expect(cell.pendingPreferred?.route?.model).toBe('scope/gpt-6-luna');
   });
   it('shows pin and effort bypasses instead of pretending a mode changed the route', () => {

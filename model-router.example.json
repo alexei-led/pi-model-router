@@ -129,7 +129,7 @@
         "thinking": "high"
       },
       "medium": {
-        "model": "openai-codex/gpt-6.1-sol",
+        "model": "openai-codex/gpt-6.1-terra",
         "thinking": "medium"
       },
       "high": {
