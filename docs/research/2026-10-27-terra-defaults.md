@@ -28,15 +28,25 @@ this router table, and equal effort names do not mean equal compute.
 - [Codex pricing](https://developers.openai.com/codex/pricing): subscription credit
   billing is not API per-token billing and has no separate cache-write charge.
 
-A preceding local Codex experiment ran 36 isolated requests: two repetitions,
-three bounded fixtures and six model/effort settings. One capacity retry passed.
-Observed mean fixture charges: Terra/xhigh code 0.1339 versus Sol/medium 0.2177;
-Terra/medium review 0.0649 versus Sol/medium 0.1648; docs 0.0225 versus 0.0493.
-Luna/high passed bounded code/review more cheaply, but one Luna docs result had
-an arithmetic error; one Terra/low result kept a stale test.
-These small fixtures motivated a policy, not broad equivalence, production
-failure-rate estimates or guaranteed session savings. They are Codex observations,
-not measured Pi API costs.
+A preceding local Codex experiment recorded 36 isolated-thread requests through
+a shared daemon: two repetitions, three bounded fixtures and six selected
+model/effort settings. One capacity retry passed.
+**These labels are selected settings, not backend-verified model comparisons.**
+The experiment lacked server attestation. Later validation showed that the shared
+daemon could ignore per-call provider/base-URL overrides; which other overrides
+it honored was not established for these historical requests.
+
+Mean reported fixture charges by selected setting were Terra/xhigh code 0.1339
+versus Sol/medium 0.2177; Terra/medium review 0.0649 versus Sol/medium 0.1648;
+docs 0.0225 versus 0.0493. Selected Luna/high passed bounded code/review at lower
+reported charge, but one Luna-labelled docs result had an arithmetic error;
+one Terra/low-labelled result kept a stale test.
+This limited historical experiment does not establish backend quality, ROI,
+production failure rates or session savings. It is not measured Pi API cost.
+Independent Artificial Analysis evidence supports the derived policy rationale.
+The [current Pi SDK acceptance](../testing/terra-018-acceptance.md#real-openai-generation)
+separately verifies actual routing against outgoing requests and server responses,
+not comparative answer quality or savings.
 
 ## Runtime and price limits
 
