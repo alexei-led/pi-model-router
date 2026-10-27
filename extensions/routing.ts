@@ -357,6 +357,8 @@ const freezeTierConfig = (
   config: RoutedTierConfig,
 ): Readonly<RoutedTierConfig> => {
   const copy = structuredClone(config);
+  // Only the selected declaration belongs in an immutable generation plan.
+  delete copy.builtinModes;
   if (copy.fallbacks) Object.freeze(copy.fallbacks);
   if (copy.thinkingLevels) Object.freeze(copy.thinkingLevels);
   if (copy.resolvedFallbacks) {
@@ -431,6 +433,49 @@ const applyModeToCell = (
     if (!cellProfile[tier] || thinkingOverrides?.[tier]) continue;
     const recovery =
       recoverCostHigh && mode === 'cost' && tier === 'high' && !budgetExceeded;
+    const preferred = recovery
+      ? undefined
+      : cellProfile[tier]?.builtinModes?.[mode];
+    const preferredPair = preferred
+      ? availableRoutePairs(
+          { [tier]: preferred },
+          findModel,
+          imageAttached,
+        ).find((pair) => pair.model === preferred.model)
+      : undefined;
+    const own = primaries.find((pair) => pair.tier === tier);
+    const price = (ref: string) => {
+      const { provider, modelId } = parseCanonicalModelRef(ref);
+      return findModel(provider, modelId)?.cost.input;
+    };
+    // The configured primary's price is valid evidence even if it cannot serve this input.
+    const configured = cellProfile[tier];
+    const cheaper =
+      configured &&
+      preferredPair &&
+      (configured.model === preferredPair.model ||
+        ((price(preferredPair.model) ?? 0) > 0 &&
+          (price(configured.model) ?? 0) > (price(preferredPair.model) ?? 0)));
+    if (
+      preferred &&
+      preferredPair &&
+      fits(preferredPair) &&
+      (mode !== 'cost' || cheaper)
+    ) {
+      next[tier] = preferred;
+      overrides[tier] = preferredPair.thinking;
+      provenance[tier] = Object.freeze({
+        mode,
+        lever:
+          own?.model !== preferredPair.model
+            ? 'model'
+            : own.thinking !== preferredPair.thinking
+              ? 'effort'
+              : 'none',
+        sourceTier: tier,
+      });
+      continue;
+    }
     const result = transformRoute({
       mode: recovery ? 'balanced' : mode,
       tier,

@@ -5,6 +5,8 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
   activityPresetFor,
+  isOpenAIDefaultLadder,
+  openaiModePreference,
   presetActivityDeclarations,
 } from './activity-presets';
 import {
@@ -31,6 +33,7 @@ import type {
   ParsedConfigFile,
   RawRouterConfig,
   RoutedTierConfig,
+  RouterActivity,
   RouterConfig,
   RouterMode,
   RouterProfile,
@@ -437,7 +440,7 @@ const declaredFields = (
 
 const presetModelReference = (
   target: string,
-  generic: Record<string, unknown>,
+  generic: { model?: unknown },
   models: Record<string, ModelDefinition>,
 ): string => {
   if (
@@ -451,6 +454,42 @@ const presetModelReference = (
   return aliases.length === 1 ? (aliases[0]?.[0] ?? target) : target;
 };
 
+/** Normalize each preferred target independently; capabilities never travel across models. */
+const withBuiltinModes = (
+  config: RoutedTierConfig,
+  rawFallbacks: unknown,
+  tier: RouterTier,
+  models: Record<string, ModelDefinition>,
+  activity?: RouterActivity,
+): RoutedTierConfig => {
+  const { provider } = parseCanonicalModelRef(config.model);
+  const builtinModes: NonNullable<RoutedTierConfig['builtinModes']> = {};
+  for (const mode of ['cost', 'quality'] as const) {
+    const pair = openaiModePreference(tier, mode, activity);
+    if (!pair) continue;
+    const target = `${provider}/${pair[0]}`;
+    const inherited = target === config.model ? config : {};
+    const preferred = normalizeTierConfig(
+      {
+        ...inherited,
+        model: presetModelReference(target, config, models),
+        thinking: pair[1],
+        fallbacks: rawFallbacks,
+      },
+      'builtin-mode',
+      tier,
+      // Generated identities/efforts are valid; source cells already reported invalid fallbacks.
+      [],
+      models,
+      target,
+    );
+    if (preferred) builtinModes[mode] = preferred;
+  }
+  return Object.keys(builtinModes).length
+    ? { ...config, builtinModes }
+    : config;
+};
+
 /** Merge raw declarations, not another target's alias-derived capability metadata. */
 const normalizeActivities = (
   raw: unknown,
@@ -459,6 +498,7 @@ const normalizeActivities = (
   warnings: string[],
   models: Record<string, ModelDefinition>,
   defaults?: unknown,
+  openaiDefaults = false,
 ): RouterProfile['activities'] => {
   const explicit = raw;
   // Existing sparse user cells keep their original generic inheritance contract.
@@ -539,7 +579,7 @@ const normalizeActivities = (
       const modelRef = builtinTarget
         ? presetModelReference(builtinTarget, genericTier, models)
         : undefined;
-      const merged = {
+      const merged: Record<string, unknown> = {
         ...inherited,
         ...override,
         ...(modelRef ? { model: modelRef } : {}),
@@ -554,7 +594,9 @@ const normalizeActivities = (
       );
       if (config)
         tiers[tier] = {
-          ...config,
+          ...(!isExplicit && openaiDefaults
+            ? withBuiltinModes(config, merged.fallbacks, tier, models, activity)
+            : config),
           ...(!isExplicit ? { activitySource: 'builtin' as const } : {}),
         };
     }
@@ -899,6 +941,7 @@ const normalizeProfileActivities = (
     preset
       ? presetActivityDeclarations(generic, preset.family, preset.provider)
       : undefined,
+    preset?.family === 'openai',
   );
 
   return {
@@ -906,6 +949,31 @@ const normalizeProfileActivities = (
     ...(preset ? { activityPresetFamily: preset.family } : {}),
     ...(activities ? { activities } : {}),
   };
+};
+
+const withGenericBuiltinModes = (
+  profile: RouterProfile,
+  raw: Record<string, unknown>,
+  models: Record<string, ModelDefinition>,
+): RouterProfile => {
+  if (
+    profile.activityPresetFamily !== 'openai' ||
+    !isOpenAIDefaultLadder(profile)
+  )
+    return profile;
+  const result = { ...profile };
+  for (const tier of ROUTER_TIERS) {
+    const route = profile[tier];
+    const rawTier = raw[tier];
+    if (route)
+      result[tier] = withBuiltinModes(
+        route,
+        isObjectRecord(rawTier) ? rawTier.fallbacks : undefined,
+        tier,
+        models,
+      );
+  }
+  return result;
 };
 
 export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
@@ -1016,14 +1084,15 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       warnings.push(
         `Profile "${name}" mode must be cost, balanced or quality. Ignored.`,
       );
+    const generic = withGenericBuiltinModes(
+      { high, medium, low, micro, ...activitySettings },
+      profileRecord,
+      normalizedModels,
+    );
     normalizedProfiles[name] = {
       ...(isRouterMode(profileRecord.mode) ? { mode: profileRecord.mode } : {}),
-      ...activitySettings,
       ...(baselineTier ? { baselineTier } : {}),
-      high,
-      medium,
-      low,
-      micro,
+      ...generic,
       advisor,
     };
   }

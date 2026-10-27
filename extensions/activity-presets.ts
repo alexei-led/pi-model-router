@@ -1,6 +1,11 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { parseCanonicalModelRef } from './domain';
-import type { RouterActivity, RouterProfile, RouterTier } from './types';
+import type {
+  RouterActivity,
+  RouterMode,
+  RouterProfile,
+  RouterTier,
+} from './types';
 import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
 
 type PresetRow = readonly [
@@ -12,6 +17,7 @@ type PresetRow = readonly [
 export type ActivityPresetFamily = 'openai' | 'anthropic';
 const LUNA = 'gpt-6-luna';
 const SOL = 'gpt-6.1-sol';
+const TERRA = 'gpt-6.1-terra';
 const HAIKU = 'claude-haiku-5-5';
 const SONNET = 'claude-sonnet-5-5';
 const OPUS = 'claude-opus-5-5';
@@ -23,43 +29,43 @@ export const ACTIVITY_PRESETS = {
     code: [
       [LUNA, 'low'],
       [LUNA, 'high'],
-      [SOL, 'medium'],
+      [TERRA, 'xhigh'],
       [SOL, 'high'],
     ],
     debug: [
       [LUNA, 'medium'],
       [LUNA, 'high'],
-      [SOL, 'high'],
+      [TERRA, 'xhigh'],
       [SOL, 'xhigh'],
     ],
     explore: [
       [LUNA, 'low'],
-      [LUNA, 'medium'],
       [LUNA, 'high'],
+      [TERRA, 'medium'],
       [SOL, 'high'],
     ],
     plan: [
       [LUNA, 'medium'],
       [LUNA, 'high'],
-      [SOL, 'high'],
+      [TERRA, 'medium'],
       [SOL, 'xhigh'],
     ],
     review: [
       [LUNA, 'medium'],
       [LUNA, 'high'],
-      [SOL, 'high'],
+      [TERRA, 'medium'],
       [SOL, 'xhigh'],
     ],
     ops: [
       [LUNA, 'low'],
-      [LUNA, 'medium'],
       [LUNA, 'high'],
+      [TERRA, 'medium'],
       [SOL, 'high'],
     ],
     docs: [
       [LUNA, 'low'],
-      [LUNA, 'medium'],
-      [SOL, 'medium'],
+      [LUNA, 'high'],
+      [TERRA, 'medium'],
       [SOL, 'high'],
     ],
   },
@@ -112,8 +118,52 @@ export const ACTIVITY_PRESETS = {
   Record<RouterActivity, PresetRow>
 >;
 
+/** The new example ladder; matching does not rewrite generic declarations. */
+const OPENAI_DEFAULT_LADDER = {
+  micro: [LUNA, 'off'],
+  low: [LUNA, 'high'],
+  medium: [TERRA, 'medium'],
+  high: [SOL, 'high'],
+} as const;
+
+/** Model-first defaults only. Custom cells retain the generic mode transform. */
+export const openaiModePreference = (
+  tier: RouterTier,
+  mode: RouterMode,
+  activity?: RouterActivity,
+): readonly [string, ThinkingLevel] | undefined => {
+  if (tier === 'micro' || mode === 'balanced') return undefined;
+  if (mode === 'cost') {
+    if (tier === 'low') return [LUNA, 'medium'];
+    if (tier === 'medium') return [LUNA, 'high'];
+    return [
+      TERRA,
+      activity === 'code' || activity === 'debug' ? 'xhigh' : 'medium',
+    ];
+  }
+  if (tier === 'low') return [TERRA, 'medium'];
+  if (tier === 'high') return [SOL, 'xhigh'];
+  return [
+    SOL,
+    activity && ['code', 'debug', 'plan', 'review'].includes(activity)
+      ? 'high'
+      : 'medium',
+  ];
+};
+
+export const isOpenAIDefaultLadder = (profile: RouterProfile): boolean =>
+  ROUTER_TIERS.every((tier) => {
+    const route = profile[tier];
+    const [id, thinking] = OPENAI_DEFAULT_LADDER[tier];
+    return (
+      !route ||
+      (parseCanonicalModelRef(route.model).modelId === id &&
+        route.thinking === thinking)
+    );
+  });
+
 const RECOGNIZED_IDS: Record<ActivityPresetFamily, readonly string[]> = {
-  openai: [LUNA, SOL, 'gpt-6-sol'],
+  openai: [LUNA, TERRA, SOL, 'gpt-6-sol'],
   // Recognize existing 4.5 fast tiers for migration; never assign 4.5 as a 5.5 equivalent.
   anthropic: [HAIKU, SONNET, OPUS, 'claude-haiku-4-5'],
 };

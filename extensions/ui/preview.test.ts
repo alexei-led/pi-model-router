@@ -15,14 +15,16 @@ const find = (provider: string, id: string) =>
           ? 0.1
           : id === 'claude-opus-5-5'
             ? 4
-            : 2,
+            : id === 'gpt-6.1-terra'
+              ? 1
+              : 2,
       output: 10,
       cacheRead: 0.1,
       cacheWrite: 1,
     },
   });
 const pairs = {
-  openai: ['gpt-6-luna', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-sol'],
+  openai: ['gpt-6-luna', 'gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'],
   anthropic: [
     'claude-haiku-5-5',
     'claude-haiku-5-5',

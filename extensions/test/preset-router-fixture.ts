@@ -8,6 +8,19 @@ import {
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 export default (pi: ExtensionAPI) => {
+  let tier = 'medium';
+  let activity = 'debug';
+  pi.registerCommand('preset-choice', {
+    description: 'Select the deterministic local fixture tier/activity.',
+    handler: async (args, ctx) => {
+      const [nextTier, nextActivity] = args.trim().split(/\s+/u);
+      if (!nextTier || !nextActivity)
+        throw new Error('Expected tier and activity');
+      tier = nextTier;
+      activity = nextActivity === 'generic' ? 'uncertain' : nextActivity;
+      ctx.ui.notify(`LOCAL FIXTURE: ${tier}/${activity}`, 'info');
+    },
+  });
   const classify = async (
     model: ClassifierModel<ClassifierApi>,
     context: ClassifierContext,
@@ -15,7 +28,7 @@ export default (pi: ExtensionAPI) => {
     const question = context.questions.route;
     const choice =
       question?.type === 'choice'
-        ? Object.keys(question.criteria).find((id) => id.startsWith('medium|'))
+        ? Object.keys(question.criteria).find((id) => id.startsWith(`${tier}|`))
         : undefined;
     return {
       api: model.api,
@@ -38,9 +51,9 @@ export default (pi: ExtensionAPI) => {
           ? {
               activity: {
                 type: 'choice' as const,
-                choice: 'debug',
+                choice: activity,
                 confidence: 1,
-                probabilities: { debug: 1 },
+                probabilities: { [activity]: 1 },
               },
             }
           : {}),
@@ -53,7 +66,7 @@ export default (pi: ExtensionAPI) => {
       api: 'preset-fixture',
       baseUrl: 'fixture://local',
       models: (provider === 'preset-openai'
-        ? ['gpt-6-luna', 'gpt-6.1-sol']
+        ? ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol']
         : ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5']
       ).map((id) => ({
         id,
@@ -61,14 +74,21 @@ export default (pi: ExtensionAPI) => {
         input: ['text'],
         reasoning: true,
         thinkingLevelMap: {
-          off: null,
+          ...(provider === 'preset-openai' && id !== 'gpt-6.1-sol'
+            ? {}
+            : { off: null }),
           minimal: null,
           xhigh: 'xhigh',
           max: 'max',
         },
         contextWindow: 128000,
         maxTokens: 4096,
-        cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 },
+        cost: {
+          input: id === 'gpt-6-luna' ? 0.1 : id === 'gpt-6.1-sol' ? 2 : 1,
+          output: 2,
+          cacheRead: 0.1,
+          cacheWrite: 1.25,
+        },
       })),
       streamSimple: (model, _context, options) => {
         const stream = createAssistantMessageEventStream();

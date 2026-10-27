@@ -35,12 +35,12 @@ flowchart LR
 Blue marks routing policy, amber marks advice, green marks generation, and gray marks local state or baseline.
 Node labels identify each role without color.
 
-| Owner | Responsibility |
-| --- | --- |
-| Router | Profile policy, eligible routes, advisor calls, explicit fallbacks, and diagnostics. |
-| Pi | Authentication, credential-specific URLs, provider dispatch, transcript conversion, and tool permissions. |
-| Structured advisor | Advice among eligible tier candidates. It cannot add models or authorize tools. |
-| Operator | Model configuration, provider access, and per-profile approval for external context. |
+| Owner              | Responsibility                                                                                            |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| Router             | Profile policy, eligible routes, advisor calls, explicit fallbacks, and diagnostics.                      |
+| Pi                 | Authentication, credential-specific URLs, provider dispatch, transcript conversion, and tool permissions. |
+| Structured advisor | Advice among eligible tier candidates. It cannot add models or authorize tools.                           |
+| Operator           | Model configuration, provider access, and per-profile approval for external context.                      |
 
 The router never reads private authentication storage or claims to identify the provider account behind a login.
 Only a current locally prevalidated route-matrix cell can authorize generation.
@@ -102,14 +102,24 @@ Explicit fallback models retain their configured order. They are not extra class
 Prompt words, language, length, and inferred task phase never select a local tier.
 
 The routing mode is applied while the matrix is built, before advice and
-baseline selection. `modes.ts` holds the pure transform: for each generic or
-activity cell it returns the source tier, the effort and the lever (`model`,
-`effort` or `none`). `routing.ts` checks the lever's source route for
+baseline selection. `config.ts` attaches runtime-only `builtinModes` alternatives to default-owned
+OpenAI cells. Exact homogeneous new-example generic ladders can receive them;
+old/custom generic declarations are not rewritten. Each alternative is normalized
+for its own exact provider/model and alias metadata, retaining only declared
+fallbacks across a model change. Explicit activity/session cells do not receive
+alternatives, and `activityPreset: off` disables them entirely.
+`routing.ts` first validates the preferred primary against the live registry,
+input, effort and context; cost model changes require positive cheaper prices.
+An ineligible preference falls through to the existing transform, not an implicit
+retry. `modes.ts` holds that pure legacy/custom transform: for each cell it returns
+the source tier, effort and lever (`model`, `effort` or `none`). `routing.ts` checks the lever's source route for
 availability and context fit, and stores the result in the plan's attempts,
 `thinkingOverrides` and `mode` provenance. Pins skip the transform. `micro` and
 an effort override keep the configured pair. Plan IDs contain the transformed
-pairs, and the advice fence contains the mode, so advice made under another
-mode cannot match. After advice, the matrix is rebuilt from the live mode, so
+pairs, and the advice fence contains the mode and normalized profile, so advice
+made under another mode/configuration cannot match. A plan snapshots only its
+selected declaration, not unselected mode alternatives. UI cell revisions include
+those alternatives so queued edits cannot reuse stale mode-target metadata. After advice, the matrix is rebuilt from the live mode, so
 only the current mode's cells generate. [Mode behavior](user-guide.md#choose-a-routing-mode).
 
 `escalation.ts` hashes a failing tool's name and normalized output. A validated cost-transformed high continuation can arm a balanced-high recovery, scoped by native branch ancestry, configuration identity and routing policy. The high cells are rebuilt before reuse/advice, and the recovery state enters the cache policy fence. Subsequent continuations retain the recovered immutable plan. Pins, manual effort, budgets and Google continuation constraints still win. This runtime-only hold is not persisted.
@@ -214,24 +224,24 @@ not native pi-subagents policy propagation.
 
 ## Failure behavior
 
-| Event | Router action | Boundary |
-| --- | --- | --- |
-| Initial advisor times out, abstains, or returns invalid advice. | Select the eligible baseline. | Do not call a second advisor. |
-| Background review fails, is stale or expires. | Keep the valid eligible incumbent. | Do not delay generation or apply old advice. |
-| An explicit pin has no eligible route. | Return an error. | Do not substitute another tier. |
-| The caller cancels. | Stop the request. | Do not start baseline generation or retry. |
-| Generation fails before visible content. | Try the next configured fallback, or return an error. | Revalidate the target and account for reported costs. |
-| Generation fails after visible content. | End the response with an error. | Do not retry on another model. |
-| The stream ends without a terminal event. | Return an incomplete-stream error. | Apply the same visibility and cancellation limits to retries. |
-| A Google thought-signature continuation loses its compatible prior model. | Fail the continuation. | Do not send it to an incompatible model. |
+| Event                                                                     | Router action                                         | Boundary                                                      |
+| ------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------- |
+| Initial advisor times out, abstains, or returns invalid advice.           | Select the eligible baseline.                         | Do not call a second advisor.                                 |
+| Background review fails, is stale or expires.                             | Keep the valid eligible incumbent.                    | Do not delay generation or apply old advice.                  |
+| An explicit pin has no eligible route.                                    | Return an error.                                      | Do not substitute another tier.                               |
+| The caller cancels.                                                       | Stop the request.                                     | Do not start baseline generation or retry.                    |
+| Generation fails before visible content.                                  | Try the next configured fallback, or return an error. | Revalidate the target and account for reported costs.         |
+| Generation fails after visible content.                                   | End the response with an error.                       | Do not retry on another model.                                |
+| The stream ends without a terminal event.                                 | Return an incomplete-stream error.                    | Apply the same visibility and cancellation limits to retries. |
+| A Google thought-signature continuation loses its compatible prior model. | Fail the continuation.                                | Do not send it to an incompatible model.                      |
 
 ## State and cost
 
-| State | Lifetime | Contents |
-| --- | --- | --- |
-| Runtime route cache | Current process | Turn hashes, branch identity, tool IDs, shared advice, and eligible routes. |
-| `router-state` entries | Pi session branch | Profile, pins, cost, display controls, latest decision, and up to 50 debug decisions, with native owner identity. |
-| Profile preference file | Across sessions | Last explicitly selected profile. Explicit startup selection takes priority. |
+| State                   | Lifetime          | Contents                                                                                                          |
+| ----------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Runtime route cache     | Current process   | Turn hashes, branch identity, tool IDs, shared advice, and eligible routes.                                       |
+| `router-state` entries  | Pi session branch | Profile, pins, cost, display controls, latest decision, and up to 50 debug decisions, with native owner identity. |
+| Profile preference file | Across sessions   | Last explicitly selected profile. Explicit startup selection takes priority.                                      |
 
 Snapshots use deep copies and field-level validation.
 They exclude raw advisor responses, prompts, credentials, endpoints, and remote explanations.
@@ -250,34 +260,34 @@ Queued controls activate at an owned user boundary: `before_agent_start` handles
 
 ## Module ownership
 
-| Module | Responsibility |
-| --- | --- |
-| `index.ts` | Wire Pi lifecycle hooks, extension state, branch restoration, commands, provider, and UI. |
-| `config.ts` | Load, merge, validate, and normalize configuration. |
-| `activity-presets.ts` | Exact-ID family recognition and complete built-in activity route declarations. No auth or provider transport. |
-| `domain.ts` | Parse canonical model references and validate pure tier, effort, and pin values; no config I/O. |
-| `routing.ts` | Build immutable eligible cell plans and apply baseline, pin, budget, input, context-fit, and effort policy. |
-| `modes.ts` | Resolve the routing mode and effective switch policy; transform a route pair for cost or quality. |
-| `escalation.ts` | Detect repeated tool failures and hold the escalation floor. |
-| `provider.ts` | Register logical profile models from live capabilities, create the provider-scoped turn cache, and adapt Pi's stream API. |
-| `provider-request.ts` | Build turn identity, validate continuation reuse, resolve a current matrix cell, and coordinate classifier advice. |
-| `provider-turns.ts` | Keep bounded continuation/advice caches and retain selected plans and reference-count shared classifier flights for one session-owned provider registration. |
-| `provider-generation.ts` | Revalidate physical targets, run configured generation fallbacks before visible content, account for attempts, and forward events. |
-| `provider-runtime.ts` | Wait for the model registry and bridge request preparation/generation to Pi streams, persistence, and status updates. |
-| `context.ts` | Select bounded classifier text and extract generation input. |
-| `classifier.ts` | Build typed bounded requests, call Pi's classifier registry, enforce deadlines, and validate advice. |
-| `choice.ts` | Define the provider-neutral rubric, candidate identity, and strict response validation. |
-| `economics.ts` | Produce observed generation metrics and diagnostic hypothetical comparisons. |
-| `switch-policy.ts` | Evaluate catalog switch estimates, exact-model effort/cache metadata, confidence override and cost holds. |
-| `state.ts` | Validate, copy, and persist allowlisted branch-safe snapshots. |
-| `commands.ts` | Register router commands and completions. |
-| `ui/preview.ts` | Project current and queued text-only preferences through the same matrix builder as generation. No auth or request-context attestation. |
-| `ui.ts` | Format and publish the route strip and expose the native inspector entrypoint. |
-| `ui/runtime.ts` | Own transient snapshots, queued control transactions, observations, and capability revalidation. |
-| `ui/controls.ts` | Validate control edits without terminal dependencies. |
-| `ui/presentation.ts` | Format sanitized snapshots and fixed local reasons without host or terminal dependencies. |
-| `ui/inspector.ts` | Render and operate the native Pi terminal inspector. |
-| `types.ts` | Define shared contracts. |
+| Module                   | Responsibility                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `index.ts`               | Wire Pi lifecycle hooks, extension state, branch restoration, commands, provider, and UI.                                                                    |
+| `config.ts`              | Load, merge and normalize configuration and per-target default-mode metadata, preserving explicit declarations.                                              |
+| `activity-presets.ts`    | Exact-ID family recognition, built-in activity declarations and default-owned OpenAI mode preferences. No auth or transport.                                 |
+| `domain.ts`              | Parse canonical model references and validate pure tier, effort, and pin values; no config I/O.                                                              |
+| `routing.ts`             | Build immutable eligible cell plans and apply baseline, pin, budget, input, context-fit, and effort policy.                                                  |
+| `modes.ts`               | Resolve mode and effective switch policy; retain deterministic custom/legacy transforms.                                                                     |
+| `escalation.ts`          | Detect repeated tool failures and hold the escalation floor.                                                                                                 |
+| `provider.ts`            | Register logical profile models from live capabilities, create the provider-scoped turn cache, and adapt Pi's stream API.                                    |
+| `provider-request.ts`    | Build turn identity, validate continuation reuse, resolve a current matrix cell, and coordinate classifier advice.                                           |
+| `provider-turns.ts`      | Keep bounded continuation/advice caches and retain selected plans and reference-count shared classifier flights for one session-owned provider registration. |
+| `provider-generation.ts` | Revalidate physical targets, run configured generation fallbacks before visible content, account for attempts, and forward events.                           |
+| `provider-runtime.ts`    | Wait for the model registry and bridge request preparation/generation to Pi streams, persistence, and status updates.                                        |
+| `context.ts`             | Select bounded classifier text and extract generation input.                                                                                                 |
+| `classifier.ts`          | Build typed bounded requests, call Pi's classifier registry, enforce deadlines, and validate advice.                                                         |
+| `choice.ts`              | Define the provider-neutral rubric, candidate identity, and strict response validation.                                                                      |
+| `economics.ts`           | Produce observed generation metrics and diagnostic hypothetical comparisons.                                                                                 |
+| `switch-policy.ts`       | Evaluate catalog switch estimates, exact-model effort/cache metadata, confidence override and cost holds.                                                    |
+| `state.ts`               | Validate, copy, and persist allowlisted branch-safe snapshots.                                                                                               |
+| `commands.ts`            | Register router commands and completions.                                                                                                                    |
+| `ui/preview.ts`          | Project current and queued text-only preferences through the same matrix builder as generation. No auth or request-context attestation.                      |
+| `ui.ts`                  | Format and publish the route strip and expose the native inspector entrypoint.                                                                               |
+| `ui/runtime.ts`          | Own transient snapshots, queued control transactions, observations, and capability revalidation.                                                             |
+| `ui/controls.ts`         | Validate control edits without terminal dependencies.                                                                                                        |
+| `ui/presentation.ts`     | Format sanitized snapshots and fixed local reasons without host or terminal dependencies.                                                                    |
+| `ui/inspector.ts`        | Render and operate the native Pi terminal inspector.                                                                                                         |
+| `types.ts`               | Define shared contracts.                                                                                                                                     |
 
 Request preparation applies routing policy and uses provider-scoped coordination for classifier advice. Generation validates and delegates each physical target through Pi. State and UI do not import provider or classifier transport. `ui/controls.ts` and `ui/presentation.ts` do not import the terminal inspector, TUI, or Pi transport APIs. `domain.ts` has no configuration I/O. Structured classification and generation both use Pi's registry, not a parallel authentication layer.
 

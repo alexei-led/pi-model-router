@@ -2,15 +2,71 @@
 
 **Activity says what the work is. Tier says how demanding it is. Mode adjusts the preferred model and effort.**
 
-Keep `balanced` for normal use. Choose `cost` when you accept a cheaper starting route.
-Choose `quality` when you want more reasoning before execution.
+Keep `balanced` for normal use. Choose `cost` for a cheaper starting route,
+or `quality` for a stronger preferred model/effort pair.
 These names describe policy, not measured quality or a spending guarantee.
 
-| Mode | Preferred route |
-| --- | --- |
-| `cost` | Use the next lower tier's model when its input price is lower and its context fits. Otherwise lower effort one step, not below `low`. |
-| `balanced` | Keep the configured activity pair. This is the default. |
-| `quality` | Raise effort one step. If no higher supported effort exists, try the next tier's route. Do not reach `high` over budget. |
+## OpenAI default preferences
+
+With the new example ladder, the generic preferences are:
+
+| Tier   | cost           | balanced       | quality        |
+| ------ | -------------- | -------------- | -------------- |
+| micro  | Luna / off     | Luna / off     | Luna / off     |
+| low    | Luna / medium  | Luna / high    | Terra / medium |
+| medium | Luna / high    | Terra / medium | Sol / medium   |
+| high   | Terra / medium | Sol / high     | Sol / xhigh    |
+
+Luna is `gpt-6-luna`, Terra is `gpt-6.1-terra`, and Sol is `gpt-6.1-sol`.
+The exact configured provider ID is preserved. Availability under one provider
+does not establish availability under another.
+
+Built-in activities use the same low row. At medium/balanced and high/cost,
+code/debug use Terra/xhigh; other activities use Terra/medium.
+Medium/quality uses Sol/high for code/debug/plan/review, otherwise Sol/medium.
+High/balanced uses Sol/xhigh for debug/plan/review, otherwise Sol/high.
+High/quality is Sol/xhigh. Existing micro activity pairs stay unchanged.
+The [generated mode table](mode-preferences.md) lists every activity cell.
+
+These are **model-first, mode-aware defaults**, not the old effort-first quality
+transform. They apply only to default-owned cells:
+
+- Recognized OpenAI built-in activity cells receive the new preferences on reload.
+- Generic cells receive them only with `activityPreset: "auto"` and a homogeneous
+  profile whose entire configured generic ladder matches the balanced example
+  above, after alias resolution. Partial matching ladders are supported; they
+  can introduce a preferred model not named in another tier.
+- Generic declarations are not rewritten. An old/custom ladder keeps its
+  generic mode transform. Explicit activity cells, including thinking-only
+  cells, never receive built-in mode alternatives. `null` uses the generic cell.
+  Session cell edits remove built-in alternatives from that cell.
+- `activityPreset: "off"` disables all automatic activity/mode defaults,
+  including generic alternatives. `activityRouting: "off"` excludes activity
+  cells only; a matching generic ladder can still use its mode defaults.
+
+A preferred primary must support the input, fit the request and have a supported
+mapped effort. Cost model changes also require positive catalog prices proving
+a cheaper input rate. The configured primary's registry price can supply that
+comparison even when the primary cannot serve the input; only the preferred
+target must be input-eligible. Missing/zero prices are not evidence of a cheaper model.
+If a preference is ineligible, use the eligible legacy transform below, then
+the configured pair. This selection adds no implicit generation fallback or retry.
+
+### Custom and non-OpenAI cells
+
+| Mode       | Legacy transform                                                                                                                         |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `cost`     | Use the next lower tier's model when its input price is lower and its context fits. Otherwise lower effort one step, not below `low`.    |
+| `balanced` | Keep the configured pair.                                                                                                                |
+| `quality`  | Raise effort one step. If no higher supported effort exists, try the next tier's route. Do not use a high-source tier lever over budget. |
+
+Anthropic presets and arbitrary/custom/mixed providers retain this behavior;
+the router never inserts Terra into them. Quality does not intentionally lower
+an eligible balanced route's effort on the same model.
+
+The soft budget filters logical tiers and skips advisors, not physical models
+or prices. A normalized medium Sol cell can remain eligible over budget even
+when high also names Sol. This is not a physical-model price ceiling.
 
 `micro` is unchanged by modes. A pin uses its generic configured tier and bypasses the mode.
 A tier-wide effort override also bypasses that tier's mode transform.
@@ -20,13 +76,12 @@ For example, with the built-in OpenAI preset, `medium + debug` prefers:
 
 ```text
 cost      → gpt-6-luna / high
-balanced  → gpt-6.1-sol / high
-quality   → gpt-6.1-sol / xhigh
+balanced  → gpt-6.1-terra / xhigh
+quality   → gpt-6.1-sol / high
 ```
 
-This example requires a configured lower tier, available targets and fitting context.
-A partial profile without that lower tier uses the effort step instead.
-The [complete generated mode table](mode-preferences.md) covers all 56 preset cells.
+This example requires available targets, usable prices for cost and fitting context.
+Defaults and custom transforms follow the ownership rules above.
 The [decision matrix](decision-matrix.md) also covers pins, budgets, escalation and explicit overrides.
 
 ## Change this session
@@ -116,7 +171,7 @@ Advice, a switch-cost hold or temporary recovery can also change the result.
 ## Recover from a failing cost route
 
 Cost mode can keep the logical tier `high` while using a cheaper physical model.
-For example, `high + ops` can prefer Haiku/high instead of its balanced Opus/high pair.
+For example, OpenAI `high + ops` prefers Terra/medium instead of its balanced Sol/high pair.
 Ordinary one-tier escalation cannot move above high.
 
 The router now restores the **balanced high cell** after the existing failure trigger:
@@ -146,11 +201,11 @@ See [failure detection limits](user-guide.md#repeated-tool-failures).
 
 Mode patches adjust the existing Pi switch controller. They do not copy Claude Code's vote/dwell controller.
 
-| Mode | `costSensitivity` | `escalationHoldTurns` |
-| --- | ---: | ---: |
-| `cost` | 0.8 | 1 |
-| `balanced` | configured | configured |
-| `quality` | 0.2 | 4 |
+| Mode       | `costSensitivity` | `escalationHoldTurns` |
+| ---------- | ----------------: | --------------------: |
+| `cost`     |               0.8 |                     1 |
+| `balanced` |        configured |            configured |
+| `quality`  |               0.2 |                     4 |
 
 These values are untuned starting points.
 A base `switchPolicy` value loses to the mode patch. An explicit Settings edit wins over both for the session.
@@ -176,6 +231,8 @@ See [cache and cost limits](user-guide.md#read-costs-and-cache-data).
 
 ## Verification and limits
 
-The [mode acceptance record](testing/routing-modes-017-acceptance.md) separates real model-backed runs from local fixtures.
+The [Terra acceptance record](testing/terra-018-acceptance.md) separates real model-backed runs from local fixtures.
+The [policy evidence](research/2026-10-27-terra-defaults.md) explains the derived defaults.
+The [0.17 mode acceptance record](testing/routing-modes-017-acceptance.md) describes the earlier policy.
 The [earlier offline estimate](research/2026-10-21-routing-modes-impact.md) predates the new activity presets.
 It does not validate their savings or answer quality.

@@ -39,7 +39,9 @@ export const preferenceLine = (
         : value.bypass === 'activity-off'
           ? 'activity routing off; generic route'
           : value.lever === 'model'
-            ? `model from ${value.sourceTier}`
+            ? value.sourceTier === value.route.tier
+              ? 'mode model preference'
+              : `model from ${value.sourceTier}`
             : value.lever === 'effort'
               ? 'effort step'
               : 'configured pair';

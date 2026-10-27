@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.18.0] - 2026-10-27
+
+### Summary
+
+Use Terra-aware, model-first OpenAI mode defaults while preserving explicit routes and exact provider identities.
+
+### Changes
+
+- Recognize `gpt-6.1-terra`. Built-in OpenAI activities use Terra at balanced/medium and cost/high, Luna at cost/medium, and Sol at quality/medium. Code/debug prefer Terra/xhigh; other Terra activities prefer medium. Low quality prefers Terra/medium; high quality prefers Sol/xhigh.
+- Apply exact mode alternatives before advice through the same immutable route matrix used by generation and current/queued previews. Normalize each target's own alias metadata against Pi's live provider-scoped catalog.
+- Keep generic user declarations unchanged. Automatic generic alternatives require the exact new example ladder; explicit activity/session cells keep their own inheritance and legacy transforms. Anthropic, mixed and arbitrary profiles do not acquire OpenAI targets.
+- Preserve declared-only pre-visible generation fallbacks, effort mapping, input/context eligibility, soft-budget advisor exclusion, cancellation and native owner/configuration fences. Cost/high repeated-failure recovery still restores bounded balanced Sol high cells.
+- Include mode-target metadata in queued-cell revision checks and distinguish a mode model preference from another tier's lever.
+
+### Upgrade
+
+1. Before upgrading, set `profiles.<name>.activityPreset: "off"` to disable all automatic activity/mode defaults and retain legacy tier-mode behavior. Otherwise recognized existing profiles receive new physical models on reload and spending can change. `activityRouting: "off"` excludes activities only.
+2. Restart Pi or run `/reload` after updating. `/router reload` reloads configuration, not extension code.
+3. Inspect Routes and the exact provider's live catalog. Defaults do not grant classifier consent, credentials or permissions.
+
+See [mode ownership and precedence](docs/routing-modes.md#openai-default-preferences), [policy evidence](docs/research/2026-10-27-terra-defaults.md), and [verification and limits](docs/testing/terra-018-acceptance.md).
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.17.0...v0.18.0)
+
 ## [0.17.0] - 2026-10-25
 
 ### Summary
@@ -168,7 +192,6 @@ Require Pi 1.1.0 and route through any Pi-registered classifier.
 ### Upgrade
 
 Replace `jev`, `cloudflare`, `classifierModel`, and string advisor settings with `advisor: { enabled, model, ... }` in user config and `profiles.<name>.advisor.models` containing exact canonical classifier references. Configure provider credentials and models in Pi. See [classifier setup](docs/classifier-advisor.md).
-
 
 ## [0.11.0] - 2026-10-06
 

@@ -23,6 +23,18 @@ export const recoveryFixtureConfig = {
   },
 };
 
+export const terraRecoveryFixtureConfig = {
+  ...recoveryFixtureConfig,
+  profiles: {
+    auto: {
+      ...recoveryFixtureConfig.profiles.auto,
+      high: { model: 'recovery-local/gpt-6.1-sol', thinking: 'high' },
+      medium: { model: 'recovery-local/gpt-6.1-terra', thinking: 'medium' },
+      low: { model: 'recovery-local/gpt-6-luna', thinking: 'high' },
+    },
+  },
+};
+
 export default (pi: ExtensionAPI) => {
   let requests = 0;
   const physical: { model: string; effort: string }[] = [];
@@ -40,28 +52,44 @@ export default (pi: ExtensionAPI) => {
     api: 'recovery-local-chat',
     baseUrl: 'fixture://local',
     models: [
-      ...['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].map(
-        (id) => ({
-          id,
-          name: id,
-          reasoning: true,
-          thinkingLevelMap: {
-            off: null,
-            minimal: null,
-            xhigh: 'xhigh',
-            max: 'max',
-          },
-          input: ['text'] as ['text'],
-          contextWindow: 128000,
-          maxTokens: 4096,
-          cost: {
-            input: id.includes('haiku') ? 0.1 : id.includes('sonnet') ? 2 : 4,
-            output: 10,
-            cacheRead: 0.1,
-            cacheWrite: 1,
-          },
-        }),
-      ),
+      ...[
+        'claude-opus-5-5',
+        'claude-sonnet-5-5',
+        'claude-haiku-5-5',
+        'gpt-6-luna',
+        'gpt-6.1-terra',
+        'gpt-6.1-sol',
+      ].map((id) => ({
+        id,
+        name: id,
+        reasoning: true,
+        thinkingLevelMap: {
+          off: null,
+          minimal: null,
+          xhigh: 'xhigh',
+          max: 'max',
+        },
+        input: ['text'] as ['text'],
+        contextWindow: 128000,
+        maxTokens: 4096,
+        cost: {
+          input:
+            id === 'gpt-6-luna'
+              ? 0.1
+              : id === 'gpt-6.1-terra'
+                ? 1
+                : id === 'gpt-6.1-sol'
+                  ? 2
+                  : id.includes('haiku')
+                    ? 0.1
+                    : id.includes('sonnet')
+                      ? 2
+                      : 4,
+          output: 10,
+          cacheRead: 0.1,
+          cacheWrite: 1,
+        },
+      })),
       {
         type: 'classifier',
         id: 'choice',

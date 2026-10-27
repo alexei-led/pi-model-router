@@ -34,43 +34,43 @@ const openaiExpected = {
   code: [
     ['gpt-6-luna', 'low'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-sol', 'medium'],
+    ['gpt-6.1-terra', 'xhigh'],
     ['gpt-6.1-sol', 'high'],
   ],
   debug: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-sol', 'high'],
+    ['gpt-6.1-terra', 'xhigh'],
     ['gpt-6.1-sol', 'xhigh'],
   ],
   explore: [
     ['gpt-6-luna', 'low'],
-    ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
+    ['gpt-6.1-terra', 'medium'],
     ['gpt-6.1-sol', 'high'],
   ],
   plan: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-sol', 'high'],
+    ['gpt-6.1-terra', 'medium'],
     ['gpt-6.1-sol', 'xhigh'],
   ],
   review: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-sol', 'high'],
+    ['gpt-6.1-terra', 'medium'],
     ['gpt-6.1-sol', 'xhigh'],
   ],
   ops: [
     ['gpt-6-luna', 'low'],
-    ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
+    ['gpt-6.1-terra', 'medium'],
     ['gpt-6.1-sol', 'high'],
   ],
   docs: [
     ['gpt-6-luna', 'low'],
-    ['gpt-6-luna', 'medium'],
-    ['gpt-6.1-sol', 'medium'],
+    ['gpt-6-luna', 'high'],
+    ['gpt-6.1-terra', 'medium'],
     ['gpt-6.1-sol', 'high'],
   ],
 };
@@ -105,7 +105,7 @@ describe('built-in activity routes', () => {
             thinkingLevels: ['medium', 'high'],
           },
           cheap: {
-            model: 'work/gpt-6-luna',
+            model: 'work/gpt-6.1-terra',
             thinkingLevels: ['low', 'high'],
             effortCacheSharing: 'separate',
           },
@@ -113,7 +113,7 @@ describe('built-in activity routes', () => {
       },
     );
     expect(profile.activities?.ops?.medium).toMatchObject({
-      model: 'work/gpt-6-luna',
+      model: 'work/gpt-6.1-terra',
       thinkingLevels: ['low', 'high'],
     });
     expect(profile.activities?.ops?.low).toBeUndefined();
@@ -318,21 +318,19 @@ describe('preset migration boundaries', () => {
       },
     });
     const route = required(profile.activities?.ops?.medium);
-    expect(route.model).toBe('work/gpt-6-luna');
+    expect(route.model).toBe('work/gpt-6.1-terra');
     expect(route.thinkingLevels).toBeUndefined();
     expect(route.contextWindow).toBeUndefined();
     expect(route.maxTokens).toBeUndefined();
     expect(route.fallbacks).toEqual(['work/fallback']);
-    expect(profile.activities?.debug?.medium?.thinkingLevels).toEqual([
-      'medium',
-    ]);
+    expect(profile.activities?.debug?.medium?.thinkingLevels).toBeUndefined();
   });
   it('cannot redirect a built-in canonical target through a canonical-looking alias key', () => {
     const profile = profileOf(
       { medium: { model: 'work/gpt-6.1-sol' } },
-      { models: { 'work/gpt-6-luna': { model: 'personal/gpt-6.1-sol' } } },
+      { models: { 'work/gpt-6.1-terra': { model: 'personal/gpt-6.1-sol' } } },
     );
-    expect(profile.activities?.ops?.medium?.model).toBe('work/gpt-6-luna');
+    expect(profile.activities?.ops?.medium?.model).toBe('work/gpt-6.1-terra');
   });
   it('keeps preset opt-out user-owned while allowing project cell tuning', () => {
     const warnings: string[] = [];
@@ -366,7 +364,7 @@ describe('preset migration boundaries', () => {
     const matrix = buildRouteMatrix(
       profile,
       (provider, id) =>
-        id === 'gpt-6-luna' ? undefined : model(id, { provider }),
+        id === 'gpt-6.1-terra' ? undefined : model(id, { provider }),
       false,
       0,
     );
@@ -422,7 +420,7 @@ it.each(['openai', 'anthropic'] as const)(
   (family) => {
     const ids =
       family === 'openai'
-        ? ['gpt-6-luna', 'gpt-6.1-sol']
+        ? ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol']
         : ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'];
     const profile = profileOf(
       Object.fromEntries(
@@ -499,7 +497,7 @@ it('protects generated identity without changing explicitly declared fallback al
     { models: { 'work/gpt-6-luna': { model: 'personal/gpt-6.1-sol' } } },
   );
   expect(profile.activities?.ops?.medium).toMatchObject({
-    model: 'work/gpt-6-luna',
+    model: 'work/gpt-6.1-terra',
     fallbacks: ['personal/gpt-6.1-sol', 'work/last'],
   });
 });

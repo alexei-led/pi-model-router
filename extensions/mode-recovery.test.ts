@@ -4,9 +4,14 @@ import { normalizeConfig } from './config';
 import { prepareRouterRequest } from './provider-request';
 import { createProviderTurnCache } from './provider-turns';
 import { message, model, required } from './test/fixtures';
-import type { RouterMode, RouterThinkingByTier, RouterTier } from './types';
+import type {
+  RouterActivity,
+  RouterMode,
+  RouterThinkingByTier,
+  RouterTier,
+} from './types';
 
-const scenario = async () => {
+const scenario = async (openai = false, activity: RouterActivity = 'ops') => {
   let config = normalizeConfig({
     advisor: { enabled: true, model: 'fixture/choice', reviewEveryRequests: 0 },
     maxSessionBudget: 1,
@@ -14,9 +19,18 @@ const scenario = async () => {
       p: {
         advisor: { models: ['fixture/choice'] },
         baselineTier: 'high',
-        high: { model: 'scope/claude-opus-5-5', thinking: 'high' },
-        medium: { model: 'scope/claude-sonnet-5-5', thinking: 'medium' },
-        low: { model: 'scope/claude-sonnet-5-5', thinking: 'low' },
+        high: {
+          model: openai ? 'scope/gpt-6.1-sol' : 'scope/claude-opus-5-5',
+          thinking: 'high',
+        },
+        medium: {
+          model: openai ? 'scope/gpt-6.1-terra' : 'scope/claude-sonnet-5-5',
+          thinking: 'medium',
+        },
+        low: {
+          model: openai ? 'scope/gpt-6-luna' : 'scope/claude-sonnet-5-5',
+          thinking: openai ? 'high' : 'low',
+        },
       },
     },
   }).config;
@@ -60,9 +74,9 @@ const scenario = async () => {
             : {}),
           activity: {
             type: 'choice' as const,
-            choice: 'ops',
+            choice: activity,
             confidence: 1,
-            probabilities: { ops: 1 },
+            probabilities: { [activity]: 1 },
           },
         },
       };
@@ -72,10 +86,23 @@ const scenario = async () => {
     find: (provider: string, id: string) =>
       model(id, {
         provider,
-        contextWindow: id === 'claude-opus-5-5' ? opusWindow : 128000,
+        contextWindow:
+          id === (openai ? 'gpt-6.1-sol' : 'claude-opus-5-5')
+            ? opusWindow
+            : 128000,
         thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
         cost: {
-          input: id.includes('haiku') ? 0.1 : id.includes('sonnet') ? 2 : 4,
+          input: openai
+            ? id === 'gpt-6-luna'
+              ? 0.1
+              : id === 'gpt-6.1-terra'
+                ? 1
+                : 2
+            : id.includes('haiku')
+              ? 0.1
+              : id.includes('sonnet')
+                ? 2
+                : 4,
           output: 10,
           cacheRead: 0.1,
           cacheWrite: 1,
@@ -204,6 +231,53 @@ const scenario = async () => {
 };
 
 describe('cost-mode failure recovery', () => {
+  it.each([
+    'code',
+    'debug',
+    'review',
+    'plan',
+    'explore',
+    'ops',
+    'docs',
+  ] as const)(
+    'recovers Terra cost/high %s to its immutable balanced Sol cell without renewing indefinitely',
+    async (activity) => {
+      const f = await scenario(true, activity);
+      expect(f.current().decision).toMatchObject({
+        targetModelId: 'gpt-6.1-terra',
+        thinking:
+          activity === 'code' || activity === 'debug' ? 'xhigh' : 'medium',
+        tier: 'high',
+      });
+      const recovered = await f.next('bash', true);
+      expect(recovered.decision).toMatchObject({
+        targetModelId: 'gpt-6.1-sol',
+        thinking: ['debug', 'plan', 'review'].includes(activity)
+          ? 'xhigh'
+          : 'high',
+        costRecovery: true,
+        tier: 'high',
+      });
+      expect((await f.next('read')).plan.id).toBe(recovered.plan.id);
+      await f.next('edit');
+      await f.next('bash', true);
+      expect((await f.user('first held task')).decision.costRecovery).toBe(
+        true,
+      );
+      const expired = await f.user('expired hold');
+      expect(expired.decision.targetModelId).toBe('gpt-6.1-terra');
+      expect(expired.decision.costRecovery).not.toBe(true);
+    },
+  );
+  it.each(['budget', 'pin', 'override', 'fork', 'reload'] as const)(
+    'does not arm Terra recovery after %s changes',
+    async (change) => {
+      const f = await scenario(true);
+      f[change]();
+      expect((await f.next('bash', true)).decision.costRecovery).not.toBe(true);
+    },
+  );
+
   it('restores the balanced high cell and keeps native tool continuations on that immutable plan', async () => {
     const f = await scenario();
     expect(f.current().decision).toMatchObject({
