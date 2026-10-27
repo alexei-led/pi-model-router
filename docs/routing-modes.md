@@ -46,7 +46,9 @@ transform. They apply only to default-owned cells:
 
 A preferred primary must support the input, fit the request and have a supported
 mapped effort. Cost model changes also require positive catalog prices proving
-a cheaper input rate. Missing/zero prices are not evidence of a cheaper model.
+a cheaper input rate. The configured primary's registry price can supply that
+comparison even when the primary cannot serve the input; only the preferred
+target must be input-eligible. Missing/zero prices are not evidence of a cheaper model.
 If a preference is ineligible, use the eligible legacy transform below, then
 the configured pair. This selection adds no implicit generation fallback or retry.
 

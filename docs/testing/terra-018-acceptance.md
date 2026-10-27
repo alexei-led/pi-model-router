@@ -38,12 +38,31 @@ npm publish --dry-run --access public
 ```
 
 The publication dry-run reran all four prepublish gates successfully: 35 test
-files, 932 tests; coverage 93.03% statements, 87.14% branches, 94.77% functions
+files, 936 tests; coverage 93.03% statements, 87.16% branches, 94.77% functions
 and 94.39% lines, with existing per-file floors unchanged. TypeScript/Biome and
 Knip passed; npm audit reported zero vulnerabilities. The 32-file package manifest
 excluded tests, fixtures and credential artifacts. Documentation checks found
 99 working local links, rendered/inspected five unchanged diagrams, and reported
 68 advisory prose findings. No package or tag was published.
+
+## Review regressions
+
+The comprehensive review prompted three contained corrections:
+
+- A partial medium-only default ladder can use Luna/high for image input even
+  when its configured Terra primary is text-only. The regression first failed
+  with no eligible route, then passed both matrix selection and actual delegation.
+  Cost comparison reads the exact configured primary's registry price independently
+  of that primary's input eligibility. Preferred input/context/effort validation remains.
+- Derived mode alternatives no longer repeat source fallback warnings under a
+  synthetic profile name. Malformed entries, references and non-array fallback
+  declarations retain only their real source-cell diagnostics.
+- The zero-price test now leaves Sol priced and zeros only preferred Terra.
+  Removing the positive-preferred-price guard made this regression fail;
+  the temporary mutation was reverted before release checks.
+
+These changes do not invalidate the real wire/server evidence below.
+No further live requests were made.
 
 ## Native agterm checks: synthetic boundaries
 

@@ -386,6 +386,92 @@ it('keeps opt-out legacy transforms, pins and effort overrides ahead of defaults
   ).toMatchObject({ model: 'scope/gpt-6.1-terra', thinking: 'medium' });
 });
 
+it.each([
+  { fallbacks: [42] },
+  { fallbacks: ['not-a-reference'] },
+  { fallbacks: 'not-an-array' },
+])(
+  'reports invalid fallback diagnostics only from the real source cells: $fallbacks',
+  ({ fallbacks }) => {
+    const { warnings } = normalizeConfig({
+      profiles: {
+        p: {
+          medium: {
+            model: 'custom/gpt-6.1-terra',
+            thinking: 'medium',
+            fallbacks,
+          },
+        },
+      },
+    });
+    expect(warnings).toHaveLength(8);
+    expect(
+      warnings.every((warning) => /profile "p(?:\/[a-z]+)?"/iu.test(warning)),
+    ).toBe(true);
+    expect(warnings.join('\n')).not.toContain('builtin-mode');
+  },
+);
+
+it('uses a valid cost preference for images when the balanced primary only supports text', async () => {
+  const raw = {
+    activityRouting: 'off',
+    profiles: {
+      p: {
+        medium: { model: 'custom/gpt-6.1-terra', thinking: 'medium' },
+      },
+    },
+  };
+  const profile = required(normalizeConfig(raw).config.profiles.p);
+  const registry = (provider: string, id: string) => {
+    const target = find(provider, id);
+    if (!target || id === 'gpt-6.1-sol') return undefined;
+    return id === 'gpt-6.1-terra'
+      ? { ...target, input: ['text'] as ['text'] }
+      : target;
+  };
+  const matrix = buildRouteMatrix(
+    profile,
+    registry,
+    true,
+    0,
+    undefined,
+    false,
+    undefined,
+    { mode: 'cost', budgetExceeded: false },
+  );
+  expect(selectBaselinePlan('p', profile, matrix).plan.attempts[0]).toEqual({
+    tier: 'medium',
+    model: 'custom/gpt-6-luna',
+    thinking: 'high',
+  });
+  const f = terraHarness(raw, registry);
+  const result = await f.run('cost', 'medium', 'generic', {
+    messages: [
+      {
+        role: 'user',
+        timestamp: 1,
+        content: [
+          { type: 'text', text: 'Inspect the fixture image.' },
+          {
+            type: 'image',
+            mimeType: 'image/png',
+            data: 'synthetic-image-boundary',
+          },
+        ],
+      },
+    ],
+  });
+  expect(result.stopReason).toBe('stop');
+  expect(f.state.lastDecision).toMatchObject({
+    tier: 'medium',
+    targetProvider: 'custom',
+    targetModelId: 'gpt-6-luna',
+    thinking: 'high',
+  });
+  expect(f.delegate).toHaveBeenCalledOnce();
+  expect(f.classify).not.toHaveBeenCalled();
+});
+
 it.each(['missing', 'price', 'context', 'image'] as const)(
   'uses the eligible legacy transform when a preferred target fails %s validation',
   (failure) => {
@@ -396,7 +482,7 @@ it.each(['missing', 'price', 'context', 'image'] as const)(
       const target = find(provider, id);
       if (!target || (failure === 'missing' && id === 'gpt-6.1-terra'))
         return undefined;
-      if (failure === 'price')
+      if (failure === 'price' && id === 'gpt-6.1-terra')
         return { ...target, cost: { ...target.cost, input: 0 } };
       if (failure === 'context' && id === 'gpt-6.1-terra')
         return { ...target, contextWindow: 100 };

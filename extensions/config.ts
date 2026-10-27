@@ -460,7 +460,6 @@ const withBuiltinModes = (
   rawFallbacks: unknown,
   tier: RouterTier,
   models: Record<string, ModelDefinition>,
-  warnings: string[],
   activity?: RouterActivity,
 ): RoutedTierConfig => {
   const { provider } = parseCanonicalModelRef(config.model);
@@ -479,7 +478,8 @@ const withBuiltinModes = (
       },
       'builtin-mode',
       tier,
-      warnings,
+      // Generated identities/efforts are valid; source cells already reported invalid fallbacks.
+      [],
       models,
       target,
     );
@@ -595,14 +595,7 @@ const normalizeActivities = (
       if (config)
         tiers[tier] = {
           ...(!isExplicit && openaiDefaults
-            ? withBuiltinModes(
-                config,
-                merged.fallbacks,
-                tier,
-                models,
-                warnings,
-                activity,
-              )
+            ? withBuiltinModes(config, merged.fallbacks, tier, models, activity)
             : config),
           ...(!isExplicit ? { activitySource: 'builtin' as const } : {}),
         };
@@ -962,7 +955,6 @@ const withGenericBuiltinModes = (
   profile: RouterProfile,
   raw: Record<string, unknown>,
   models: Record<string, ModelDefinition>,
-  warnings: string[],
 ): RouterProfile => {
   if (
     profile.activityPresetFamily !== 'openai' ||
@@ -979,7 +971,6 @@ const withGenericBuiltinModes = (
         isObjectRecord(rawTier) ? rawTier.fallbacks : undefined,
         tier,
         models,
-        warnings,
       );
   }
   return result;
@@ -1097,7 +1088,6 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       { high, medium, low, micro, ...activitySettings },
       profileRecord,
       normalizedModels,
-      warnings,
     );
     normalizedProfiles[name] = {
       ...(isRouterMode(profileRecord.mode) ? { mode: profileRecord.mode } : {}),

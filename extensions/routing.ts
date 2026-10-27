@@ -444,16 +444,18 @@ const applyModeToCell = (
         ).find((pair) => pair.model === preferred.model)
       : undefined;
     const own = primaries.find((pair) => pair.tier === tier);
-    const price = (pair: RoutePair) => {
-      const { provider, modelId } = parseCanonicalModelRef(pair.model);
+    const price = (ref: string) => {
+      const { provider, modelId } = parseCanonicalModelRef(ref);
       return findModel(provider, modelId)?.cost.input;
     };
+    // The configured primary's price is valid evidence even if it cannot serve this input.
+    const configured = cellProfile[tier];
     const cheaper =
-      own &&
+      configured &&
       preferredPair &&
-      (own.model === preferredPair.model ||
-        ((price(preferredPair) ?? 0) > 0 &&
-          (price(own) ?? 0) > (price(preferredPair) ?? 0)));
+      (configured.model === preferredPair.model ||
+        ((price(preferredPair.model) ?? 0) > 0 &&
+          (price(configured.model) ?? 0) > (price(preferredPair.model) ?? 0)));
     if (
       preferred &&
       preferredPair &&
