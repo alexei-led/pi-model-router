@@ -184,7 +184,7 @@ The bounded cache stores the actual successful route and its immutable selected-
 
 Reuse requires matching session, user turn, profile, policy, configuration, branch ancestry, model, and tool-result identities.
 When the caller omits `sessionId`, the key uses Pi's native session ID.
-Changed capabilities or configuration invalidate reuse. New user-role steering messages change turn identity and abort prior background review. Valid tool-result continuations may schedule a periodic nonblocking classifier review; only the immediately following request may consume it. Branch/policy/plan/matrix identity changes and expiry drop the result. The original provider `sessionId` passes through unchanged.
+Changed capabilities or configuration invalidate reuse. New user-role steering messages change turn identity and abort prior background review. Native-provenance notifications preserve the goal and continuation; see [notification recognition](classifier-advisor.md#goals-steering-and-notifications). Valid tool-result continuations may schedule a periodic nonblocking classifier review; only the immediately following request may consume it. Branch/policy/plan/matrix identity changes and expiry drop the result. The original provider `sessionId` passes through unchanged.
 Context truncation, the last resort after the window check, removes complete old user turns and preserves system instructions and the active tool chain.
 Its text estimate does not guarantee a fit for images or oversized active turns.
 
@@ -274,7 +274,7 @@ Queued controls activate at an owned user boundary: `before_agent_start` handles
 | `provider-turns.ts`      | Keep bounded continuation/advice caches and retain selected plans and reference-count shared classifier flights for one session-owned provider registration. |
 | `provider-generation.ts` | Revalidate physical targets, run configured generation fallbacks before visible content, account for attempts, and forward events.                           |
 | `provider-runtime.ts`    | Wait for the model registry and bridge request preparation/generation to Pi streams, persistence, and status updates.                                        |
-| `context.ts`             | Select bounded classifier text and extract generation input.                                                                                                 |
+| `context.ts`             | Resolve native notification provenance, select bounded classifier text and extract generation input.                                                                                                 |
 | `classifier.ts`          | Build typed bounded requests, call Pi's classifier registry, enforce deadlines, and validate advice.                                                         |
 | `choice.ts`              | Define the provider-neutral rubric, candidate identity, and strict response validation.                                                                      |
 | `economics.ts`           | Produce observed generation metrics and diagnostic hypothetical comparisons.                                                                                 |

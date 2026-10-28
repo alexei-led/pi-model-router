@@ -9,6 +9,7 @@ import type {
   SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { notificationMessageIndices } from './context';
 import { modeForProfile } from './modes';
 import type { GenerationOutcome } from './provider-generation';
 import { runGenerationAttempts } from './provider-generation';
@@ -136,17 +137,26 @@ const prepareStreamRequest = async (
     ? state.thinkingByProfile[model.id]
     : undefined;
   const extensionContext = state.lastExtensionContext;
-  const branch =
-    extensionContext?.sessionManager
-      .getBranch()
-      .filter(
-        (entry) =>
-          entry.type !== 'custom' || entry.customType !== 'router-state',
-      )
-      .map((entry) => entry.id) ?? [];
+  const entries = extensionContext?.sessionManager.getBranch() ?? [];
+  const notifications = notificationMessageIndices(context, entries);
+  const routingContext = {
+    ...context,
+    messages: context.messages.filter(
+      (_message, index) => !notifications.includes(index),
+    ),
+  };
+  const branch = entries
+    .filter(
+      (entry) => entry.type !== 'custom' || entry.customType !== 'router-state',
+    )
+    .map((entry) => entry.id);
   const sessionId =
     extensionContext?.sessionManager.getSessionId?.() ?? options?.sessionId;
-  const identity = createRouterRequestIdentity(context, sessionId, branch);
+  const identity = createRouterRequestIdentity(
+    routingContext,
+    sessionId,
+    branch,
+  );
   onTurnIdentified(identity.turn);
   const modeFor = (current: RouterConfig) =>
     modeForProfile(current, model.id, state.modeOverride);
@@ -156,6 +166,7 @@ const prepareStreamRequest = async (
     config,
     getCurrentConfig: () => state.currentConfig,
     context,
+    notificationIndices: notifications,
     registry,
     identity,
     ...(pinnedTier ? { pinnedTier } : {}),

@@ -1,5 +1,7 @@
 import type { Context, Message } from '@earendil-works/pi-ai';
+import type { SessionEntry } from '@earendil-works/pi-coding-agent';
 import { DEFAULT_CLASSIFIER_CONTEXT } from './constants';
+import { isObjectRecord } from './domain';
 import type {
   ClassifierContextConfig,
   ClassifierContextMetrics,
@@ -31,6 +33,57 @@ const textOnly = (message: Message): string =>
         .filter((part) => part.type === 'text')
         .map((part) => part.text)
         .join('\n');
+
+const messageKey = (
+  timestamp: number,
+  content: Extract<Message, { role: 'user' }>['content'],
+): string =>
+  JSON.stringify([
+    timestamp,
+    typeof content === 'string' ? [{ type: 'text', text: content }] : content,
+  ]);
+
+const isNotification = (
+  entry: Extract<SessionEntry, { type: 'custom_message' }>,
+): boolean => {
+  const details: unknown = entry.details;
+  if (
+    isObjectRecord(details) &&
+    isObjectRecord(details.router) &&
+    'intent' in details.router
+  )
+    return details.router.intent === 'notification';
+  // This exact completion type resumes the parent's existing task; unknown custom types remain steering.
+  return entry.customType === 'subagent-notify';
+};
+
+/** Native ancestry supplies provenance lost when Pi converts custom messages to user messages. */
+export const notificationMessageIndices = (
+  context: Context,
+  branch: readonly SessionEntry[],
+): number[] => {
+  const provenance = new Map<string, boolean>();
+  for (const entry of branch) {
+    const user =
+      entry.type === 'custom_message'
+        ? { timestamp: Date.parse(entry.timestamp), content: entry.content }
+        : entry.type === 'message' && entry.message?.role === 'user'
+          ? entry.message
+          : undefined;
+    if (!user) continue;
+    const key = messageKey(user.timestamp, user.content);
+    const notification =
+      entry.type === 'custom_message' && isNotification(entry);
+    // Ambiguous same-timestamp/content matches must not hide a real user or untyped steering message.
+    provenance.set(key, notification && provenance.get(key) !== false);
+  }
+  return context.messages.flatMap((message, index) =>
+    message.role === 'user' &&
+    provenance.get(messageKey(message.timestamp, message.content)) === true
+      ? [index]
+      : [],
+  );
+};
 
 const utf8 = new TextEncoder();
 
@@ -103,12 +156,14 @@ export const buildClassifierContext = (
   context: Context,
   maxTokens: number,
   options: ClassifierContextConfig = DEFAULT_CLASSIFIER_CONTEXT,
+  notificationIndices: readonly number[] = [],
 ): { state: ClassifierContextState; metrics: ClassifierContextMetrics } => {
   const budget = Number.isFinite(maxTokens)
     ? Math.max(0, Math.floor(maxTokens))
     : 0;
+  const notifications = new Set(notificationIndices);
   const latest = context.messages.findLastIndex(
-    (message) => message.role === 'user',
+    (message, index) => message.role === 'user' && !notifications.has(index),
   );
   const current = context.messages[latest];
   const loopMessages = context.messages.slice(latest + 1);
@@ -131,16 +186,17 @@ export const buildClassifierContext = (
     index >= 0 && turns.length < Math.max(1, options.previousTurns);
     index--
   ) {
-    if (context.messages[index]?.role !== 'user') continue;
+    if (context.messages[index]?.role !== 'user' || notifications.has(index))
+      continue;
     turns.push({ start: index, end });
     end = index;
   }
   const dialogue: { role: 'user' | 'assistant'; text: string; turn: number }[] =
     [];
   const loopDialogue = currentLoop.flatMap((message, index) => {
-    if (message.role !== 'assistant') return [];
+    if (message.role !== 'assistant' && message.role !== 'user') return [];
     const text = textOnly(message).trim();
-    return text ? [{ role: 'assistant' as const, text, turn: -1 - index }] : [];
+    return text ? [{ role: message.role, text, turn: -1 - index }] : [];
   });
   // Current task progress receives the history budget before older completed turns.
   for (const entry of loopDialogue.reverse()) dialogue.push(entry);

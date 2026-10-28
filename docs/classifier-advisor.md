@@ -331,6 +331,35 @@ removes the activity question.
 
 A profile pin and soft-budget policy bypass advice. One effective plan bypasses advice. Tool continuations reuse a valid route unless an eligible background review is ready at the next request. The advisor cannot introduce a route or change generation permissions.
 
+## Goals, steering and notifications
+
+A human request or steering message starts a new routing task. Pi also converts
+extension messages to user-role messages, but a progress notification must not
+replace the task goal or break a valid tool continuation.
+
+The router uses native branch metadata, never message wording:
+
+- An extension can mark a custom message with
+  `details: { router: { intent: "notification" } }`.
+- The exact `subagent-notify` completion type is a notification by default.
+  This recognizes a result notice only; it does not enable inherited/shared
+  subagent provider runtimes.
+- `details: { router: { intent: "steering" } }` starts a new routing task,
+  including on a completion-type message.
+- Unknown types, unmarked intercom messages and invalid intent values retain
+  steering behavior. The router does not guess whether a peer sent a new task.
+
+Recognition requires matching content and timestamp on the current native
+branch. Missing or ambiguous provenance retains steering behavior. Notification
+text remains eligible as bounded recent dialogue; it shares the current-loop
+message window and history token budget. Notification metadata is not sent to
+the classifier or persisted by the router.
+
+Generation still receives the notification and the original goal/tool chain.
+Context eligibility counts the full request, and truncation does not treat an
+identified notification as a new removable-turn boundary. Pins, budgets,
+cancellation and advice freshness checks keep their existing precedence.
+
 ## Privacy
 
 A classifier call sends the current user goal plus bounded recent assistant text and permitted text tool results, including the current tool loop, and configured previous dialogue. `advisor.context.currentLoopMessages` bounds current-loop messages (default 8). When loop messages exist, half the text budget is reserved for the goal so recent progress can remain visible. `toolResults` defaults to `last-error`: only the latest result when it failed. `last` sends one latest result, `none` excludes results, and opt-in `recent` sends bounded results from the current-loop window. Successful current-loop results do not revive a previous task's old error. History and tool token limits share the total text budget. The extension excludes system prompts, tool definitions, thinking, tool arguments, image/binary blocks, and raw router configuration. Text filtering is **not redaction**; selected conversation text can contain private information.

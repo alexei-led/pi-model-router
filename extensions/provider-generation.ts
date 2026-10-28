@@ -95,7 +95,12 @@ interface AttemptEventProgress {
 
 const estimateTokens = (text: string): number => Math.ceil(text.length / 3);
 
-const truncateContext = (context: Context, limit: number): Context => {
+const truncateContext = (
+  context: Context,
+  limit: number,
+  notificationIndices: readonly number[] = [],
+): Context => {
+  const notifications = new Set(notificationIndices);
   const messages = [...context.messages];
   if (messages.length <= 1) return context;
 
@@ -119,7 +124,7 @@ const truncateContext = (context: Context, limit: number): Context => {
     index < messages.length && remaining > limit;
     index += 1
   ) {
-    if (messages[index]?.role !== 'user') continue;
+    if (messages[index]?.role !== 'user' || notifications.has(index)) continue;
     while (nextRemovableIndex < index) {
       const candidate = messages[nextRemovableIndex];
       if (candidate?.role !== 'system')
@@ -413,7 +418,11 @@ export const runGenerationAttempts = async (
           input.model.contextWindow !== undefined &&
           targetLimit < input.model.contextWindow
         )
-          effectiveContext = truncateContext(input.context, targetLimit);
+          effectiveContext = truncateContext(
+            input.context,
+            targetLimit,
+            input.request.notificationIndices,
+          );
 
         const pair = currentPlanPairs(
           request.plan,

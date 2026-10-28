@@ -4,9 +4,10 @@ import {
   type Context,
   normalizeContext,
 } from '@earendil-works/pi-ai';
-import type {
-  ExtensionAPI,
-  ExtensionContext,
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { normalizeConfig } from './config';
@@ -1111,6 +1112,163 @@ const configureChoice = (s: ReturnType<typeof setup>, tier: string) => {
 };
 
 describe('Pi classifier provider integration', () => {
+  it.each([
+    [
+      'explicit notification',
+      'fixture-status',
+      { router: { intent: 'notification' } },
+      1,
+    ],
+    ['completion notification', 'subagent-notify', undefined, 1],
+    [
+      'explicit steering',
+      'subagent-notify',
+      { router: { intent: 'steering' } },
+      2,
+    ],
+    ['untyped intercom', 'intercom_message', undefined, 2],
+    ['invalid intent', 'fixture-status', { router: { intent: 'other' } }, 2],
+    [
+      'background progress',
+      'fixture-status',
+      { router: { intent: 'notification' }, private: 'PRIVATE_METADATA' },
+      2,
+      1,
+    ],
+  ])(
+    'preserves notification routing but reconsiders %s',
+    async (_name, customType, details, calls, reviewEveryRequests = 4) => {
+      const s = setup();
+      configureChoice(s, 'high');
+      required(s.state.currentConfig.advisor).reviewEveryRequests =
+        reviewEveryRequests;
+      const manager = SessionManager.inMemory();
+      s.state.lastExtensionContext = {
+        ...required(s.state.lastExtensionContext),
+        sessionManager: manager,
+      };
+      const goal = {
+        role: 'user' as const,
+        content: 'diagnose the original failure',
+        timestamp: 1,
+      };
+      manager.appendMessage(goal);
+      const assistant = message({
+        content: [
+          {
+            type: 'toolCall',
+            id: 'notification-tool',
+            name: 'read',
+            arguments: {},
+          },
+        ],
+        stopReason: 'toolUse',
+      });
+      s.delegate.mockReturnValueOnce(
+        events({ type: 'done', reason: 'toolUse', message: assistant }),
+      );
+      await consume(s.stream({ messages: [goal] }));
+      manager.appendMessage(assistant);
+      const result = {
+        role: 'toolResult' as const,
+        toolCallId: 'notification-tool',
+        toolName: 'read',
+        content: [{ type: 'text' as const, text: 'successful check' }],
+        isError: false,
+        timestamp: 2,
+      };
+      manager.appendMessage(result);
+      manager.appendCustomMessageEntry(
+        customType,
+        'worker finished a check',
+        true,
+        details,
+      );
+      const native = required(manager.getBranch().at(-1));
+      const notification = {
+        role: 'user' as const,
+        content: 'worker finished a check',
+        timestamp: Date.parse(native.timestamp),
+      };
+      const continued = { messages: [goal, assistant, result, notification] };
+      expect((await consume(s.stream(continued))).result.stopReason).toBe(
+        'stop',
+      );
+      expect(s.registry.classify).toHaveBeenCalledTimes(calls);
+      expect(s.state.lastDecision?.reasonCode).toBe(
+        calls === 1 || reviewEveryRequests === 1
+          ? 'continuation'
+          : 'classifier',
+      );
+      expect(s.delegate.mock.calls.at(-1)?.[1].messages).toEqual(
+        normalizeContext(continued).messages,
+      );
+      if (reviewEveryRequests === 1) {
+        const payload = JSON.stringify(
+          vi.mocked(s.registry.classify).mock.calls[1]?.[1].state,
+        );
+        expect(payload).toContain('diagnose the original failure');
+        expect(payload).toContain('worker finished a check');
+        expect(payload).not.toContain('PRIVATE_METADATA');
+      }
+    },
+  );
+
+  it('does not truncate the active goal or tool chain at a notification boundary', async () => {
+    const s = setup();
+    required(s.models[0]).contextWindow = 64;
+    const manager = SessionManager.inMemory();
+    s.state.lastExtensionContext = {
+      ...required(s.state.lastExtensionContext),
+      sessionManager: manager,
+    };
+    const goal = {
+      role: 'user' as const,
+      content: 'fix the original failure',
+      timestamp: 1,
+    };
+    manager.appendMessage(goal);
+    const assistant = message({
+      content: [
+        { type: 'toolCall', id: 'active-tool', name: 'read', arguments: {} },
+      ],
+      stopReason: 'toolUse',
+    });
+    s.delegate.mockReturnValueOnce(
+      events({ type: 'done', reason: 'toolUse', message: assistant }),
+    );
+    await consume(s.stream({ messages: [goal] }));
+    manager.appendMessage(assistant);
+    const result = {
+      role: 'toolResult' as const,
+      toolCallId: 'active-tool',
+      toolName: 'read',
+      content: [{ type: 'text' as const, text: 'checked' }],
+      isError: false,
+      timestamp: 2,
+    };
+    manager.appendMessage(result);
+    const text = 'worker progress '.repeat(100);
+    manager.appendCustomMessageEntry('subagent-notify', text, true);
+    const native = required(manager.getBranch().at(-1));
+    const context = {
+      messages: [
+        goal,
+        assistant,
+        result,
+        {
+          role: 'user' as const,
+          content: text,
+          timestamp: Date.parse(native.timestamp),
+        },
+      ],
+    };
+    expect((await consume(s.stream(context))).result.stopReason).toBe('stop');
+    expect(s.delegate.mock.calls.at(-1)?.[1].messages).toEqual(
+      normalizeContext(context).messages,
+    );
+  });
+
   it('routes varied prompt texts through the same local baseline without advice', async () => {
     const s = setup();
     s.models.push(model('tiny'));
