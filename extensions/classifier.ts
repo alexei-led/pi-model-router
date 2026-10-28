@@ -6,7 +6,7 @@ import {
   selectRoute,
   validCandidates,
 } from './choice';
-import { normalizeAdvisorConfig } from './config';
+import { advisorForProfile, normalizeAdvisorConfig } from './config';
 import { MAX_CLASSIFIER_ESTIMATED_REQUEST_TOKENS } from './constants';
 import {
   buildClassifierContext,
@@ -83,7 +83,10 @@ export const runClassifierDetailed = async (
   };
   try {
     if (request.signal?.aborted) return result('cancelled');
-    const config = normalizeAdvisorConfig(rawConfig, []);
+    const config = normalizeAdvisorConfig(
+      advisorForProfile(rawConfig, request.profile),
+      [],
+    );
     if (
       !config?.enabled ||
       !request.profile?.models.includes(config.model) ||

@@ -138,7 +138,11 @@ const prepareStreamRequest = async (
     : undefined;
   const extensionContext = state.lastExtensionContext;
   const entries = extensionContext?.sessionManager.getBranch() ?? [];
-  const notifications = notificationMessageIndices(context, entries);
+  const notifications = notificationMessageIndices(
+    context,
+    entries,
+    profile.notificationTypes,
+  );
   const routingContext = {
     ...context,
     messages: context.messages.filter(

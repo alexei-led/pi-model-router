@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.18.2] - 2026-10-28
+
+Tune classifier confidence, switching and notification handling per user profile without changing other profiles.
+
+### Changes
+
+- Allow profile advisor confidence/probability overrides while preserving exact classifier consent, shared-call cancellation and policy fences.
+- Add partial profile switch policy below mode/session patches. Omitted fields inherit global policy.
+- Add exact profile `notificationTypes`, such as `intercom_message`, to preserve the routing goal across peer updates. Native provenance is required; explicit steering wins. No prompt-text regex is used and generation retains every message.
+- Keep these controls user-owned. Project files cannot override them. Defaults, baseline tiers and generation routes are unchanged.
+
+### Upgrade
+
+Update the extension and run `/reload` before adding profile advisor tuning. Older versions reject the new advisor fields. See [classifier configuration](docs/classifier-advisor.md#advisor-configuration-reference).
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.18.1...v0.18.2)
+
 ## [0.18.1] - 2026-10-27
 
 Preserve the routing goal across identified extension notifications without changing user-owned routes or classifier thresholds.

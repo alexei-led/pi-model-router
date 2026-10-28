@@ -96,6 +96,48 @@ const registry = (): ClassifierRegistry => ({
 });
 
 describe('Pi classifier registry routing', () => {
+  it('uses profile confidence thresholds without changing other profiles', async () => {
+    const current = registry();
+    current.classify = vi.fn(async () => {
+      const response = classifierResult();
+      response.answers.route = {
+        type: 'choice',
+        choice: candidates[0]?.id ?? '',
+        confidence: 0.6,
+        probabilities: {
+          [candidates[0]?.id ?? '']: 0.6,
+          [candidates[1]?.id ?? '']: 0.4,
+          uncertain: 0,
+        },
+      };
+      return response;
+    });
+    const personal = await runClassifierDetailed(
+      config,
+      request({
+        profile: {
+          models: ['custom/decision:model/v2'],
+          confidenceThreshold: 0.55,
+          probabilityThreshold: 0.75,
+        },
+      }),
+      current,
+    );
+    expect(personal.diagnostics).toMatchObject({
+      selectedTier: 'medium',
+      selectionBasis: 'choice',
+      threshold: 0.55,
+      probabilityThreshold: 0.75,
+    });
+    const work = await runClassifierDetailed(config, request(), current);
+    expect(work.diagnostics).toMatchObject({
+      selectedTier: 'high',
+      selectionBasis: 'probability',
+      threshold: 0.65,
+      probabilityThreshold: 0.8,
+    });
+  });
+
   it.each([
     'typesafe-system-one',
     'cloudflare-workers-ai-system-one',

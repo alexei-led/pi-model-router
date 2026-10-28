@@ -45,6 +45,7 @@ const messageKey = (
 
 const isNotification = (
   entry: Extract<SessionEntry, { type: 'custom_message' }>,
+  notificationTypes: readonly string[],
 ): boolean => {
   const details: unknown = entry.details;
   if (
@@ -54,13 +55,17 @@ const isNotification = (
   )
     return details.router.intent === 'notification';
   // This exact completion type resumes the parent's existing task; unknown custom types remain steering.
-  return entry.customType === 'subagent-notify';
+  return (
+    entry.customType === 'subagent-notify' ||
+    notificationTypes.includes(entry.customType)
+  );
 };
 
 /** Native ancestry supplies provenance lost when Pi converts custom messages to user messages. */
 export const notificationMessageIndices = (
   context: Context,
   branch: readonly SessionEntry[],
+  notificationTypes: readonly string[] = [],
 ): number[] => {
   const provenance = new Map<string, boolean>();
   for (const entry of branch) {
@@ -73,7 +78,8 @@ export const notificationMessageIndices = (
     if (!user) continue;
     const key = messageKey(user.timestamp, user.content);
     const notification =
-      entry.type === 'custom_message' && isNotification(entry);
+      entry.type === 'custom_message' &&
+      isNotification(entry, notificationTypes);
     // Ambiguous same-timestamp/content matches must not hide a real user or untyped steering message.
     provenance.set(key, notification && provenance.get(key) !== false);
   }

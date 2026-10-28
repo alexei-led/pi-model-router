@@ -279,6 +279,8 @@ These are router defaults, not guaranteed model-specific optima.
 | `advisor.enabled`                     | `false`      | Enable only with explicit `true`; omitted advisor means no classifier calls          |
 | `advisor.model`                       | None         | Required exact Pi classifier reference when configuring an advisor                   |
 | `profiles.<name>.advisor.models`      | None         | Exact references approved for this profile; does not register or select models       |
+| `profiles.<name>.advisor.confidenceThreshold` | Inherit | Profile-only top-choice/activity threshold, 0–1; does not select or enable a classifier |
+| `profiles.<name>.advisor.probabilityThreshold` | Inherit | Profile-only cumulative tier threshold, greater than 0 and at most 1 |
 | `advisor.timeoutMs`                   | `10000`      | Total deadline, including retries; positive and at most 2147483647 ms                |
 | `advisor.reviewEveryRequests`         | `4`          | Background review interval, 0–1000 requests; 0 disables reviews, not initial advice  |
 | `advisor.confidenceThreshold`         | `0.65`       | Top-choice and activity confidence threshold, 0–1                                    |
@@ -296,6 +298,13 @@ These are router defaults, not guaranteed model-specific optima.
 The [complete reference configuration](../model-router.example.json) leaves
 both classification and debug collection off until you enable them.
 Credentials, endpoints and API keys are not valid advisor fields.
+
+Profile thresholds inherit the global values when omitted. Add overrides beside
+the existing `profiles.<name>.advisor.models` approval list, without replacing it.
+Lowering confidence accepts more top-tier and activity answers directly. Lowering
+the cumulative threshold can select a lower tier when confidence is insufficient.
+These are risk-policy choices, not measured model-quality guarantees. Other
+profiles retain their own thresholds. Project files cannot override them.
 
 ## Bounds and selection
 
@@ -346,8 +355,17 @@ The router uses native branch metadata, never message wording:
   subagent provider runtimes.
 - `details: { router: { intent: "steering" } }` starts a new routing task,
   including on a completion-type message.
-- Unknown types, unmarked intercom messages and invalid intent values retain
-  steering behavior. The router does not guess whether a peer sent a new task.
+- User-level `profiles.<name>.notificationTypes` adds exact native custom types.
+  For example, `["intercom_message"]` keeps intercom text as progress without
+  replacing that profile's routing goal. It does not remove the message from
+  generation or hide it from the assistant. Other profiles are unaffected.
+- Explicit steering intent still wins over a configured notification type.
+  Unknown types and invalid intent values retain steering behavior.
+
+Type names match literally: `intercom_message` is not a regex or a prompt-text
+pattern. Text such as `**From a peer**` alone never suppresses a new user goal.
+Without configuration, unmarked intercom messages still act as steering. Project
+files cannot set notification types.
 
 Recognition requires matching content and timestamp on the current native
 branch. Missing or ambiguous provenance retains steering behavior. Notification

@@ -801,6 +801,39 @@ describe('adaptive switch configuration', () => {
 });
 
 describe('classifier advisor config', () => {
+  it('keeps personal tuning and notification policy user-owned through project merges', () => {
+    const personal = {
+      medium: { model: 'test/model' },
+      advisor: {
+        models: ['typesafe/jev-latest'],
+        confidenceThreshold: 0.55,
+        probabilityThreshold: 0.75,
+      },
+      switchPolicy: { strongAdviceConfidence: 0.8 },
+      notificationTypes: ['intercom_message'],
+    };
+    const merged = mergeConfig(
+      { profiles: { personal, work: { medium: { model: 'test/model' } } } },
+      projectRouterConfig(
+        {
+          profiles: {
+            personal: {
+              advisor: { models: ['attacker/model'], confidenceThreshold: 0.1 },
+              switchPolicy: { strongAdviceConfidence: 0.1 },
+              notificationTypes: ['attacker'],
+            },
+          },
+        },
+        [],
+      ),
+    );
+    const { config, warnings } = normalizeConfig(merged);
+    expect(config.profiles.personal).toMatchObject(personal);
+    expect(config.profiles.work?.notificationTypes).toBeUndefined();
+    expect(config.profiles.work?.advisor).toBeUndefined();
+    expect(warnings).toEqual([]);
+  });
+
   it('normalizes arbitrary provider classifier references and explicit profile approvals', () => {
     const { config, warnings } = normalizeConfig({
       advisor: {
@@ -829,6 +862,45 @@ describe('classifier advisor config', () => {
       'llama.cpp/julia-1',
     ]);
     expect(warnings).toEqual([]);
+  });
+  it.each([-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY, 'PRIVATE_VALUE'])(
+    'rejects invalid profile tuning %s without echoing values',
+    (value) => {
+      const result = normalizeConfig({
+        profiles: {
+          personal: {
+            medium: { model: 'test/model' },
+            advisor: {
+              models: ['typesafe/jev-latest'],
+              confidenceThreshold: value,
+            },
+            switchPolicy: { strongAdviceConfidence: value },
+            notificationTypes: [null],
+          },
+        },
+      });
+      expect(result.config.profiles.personal?.advisor).toBeUndefined();
+      expect(result.config.profiles.personal?.switchPolicy).toBeUndefined();
+      expect(
+        result.config.profiles.personal?.notificationTypes,
+      ).toBeUndefined();
+      expect(JSON.stringify(result.warnings)).not.toContain('PRIVATE_VALUE');
+    },
+  );
+  it('rejects zero cumulative probability and deduplicates notification types', () => {
+    const result = normalizeConfig({
+      profiles: {
+        personal: {
+          medium: { model: 'test/model' },
+          advisor: { models: [], probabilityThreshold: 0 },
+          notificationTypes: ['intercom_message', 'intercom_message'],
+        },
+      },
+    });
+    expect(result.config.profiles.personal?.advisor).toBeUndefined();
+    expect(result.config.profiles.personal?.notificationTypes).toEqual([
+      'intercom_message',
+    ]);
   });
   it('rejects malformed references and bounds retries without echoing values', () => {
     for (const raw of ['router/private', 'missing-slash', 'secret\nvalue']) {

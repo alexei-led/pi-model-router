@@ -9,6 +9,7 @@ import type {
   RouterConfig,
   RouterMode,
   RouterModeBypass,
+  RouterProfile,
   RouterSwitchPolicy,
   RouterThinkingByTier,
   RouterTier,
@@ -65,12 +66,14 @@ export const modeBypassLabel = (
       ? ` · bypassed at ${bypass.join(', ')} by effort override`
       : '';
 
-/** Config policy < mode patch < Settings-tab edits for this session. */
+/** Global policy < profile patch < mode patch < Settings-tab session edits. */
 export const effectivePolicy = (
   config: RouterConfig,
   mode: RouterMode,
+  profile?: RouterProfile,
 ): RouterSwitchPolicy => ({
   ...(config.switchPolicy ?? DEFAULT_SWITCH_POLICY),
+  ...profile?.switchPolicy,
   ...(config.modes ?? DEFAULT_MODES)[mode].policy,
   ...config.sessionPolicy,
 });

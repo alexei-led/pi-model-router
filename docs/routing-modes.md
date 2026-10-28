@@ -208,7 +208,16 @@ Mode patches adjust the existing Pi switch controller. They do not copy Claude C
 | `quality`  |               0.2 |                     4 |
 
 These values are untuned starting points.
-A base `switchPolicy` value loses to the mode patch. An explicit Settings edit wins over both for the session.
+Policy precedence is global `switchPolicy`, then the user-owned
+`profiles.<name>.switchPolicy` partial patch, then the mode patch, then an explicit
+Settings edit for the session. Omitted profile fields inherit rather than reset
+other policy values. Project files cannot set profile policy.
+
+For example, a personal profile can set `switchPolicy.strongAdviceConfidence` to
+`0.8` while a work profile retains `0.9`. This lets sufficiently strong relevant
+advice override an estimated switch-cost hold sooner. CDF-selected tiers do not
+become confident top-choice evidence. The threshold does not bypass eligibility,
+pins, budgets or cancellation.
 Override a mode patch in the user file, for example:
 
 ```json
