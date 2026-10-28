@@ -1,8 +1,10 @@
 import type { Context, Message } from '@earendil-works/pi-ai';
+import type { SessionEntry } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
 import {
   buildClassifierContext,
   estimateClassifierTextTokens,
+  notificationMessageIndices,
 } from './context';
 import { message } from './test/fixtures';
 
@@ -31,6 +33,32 @@ const options = {
 };
 
 describe('buildClassifierContext', () => {
+  it('keeps the task goal and bounded notification progress separate', () => {
+    const result = buildClassifierContext(
+      {
+        messages: [
+          user('diagnose the original failure'),
+          tool('checks passed'),
+          user('worker finished checking'),
+        ],
+      },
+      3000,
+      { ...options, toolResults: 'recent' },
+      [2],
+    );
+    expect(result.state.currentRequest.text).toBe(
+      'diagnose the original failure',
+    );
+    expect(result.state.recentDialogue).toContainEqual({
+      role: 'user',
+      text: 'worker finished checking',
+      truncated: false,
+    });
+    expect(result.state.recentToolEvidence).toEqual([
+      { text: 'checks passed', isError: false, truncated: false },
+    ]);
+  });
+
   it('defaults to two previous turns and only the last native error', () => {
     const context: Context = {
       messages: [
@@ -445,6 +473,87 @@ describe('buildClassifierContext', () => {
       expect(result.metrics.toolTokens).toBeLessThanOrEqual(
         options.maxToolTokens,
       );
+    },
+  );
+});
+
+describe('native notification provenance', () => {
+  const entry = (
+    details: unknown,
+    customType = 'fixture-status',
+  ): SessionEntry => ({
+    type: 'custom_message',
+    customType,
+    details,
+    id: 'notice',
+    parentId: null,
+    timestamp: new Date(1).toISOString(),
+    content: 'worker finished',
+    display: true,
+  });
+  const context: Context = { messages: [user('worker finished')] };
+  it.each([
+    [
+      'explicit notification',
+      { router: { intent: 'notification' } },
+      'fixture-status',
+      [0],
+    ],
+    ['known completion', undefined, 'subagent-notify', [0]],
+    [
+      'explicit steering',
+      { router: { intent: 'steering' } },
+      'subagent-notify',
+      [],
+    ],
+    [
+      'invalid completion intent',
+      { router: { intent: 'invalid' } },
+      'subagent-notify',
+      [],
+    ],
+    ['unknown type', undefined, 'intercom_message', []],
+    ['malformed details', { router: null }, 'fixture-status', []],
+  ])(
+    '%s uses provenance, not message wording',
+    (_name, details, type, expected) => {
+      expect(
+        notificationMessageIndices(context, [entry(details, type)]),
+      ).toEqual(expected);
+    },
+  );
+  it('requires exact content and timestamp on the current native branch', () => {
+    const native = entry({ router: { intent: 'notification' } });
+    expect(notificationMessageIndices(context, [])).toEqual([]);
+    expect(
+      notificationMessageIndices(
+        { messages: [{ ...user('worker finished'), timestamp: 2 }] },
+        [native],
+      ),
+    ).toEqual([]);
+    expect(
+      notificationMessageIndices({ messages: [user('change the goal')] }, [
+        native,
+      ]),
+    ).toEqual([]);
+  });
+  it.each([false, true])(
+    'does not hide a real user with a colliding notification, reverse=%s',
+    (reverse) => {
+      const notification = entry({ router: { intent: 'notification' } });
+      const human: SessionEntry = {
+        type: 'message',
+        id: 'human',
+        parentId: 'notice',
+        timestamp: new Date(1).toISOString(),
+        message: user('worker finished'),
+      };
+      expect(
+        notificationMessageIndices(
+          context,
+          reverse ? [human, notification] : [notification, human],
+        ),
+      ).toEqual([]);
     },
   );
 });

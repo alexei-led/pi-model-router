@@ -121,6 +121,7 @@ export const runClassifierDetailed = async (
       request.context,
       config.maxStateTokens,
       config.context,
+      request.notificationIndices,
     );
     const context = buildChoicePayload(
       selectedContext.state,

@@ -52,6 +52,7 @@ export interface RouterRequestIdentity {
 }
 
 export interface PreparedRouterRequest {
+  notificationIndices?: readonly number[] | undefined;
   plan: RoutePlan;
   decision: RoutingDecision;
   profile: RouterProfile;
@@ -72,6 +73,7 @@ interface RequestRouteInput {
   config: RouterConfig;
   getCurrentConfig: () => RouterConfig;
   context: Context;
+  notificationIndices?: readonly number[] | undefined;
   registry: RoutingRegistry;
   identity: RouterRequestIdentity;
   pinnedTier?: RouterTier;
@@ -86,6 +88,17 @@ interface RequestRouteInput {
   cache: ProviderTurnCache;
   onReview?: ((decision: RoutingDecision) => void) | undefined;
 }
+
+const routingContext = (input: RequestRouteInput): Context => {
+  if (!input.notificationIndices?.length) return input.context;
+  const notifications = new Set(input.notificationIndices);
+  return {
+    ...input.context,
+    messages: input.context.messages.filter(
+      (_message, index) => !notifications.has(index),
+    ),
+  };
+};
 
 export const createRouterRequestIdentity = (
   context: Context,
@@ -233,9 +246,9 @@ const canReuseContinuation = (
     )
   )
     return undefined;
-  const index = input.context.messages.lastIndexOf(assistant);
-  const results = input.context.messages
-    .slice(index + 1)
+  const index = routingContext(input).messages.lastIndexOf(assistant);
+  const results = routingContext(input)
+    .messages.slice(index + 1)
     .filter((entry) => entry.role === 'toolResult');
   if (
     !results.length ||
@@ -333,6 +346,7 @@ const runBackgroundReview = async (
     performance.now() + (advisor.timeoutMs ?? DEFAULT_CLASSIFIER_TIMEOUT_MS);
   const request: ClassifierRequest = {
     context: input.context,
+    notificationIndices: input.notificationIndices,
     candidates,
     ...(activityCandidates
       ? { activityCandidates, askRoute: candidates.length > 1 }
@@ -401,7 +415,7 @@ const scheduleBackgroundReview = (
   if (
     !turn ||
     !validContinuation ||
-    !input.context.messages.length ||
+    !routingContext(input).messages.length ||
     input.pinnedTier ||
     budget ||
     !advisor?.enabled ||
@@ -477,6 +491,7 @@ const chooseAdvisorRoute = async (
   const authorization = JSON.stringify([advisor, input.profile.advisor]);
   const request: ClassifierRequest = {
     context: input.context,
+    notificationIndices: input.notificationIndices,
     candidates,
     ...(activityCandidates
       ? { activityCandidates, askRoute: candidates.length > 1 }
@@ -648,7 +663,7 @@ const applySwitchPolicy = (
     proposedModelRef.modelId,
   );
   if (!currentModel || !nextModel) return proposed;
-  const priorAssistant = input.context.messages.findLast(
+  const priorAssistant = routingContext(input).messages.findLast(
     (message) => message.role === 'assistant',
   );
   const usage =
@@ -792,7 +807,7 @@ const applyEscalation = (
   policy: string,
 ): SelectedRoute => {
   const { state, floor } = updateEscalation(input.cache.escalation(), {
-    messages: input.context.messages,
+    messages: routingContext(input).messages,
     incumbent: selected.plan.tier,
     holdTurns: effectivePolicy(input.config, input.mode.mode)
       .escalationHoldTurns,
@@ -844,8 +859,9 @@ export const prepareRouterRequest = async (
   const budget =
     input.config.maxSessionBudget !== undefined &&
     input.accumulatedCost >= input.config.maxSessionBudget;
-  const toolContinuation = input.context.messages.at(-1)?.role === 'toolResult';
-  const latest = input.context.messages.findLast(
+  const toolContinuation =
+    routingContext(input).messages.at(-1)?.role === 'toolResult';
+  const latest = routingContext(input).messages.findLast(
     (entry) => entry.role === 'assistant',
   );
   const priorAssistant = latest?.role === 'assistant' ? latest : undefined;
@@ -863,7 +879,7 @@ export const prepareRouterRequest = async (
     budget,
   ]);
   const held = updateEscalation(input.cache.escalation(), {
-    messages: input.context.messages,
+    messages: routingContext(input).messages,
     incumbent: undefined,
     holdTurns: 0,
   });
@@ -905,7 +921,7 @@ export const prepareRouterRequest = async (
     continuationRoute.plan.mode.lever !== 'none'
   ) {
     const recovery = updateEscalation(input.cache.escalation(), {
-      messages: input.context.messages,
+      messages: routingContext(input).messages,
       incumbent: 'high',
       recoverCostHigh: true,
       holdTurns: effectivePolicy(input.config, 'cost').escalationHoldTurns,
@@ -1013,6 +1029,7 @@ export const prepareRouterRequest = async (
   selected.decision.generation = undefined;
   return {
     ...selected,
+    notificationIndices: input.notificationIndices,
     profile: input.profile,
     ...(turn ? { turn } : {}),
     branch: input.identity.branch,

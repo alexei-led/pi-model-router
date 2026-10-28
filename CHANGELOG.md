@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.1] - 2026-10-27
+
+Preserve the routing goal across identified extension notifications without changing user-owned routes or classifier thresholds.
+
+### Fixes
+
+- Keep explicitly marked notifications and `subagent-notify` completion notices as bounded progress evidence instead of new task anchors. Preserve valid tool continuation, review cadence, full-request context eligibility and the active goal/tool chain during truncation.
+- Keep unknown custom/intercom messages as steering. Extensions can explicitly mark notification or steering intent through custom-message details; ambiguous native provenance retains steering behavior.
+
+### Upgrade
+
+Restart Pi or run `/reload` after updating. No router configuration migration is required; baseline tiers, activity defaults and the default tool-result policy are unchanged. See [notification recognition](docs/classifier-advisor.md#goals-steering-and-notifications).
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.18.0...v0.18.1)
+
 ## [0.18.0] - 2026-10-27
 
 ### Summary

@@ -220,6 +220,8 @@ export interface ClassifierDependencies {
 
 export interface ClassifierRequest {
   context: Context;
+  /** Native-provenance notifications: progress text, not new task anchors. Runtime only. */
+  notificationIndices?: readonly number[] | undefined;
   candidates: readonly RouteCandidate[];
   /** Present only when eligible activity cells change the physical attempt plan. */
   activityCandidates?: readonly ActivityCandidate[] | undefined;
