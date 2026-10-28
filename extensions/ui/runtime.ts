@@ -243,7 +243,11 @@ export const createRouterUIRuntime = (
   const controls = (profile: string): RouterUIControls => {
     const config = state.currentConfig;
     const thinking = state.thinkingByProfile[profile];
-    const policy = effectivePolicy(config, modeOf(profile).mode);
+    const policy = effectivePolicy(
+      config,
+      modeOf(profile).mode,
+      config.profiles[profile],
+    );
     return {
       mode: state.modeOverride,
       pin: state.pinnedTierByProfile[profile] ?? 'auto',

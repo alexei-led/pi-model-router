@@ -522,6 +522,29 @@ describe('native notification provenance', () => {
       ).toEqual(expected);
     },
   );
+  it('matches configured native types exactly, not prompt patterns', () => {
+    const native = entry(undefined, 'intercom_message');
+    expect(
+      notificationMessageIndices(context, [native], ['intercom_message']),
+    ).toEqual([0]);
+    expect(
+      notificationMessageIndices(context, [native], ['intercom.*']),
+    ).toEqual([]);
+    expect(
+      notificationMessageIndices(
+        context,
+        [entry({ router: { intent: 'steering' } }, 'intercom_message')],
+        ['intercom_message'],
+      ),
+    ).toEqual([]);
+    expect(
+      notificationMessageIndices(
+        { messages: [user('**From a peer**')] },
+        [native],
+        ['intercom_message'],
+      ),
+    ).toEqual([]);
+  });
   it('requires exact content and timestamp on the current native branch', () => {
     const native = entry({ router: { intent: 'notification' } });
     expect(notificationMessageIndices(context, [])).toEqual([]);

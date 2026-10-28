@@ -109,6 +109,8 @@ export interface CapabilityCriterion {
 }
 
 export interface AdvisorProfileConfig {
+  confidenceThreshold?: number | undefined;
+  probabilityThreshold?: number | undefined;
   /** Explicit user-owned consent for these exact classifier references. */
   models: string[];
 }
@@ -138,6 +140,9 @@ export interface ModeProvenance {
 }
 
 export interface RouterProfile {
+  /** User-owned exact native custom-message types treated as notifications. */
+  notificationTypes?: readonly string[] | undefined;
+  switchPolicy?: Partial<RouterSwitchPolicy> | undefined;
   activityPreset?: 'auto' | 'off' | undefined;
   activityPresetFamily?: 'openai' | 'anthropic' | undefined;
   mode?: RouterMode | undefined;

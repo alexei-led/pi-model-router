@@ -7,6 +7,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { createCandidate, selectedAdviceConfidence } from './choice';
 import { runClassifierDetailed } from './classifier';
+import { advisorForProfile } from './config';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
 import { hasImageAttachment } from './context';
 import { parseCanonicalModelRef } from './domain';
@@ -363,7 +364,10 @@ const runBackgroundReview = async (
     classify: (model, context, options) =>
       input.registry.classify(model, context, options),
   };
-  const authorization = JSON.stringify([advisor, input.profile.advisor]);
+  const authorization = JSON.stringify([
+    input.config.advisor,
+    input.profile.advisor,
+  ]);
   const result = await runClassifierDetailed(advisor, request, registry);
   const currentConfig = input.getCurrentConfig();
   if (
@@ -488,7 +492,10 @@ const chooseAdvisorRoute = async (
   if (!reviewResult) input.signal?.throwIfAborted();
   const routingDeadline =
     performance.now() + (advisor.timeoutMs ?? DEFAULT_CLASSIFIER_TIMEOUT_MS);
-  const authorization = JSON.stringify([advisor, input.profile.advisor]);
+  const authorization = JSON.stringify([
+    input.config.advisor,
+    input.profile.advisor,
+  ]);
   const request: ClassifierRequest = {
     context: input.context,
     notificationIndices: input.notificationIndices,
@@ -514,7 +521,7 @@ const chooseAdvisorRoute = async (
         turn,
         input.profileName,
         candidates,
-        advisor,
+        advisorForProfile(advisor, input.profile.advisor) ?? advisor,
         JSON.stringify([
           policy,
           matrix.plans.map((plan) => plan.id),
@@ -545,7 +552,10 @@ const chooseAdvisorRoute = async (
   const authorized =
     activeConfig === input.config &&
     authorization ===
-      JSON.stringify([activeConfig.advisor, input.profile.advisor]) &&
+      JSON.stringify([
+        activeConfig.advisor,
+        activeConfig.profiles[input.profileName]?.advisor,
+      ]) &&
     (reviewResult !== undefined || performance.now() < routingDeadline);
   const activity = authorized ? result.advice?.activity : undefined;
   const plan =
@@ -703,7 +713,11 @@ const applySwitchPolicy = (
     proposedModel: nextModel,
     config: {
       ...input.config,
-      switchPolicy: effectivePolicy(input.config, input.mode.mode),
+      switchPolicy: effectivePolicy(
+        input.config,
+        input.mode.mode,
+        input.profile,
+      ),
     },
     ...(previousGeneration ? { previousGeneration } : {}),
     contextTokens,
@@ -809,7 +823,7 @@ const applyEscalation = (
   const { state, floor } = updateEscalation(input.cache.escalation(), {
     messages: routingContext(input).messages,
     incumbent: selected.plan.tier,
-    holdTurns: effectivePolicy(input.config, input.mode.mode)
+    holdTurns: effectivePolicy(input.config, input.mode.mode, input.profile)
       .escalationHoldTurns,
   });
   input.cache.setEscalation(state);
@@ -924,7 +938,8 @@ export const prepareRouterRequest = async (
       messages: routingContext(input).messages,
       incumbent: 'high',
       recoverCostHigh: true,
-      holdTurns: effectivePolicy(input.config, 'cost').escalationHoldTurns,
+      holdTurns: effectivePolicy(input.config, 'cost', input.profile)
+        .escalationHoldTurns,
     });
     if (recovery.costRecovery && recovery.state !== input.cache.escalation()) {
       recovering = true;

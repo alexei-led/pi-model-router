@@ -178,6 +178,30 @@ describe('mode resolution', () => {
 });
 
 describe('effective switch policy', () => {
+  it('scopes profile patches below mode and session edits', () => {
+    const personal = {
+      switchPolicy: { strongAdviceConfidence: 0.8, costSensitivity: 0.4 },
+    };
+    const config = { profiles: { personal, work: {} } };
+    expect(effectivePolicy(config, 'balanced', personal)).toMatchObject({
+      strongAdviceConfidence: 0.8,
+      costSensitivity: 0.4,
+      horizonRequests: 5,
+    });
+    expect(effectivePolicy(config, 'cost', personal).costSensitivity).toBe(0.8);
+    expect(
+      effectivePolicy(config, 'balanced', config.profiles.work)
+        .strongAdviceConfidence,
+    ).toBe(0.9);
+    expect(
+      effectivePolicy(
+        { ...config, sessionPolicy: { strongAdviceConfidence: 0.95 } },
+        'balanced',
+        personal,
+      ).strongAdviceConfidence,
+    ).toBe(0.95);
+  });
+
   const config: RouterConfig = {
     profiles: {},
     switchPolicy: { ...DEFAULT_SWITCH_POLICY, costSensitivity: 0.3 },

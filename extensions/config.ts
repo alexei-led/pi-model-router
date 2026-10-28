@@ -27,6 +27,7 @@ import {
 } from './domain';
 import type {
   AdvisorConfig,
+  AdvisorProfileConfig,
   ClassifierContextConfig,
   ConfigLoadResult,
   ModelDefinition,
@@ -137,6 +138,11 @@ export const mergeConfig = (
       : {};
     mergedProfiles[name] = {
       mode: mergeRawValue(existing.mode, profile.mode),
+      switchPolicy: mergeRawValue(existing.switchPolicy, profile.switchPolicy),
+      notificationTypes: mergeRawValue(
+        existing.notificationTypes,
+        profile.notificationTypes,
+      ),
       activities: mergeActivities(existing.activities, profile.activities),
       activityPreset: mergeRawValue(
         existing.activityPreset,
@@ -744,6 +750,33 @@ export const normalizeAdvisorConfig = (
   };
 };
 
+/** Profile tuning cannot select a classifier, enable it or grant consent. */
+export const advisorForProfile = (
+  advisor: AdvisorConfig | undefined,
+  profile: AdvisorProfileConfig | undefined,
+): AdvisorConfig | undefined =>
+  advisor
+    ? {
+        ...advisor,
+        ...(profile?.confidenceThreshold !== undefined
+          ? { confidenceThreshold: profile.confidenceThreshold }
+          : {}),
+        ...(profile?.probabilityThreshold !== undefined
+          ? { probabilityThreshold: profile.probabilityThreshold }
+          : {}),
+      }
+    : undefined;
+
+const profileThresholdsValid = (raw: Record<string, unknown>): boolean =>
+  ['confidenceThreshold', 'probabilityThreshold'].every(
+    (key) =>
+      raw[key] === undefined ||
+      (typeof raw[key] === 'number' &&
+        Number.isFinite(raw[key]) &&
+        raw[key] <= 1 &&
+        (key === 'probabilityThreshold' ? raw[key] > 0 : raw[key] >= 0)),
+  );
+
 const PROJECT_KEYS = ['profiles', 'activityRouting', 'ui', 'mode'];
 const PROJECT_PROFILE_KEYS = [
   'high',
@@ -976,6 +1009,47 @@ const withGenericBuiltinModes = (
   return result;
 };
 
+const normalizeProfileAdvisor = (
+  raw: unknown,
+  warnings: string[],
+): RouterProfile['advisor'] => {
+  let advisor: RouterProfile['advisor'];
+  if (raw !== undefined) {
+    const rawApproval = raw;
+    if (
+      isObjectRecord(rawApproval) &&
+      Array.isArray(rawApproval.models) &&
+      Object.keys(rawApproval).every((key) =>
+        ['models', 'confidenceThreshold', 'probabilityThreshold'].includes(key),
+      ) &&
+      profileThresholdsValid(rawApproval) &&
+      rawApproval.models.every(
+        (ref) => normalizeClassifierRef(ref) !== undefined,
+      )
+    ) {
+      advisor = {
+        ...(typeof rawApproval.confidenceThreshold === 'number'
+          ? { confidenceThreshold: rawApproval.confidenceThreshold }
+          : {}),
+        ...(typeof rawApproval.probabilityThreshold === 'number'
+          ? { probabilityThreshold: rawApproval.probabilityThreshold }
+          : {}),
+        models: [
+          ...new Set(
+            rawApproval.models.map(
+              (ref) => normalizeClassifierRef(ref) as string,
+            ),
+          ),
+        ],
+      };
+    } else
+      warnings.push(
+        'Ignored invalid profile advisor approval or tuning. Use exact advisor.models references and valid probability thresholds.',
+      );
+  }
+  return advisor;
+};
+
 export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   const warnings: string[] = [];
 
@@ -1055,31 +1129,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       }
     }
 
-    let advisor: RouterProfile['advisor'];
-    if (profileRecord.advisor !== undefined) {
-      const rawApproval = profileRecord.advisor;
-      if (
-        isObjectRecord(rawApproval) &&
-        Array.isArray(rawApproval.models) &&
-        Object.keys(rawApproval).every((key) => key === 'models') &&
-        rawApproval.models.every(
-          (ref) => normalizeClassifierRef(ref) !== undefined,
-        )
-      ) {
-        advisor = {
-          models: [
-            ...new Set(
-              rawApproval.models.map(
-                (ref) => normalizeClassifierRef(ref) as string,
-              ),
-            ),
-          ],
-        };
-      } else
-        warnings.push(
-          'Ignored invalid profile advisor approval. List exact Pi classifier references in advisor.models.',
-        );
-    }
+    const advisor = normalizeProfileAdvisor(profileRecord.advisor, warnings);
     if (profileRecord.mode !== undefined && !isRouterMode(profileRecord.mode))
       warnings.push(
         `Profile "${name}" mode must be cost, balanced or quality. Ignored.`,
@@ -1089,7 +1139,44 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       profileRecord,
       normalizedModels,
     );
+    let switchPolicy: Partial<RouterSwitchPolicy> | undefined;
+    if (profileRecord.switchPolicy !== undefined) {
+      const count = warnings.length;
+      const policy = normalizeSwitchPolicy(
+        profileRecord.switchPolicy,
+        warnings,
+      );
+      if (
+        isObjectRecord(profileRecord.switchPolicy) &&
+        warnings.length === count
+      )
+        switchPolicy = Object.fromEntries(
+          Object.keys(profileRecord.switchPolicy).map((key) => [
+            key,
+            policy[key as keyof RouterSwitchPolicy],
+          ]),
+        );
+    }
+    let notificationTypes: string[] | undefined;
+    if (profileRecord.notificationTypes !== undefined) {
+      if (
+        Array.isArray(profileRecord.notificationTypes) &&
+        profileRecord.notificationTypes.every(
+          (type) =>
+            typeof type === 'string' && type.length > 0 && type === type.trim(),
+        )
+      )
+        notificationTypes = [
+          ...new Set<string>(profileRecord.notificationTypes),
+        ];
+      else
+        warnings.push(
+          'Ignored invalid profile notificationTypes. Use exact native custom-message types.',
+        );
+    }
     normalizedProfiles[name] = {
+      ...(switchPolicy ? { switchPolicy } : {}),
+      ...(notificationTypes ? { notificationTypes } : {}),
       ...(isRouterMode(profileRecord.mode) ? { mode: profileRecord.mode } : {}),
       ...(baselineTier ? { baselineTier } : {}),
       ...generic,

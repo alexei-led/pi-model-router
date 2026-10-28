@@ -1127,6 +1127,7 @@ describe('Pi classifier provider integration', () => {
       2,
     ],
     ['untyped intercom', 'intercom_message', undefined, 2],
+    ['configured intercom', 'intercom_message', undefined, 1],
     ['invalid intent', 'fixture-status', { router: { intent: 'other' } }, 2],
     [
       'background progress',
@@ -1140,6 +1141,10 @@ describe('Pi classifier provider integration', () => {
     async (_name, customType, details, calls, reviewEveryRequests = 4) => {
       const s = setup();
       configureChoice(s, 'high');
+      if (_name === 'configured intercom')
+        required(s.state.currentConfig.profiles.balanced).notificationTypes = [
+          'intercom_message',
+        ];
       required(s.state.currentConfig.advisor).reviewEveryRequests =
         reviewEveryRequests;
       const manager = SessionManager.inMemory();
@@ -1450,6 +1455,9 @@ describe('Pi classifier provider integration', () => {
   it('shares same-turn classification while one cancelled waiter leaves the other active', async () => {
     const s = setup();
     enableAdvisors(s);
+    required(
+      required(s.state.currentConfig.profiles.balanced).advisor,
+    ).confidenceThreshold = 0.55;
     let resolveClassification:
       | ((result: ClassifierResponse) => void)
       | undefined;
@@ -1484,6 +1492,9 @@ describe('Pi classifier provider integration', () => {
   it('aborts the shared classifier transport when the final same-turn waiter leaves', async () => {
     const s = setup();
     enableAdvisors(s);
+    required(
+      required(s.state.currentConfig.profiles.balanced).advisor,
+    ).confidenceThreshold = 0.55;
     let classifierSignal: AbortSignal | undefined;
     const classify = vi.fn<Classify>(
       (_target, _context, options) =>
