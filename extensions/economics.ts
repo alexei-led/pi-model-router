@@ -57,6 +57,24 @@ const compareCacheCosts = (
   return { previousModel: `${previous.provider}/${previous.id}`, ...costs };
 };
 
+/**
+ * Catalog cost of measured token counters on another model, or undefined when
+ * that model has no usable tariff. A zero tariff is not evidence of free generation.
+ */
+export const repriceTokens = (
+  model: Model<Api>,
+  tokens: Pick<Usage, 'input' | 'output' | 'cacheRead' | 'cacheWrite'>,
+): number | undefined => {
+  const totalInput = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  if (!priced(model, totalInput)) return undefined;
+  const total = calculateCost(model, {
+    ...tokens,
+    totalTokens: totalInput + tokens.output,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  }).total;
+  return isCost(total) ? total : undefined;
+};
+
 export const observeGeneration = ({
   usage,
   target,

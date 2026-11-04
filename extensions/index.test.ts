@@ -78,6 +78,7 @@ describe('index.ts (orchestrator)', () => {
     const api = {
       registerProvider: vi.fn(),
       registerCommand: vi.fn(),
+      registerEntryRenderer: vi.fn(),
       setModel: vi.fn().mockResolvedValue(true),
       setThinkingLevel: vi.fn(),
       getThinkingLevel: vi.fn<() => ThinkingLevel>(() => 'medium'),
@@ -478,7 +479,7 @@ describe('index.ts (orchestrator)', () => {
       'Retained active-branch history: 0 decisions',
     );
     expect(ctx.ui.notify.mock.calls.at(-1)?.[0]).toContain(
-      'No retained decisions. /router log on',
+      'History collection is off · /router log on',
     );
     expect(ctx.ui.notify.mock.calls.at(-1)?.[0]).not.toContain(
       'Known generation cost: $0.5000',
@@ -1167,7 +1168,7 @@ describe('index.ts (orchestrator)', () => {
         );
         const runs = level === 'max' ? 'high' : 'low';
         expect(ctx.ui.notify).toHaveBeenCalledWith(
-          `Router thinking (all) set to ${level}; high runs at ${runs}, medium runs at ${runs}, micro runs at ${runs}`,
+          `Router thinking set to ${level}; high runs at ${runs}, medium runs at ${runs}, micro runs at ${runs}`,
           'info',
         );
       },

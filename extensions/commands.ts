@@ -28,10 +28,12 @@ import { ROUTER_MODES, ROUTER_TIERS } from './types';
 import {
   formatClassifierStats,
   formatDecision,
-  formatDecisionSource,
   formatPinSummary,
   formatThinkingSummary,
 } from './ui';
+import { clock, modelName, tierMeter, usd } from './ui/format';
+import { decisionReason, thinkingSet, thinkingUnchanged } from './ui/notices';
+import { ROUTER_OUTPUT_ENTRY } from './ui/output';
 
 /** Removed verbs answer with the replacement instead of acting. */
 const RETIRED_VERBS: Record<string, string> = {
@@ -45,23 +47,19 @@ const LOG_ACTIONS = ['on', 'off', 'clear'] as const;
 const MODE_VALUES = [...ROUTER_MODES, 'default'] as const;
 const THINKING_VALUES = ['auto', ...THINKING_LEVELS] as const;
 
-const USAGE = [
-  '/router                        overview (text outside TUI)',
-  '/router status                 short text status',
-  '/router routes                 configured routes and per-cell editor',
-  '/router classifier             classifier status and session selection',
-  '/router usage                  retained usage and known costs',
-  '/router settings               session controls',
-  '/router profile <name>         switch profile (enables the router)',
-  '/router off                    leave the router; restore the previous model',
-  '/router pin <tier|auto>        pin the active profile to high|medium|low|micro, or clear',
-  '/router thinking <level|auto>  override thinking for every tier, or clear',
-  '/router mode [cost|balanced|quality|default]  session mode; default clears it',
-  '/router log [on|off|clear]     recent decisions and advisor stats; control collection',
-  '/router widget                 toggle the status widget',
-  '/router reload                 reload model-router.json',
-  '/router help                   this text',
-].join('\n');
+const USAGE_ROWS = [
+  { line: '/router', desc: 'Overview (text outside TUI)' },
+  ...VERBS.map((verb) => ({
+    line: `/router ${verb.name}${verb.args ? ` ${verb.args}` : ''}`,
+    desc: verb.desc,
+  })),
+];
+/** Descriptions align at this column; a longer command keeps two spaces before its text. */
+const USAGE_COLUMN = 32;
+const USAGE = USAGE_ROWS.map(
+  (row) =>
+    `${row.line.padEnd(Math.max(USAGE_COLUMN, row.line.length + 2))}${row.desc}`,
+).join('\n');
 
 export const registerCommands = (
   pi: ExtensionAPI,
@@ -126,35 +124,16 @@ export const registerCommands = (
     return `Mode: ${mode} (${source})${modeBypassLabel(bypass)}`;
   };
 
-  const showStatus = (ctx: ExtensionContext) => {
-    const profile = state.selectedProfile;
-    const config = state.currentConfig;
-    const configured = profile ? config.profiles[profile] : undefined;
-    const preset =
-      configured?.activityPreset === 'off'
-        ? 'off'
-        : (configured?.activityPresetFamily ?? 'none (unrecognized routes)');
-    const cost =
-      `$${state.accumulatedCost.toFixed(4)}` +
-      (config.maxSessionBudget
-        ? ` / $${config.maxSessionBudget.toFixed(2)} soft budget`
-        : '');
-    const last =
-      state.lastDecision?.profile === profile ? state.lastDecision : undefined;
-    const lines = [
-      `Router: ${state.routerEnabled ? 'on' : 'off'} · profile ${profile ?? 'none'} · available: ${profileNames(config).join(', ')}`,
-      `Pin: ${formatPinSummary(state.pinnedTierByProfile)} · effort: ${formatThinkingSummary(state.thinkingByProfile)}`,
-      `${modeLine()} · activity routing: ${config.activityRouting ?? 'on'} (configuration) · Activity preset: ${preset}`,
-      `Recorded catalog cost: ${cost} (not billing; excludes advice)`,
-      ...(last && state.routerEnabled
-        ? [
-            `Last: ${last.tier} → ${last.targetProvider}/${last.targetModelId} (${last.thinking}) · ${formatDecisionSource(last)}`,
-          ]
-        : []),
-      'Details: /router · /router routes · /router classifier · /router usage · /router settings',
-      ...state.lastConfigWarnings,
-    ];
-    const text = lines.join('\n');
+  /**
+   * Multi-line output: a transcript entry in the TUI (kept in the session, out of
+   * model context), stderr in print mode, a display-only message in json mode.
+   */
+  const showOutput = (
+    ctx: ExtensionContext,
+    title: string,
+    lines: readonly string[],
+  ) => {
+    const text = [title, ...lines].join('\n');
     if (ctx.mode === 'print') process.stderr.write(`${text}\n`);
     else if (ctx.mode === 'json')
       pi.sendMessage(
@@ -166,7 +145,37 @@ export const registerCommands = (
         },
         { triggerTurn: false },
       );
+    else if (ctx.mode === 'tui')
+      pi.appendEntry(ROUTER_OUTPUT_ENTRY, { title, lines });
     else ctx.ui.notify(text, 'info');
+  };
+
+  const showStatus = (ctx: ExtensionContext) => {
+    const profile = state.selectedProfile;
+    const config = state.currentConfig;
+    const configured = profile ? config.profiles[profile] : undefined;
+    const preset =
+      configured?.activityPreset === 'off'
+        ? 'off'
+        : (configured?.activityPresetFamily ?? 'none (unrecognized routes)');
+    const last =
+      state.lastDecision?.profile === profile ? state.lastDecision : undefined;
+    const budget = config.maxSessionBudget
+      ? ` · soft budget ${usd(config.maxSessionBudget)}`
+      : '';
+    showOutput(ctx, `Router ${state.routerEnabled ? 'on' : 'off'}`, [
+      `Profile ${profile ?? 'none'} · available: ${profileNames(config).join(', ')}`,
+      ...(last && state.routerEnabled
+        ? [
+            `${tierMeter(last.tier)} ${modelName(last.targetModelId)} · ${last.thinking}${last.activity ? `  ${last.activity}` : ''}  ${decisionReason(last)}`,
+          ]
+        : []),
+      `${modeLine()} · activity routing: ${config.activityRouting ?? 'on'} · preset ${preset}`,
+      `Pin: ${formatPinSummary(state.pinnedTierByProfile)} · effort: ${formatThinkingSummary(state.thinkingByProfile)}`,
+      `Cost ${usd(state.accumulatedCost)} catalog, advice excluded${budget}`,
+      'Details: /router routes · /router classifier · /router usage · /router settings',
+      ...state.lastConfigWarnings,
+    ]);
     actions.updateStatus(ctx);
   };
 
@@ -262,10 +271,7 @@ export const registerCommands = (
         state.currentConfig.activityRouting !== 'off',
       ) === false
     ) {
-      ctx.ui.notify(
-        `Router thinking unchanged: '${level}' leaves no eligible route.`,
-        'warning',
-      );
+      ctx.ui.notify(thinkingUnchanged(level), 'warning');
       return;
     }
     if (level)
@@ -288,9 +294,7 @@ export const registerCommands = (
           )
         : [];
     ctx.ui.notify(
-      level
-        ? `Router thinking set to ${level}${adjusted.length > 0 ? `; ${adjusted.join(', ')}` : ''}`
-        : 'Router thinking override cleared',
+      level ? thinkingSet(level, adjusted) : 'Router thinking override cleared',
       'info',
     );
   };
@@ -329,22 +333,21 @@ export const registerCommands = (
       ctx.ui.notify('Router log cleared', 'info');
       return;
     }
-    const header = state.debugEnabled
-      ? 'Log: on'
-      : 'Log: off; /router log on collects new decisions';
     const history = state.debugHistory.map(
       (decision) =>
-        `[${new Date(decision.timestamp).toLocaleTimeString()}] ${formatDecision(decision)}`,
+        `[${clock(decision.timestamp)}] ${formatDecision(decision)}`,
     );
-    ctx.ui.notify(
+    showOutput(
+      ctx,
+      state.debugEnabled
+        ? 'Router log: on'
+        : 'Router log: off; /router log on collects new decisions',
       [
-        header,
         ...formatClassifierStats(state.debugHistory),
         ...(history.length > 0
           ? ['Recent decisions:', ...history]
           : ['No recent routing decisions.']),
-      ].join('\n'),
-      'info',
+      ],
     );
   };
 

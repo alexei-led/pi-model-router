@@ -97,7 +97,7 @@ for (const view of ['usage', 'settings', 'status', ''] as const) {
         view === 'usage'
           ? /Retained active-branch history: 0/
           : view === 'status'
-            ? /Router: on/
+            ? /Router on(?:\\n|\n)Profile/
             : /Router \/ offline/;
       if (mode === 'print') {
         assert.match(result.stderr, expected);

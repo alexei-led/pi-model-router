@@ -9,7 +9,6 @@ import {
   activityLabel,
   activityRouteLines,
   activityRoutingSummary,
-  advisorName,
   budgetLines,
   classifierLines,
   classifierStatus,
@@ -17,10 +16,10 @@ import {
   historyStatus,
   observedRouteChanges,
   preferenceLine,
-  routeMix,
   routeReason,
   routerTone,
   routeTimeline,
+  shortReason,
   textBar,
   usageSummary,
 } from './presentation';
@@ -74,11 +73,6 @@ const snapshot: RouterUISnapshot = {
 };
 
 describe('Signal Panel presentation', () => {
-  it('uses the configured classifier name without adding advisor branding', () => {
-    expect(advisorName('typesafe/jev-latest')).toBe('typesafe/jev-latest');
-    expect(advisorName('Pi classifier')).toBe('Pi classifier');
-  });
-
   it('marks high tier as ordinary, actual failure as error and recovered problems as warnings', () => {
     expect(routerTone(snapshot)).toBe('accent');
     expect(routerTone({ ...snapshot, lifecycle: 'failed' })).toBe('error');
@@ -115,7 +109,7 @@ describe('Signal Panel presentation', () => {
       ...snapshot,
       pendingControls: { ...snapshot.controls, pin: 'high' as const },
     };
-    expect(routeReason(state)).toBe('Local eligible baseline');
+    expect(routeReason(state)).toBe('Baseline route');
     expect(routeReason({ ...state, bypassReason: 'pinned' })).toBe(
       'Pinned route · advice skipped',
     );
@@ -139,7 +133,7 @@ describe('Signal Panel presentation', () => {
         confidenceOverride: false,
       },
     });
-    expect(held).toContain('held: $0.0800 vs $0.0200 over 5 requests');
+    expect(held).toContain('held: $0.08 vs $0.02 over 5 requests');
     expect(
       routerTone({
         ...snapshot,
@@ -191,7 +185,9 @@ describe('Signal Panel presentation', () => {
     }).join('\n');
     expect(text).toContain('Budget unset');
     expect(text).not.toContain('%');
-    expect(text).toContain('not a bill or cap');
+    expect(text).toContain(
+      'Catalog prices. Not a bill or cap. Advice excluded.',
+    );
   });
   it('bounds the history window, includes unknown routes in denominators and handles empty histories', () => {
     const actual = {
@@ -200,13 +196,16 @@ describe('Signal Panel presentation', () => {
       model: 'm',
       thinking: 'off' as const,
     };
-    const lines = routeMix([
-      ...Array.from({ length: 50 }, () => ({ actual })),
-      {},
-    ]).join('\n');
-    expect(lines).toContain('49/50');
-    expect(lines).toContain('Unknown routes: 1');
-    expect(routeMix([]).join('\n')).toContain('No retained decisions');
+    const collecting = { ...snapshot, loggingEnabled: true };
+    const lines = usageSummary({
+      ...collecting,
+      history: [...Array.from({ length: 50 }, () => ({ actual })), {}],
+    }).join('\n');
+    expect(lines).toContain('49 replies');
+    expect(lines).toContain('1 unknown route');
+    expect(usageSummary({ ...collecting, history: [] }).join('\n')).toContain(
+      'Send a new request with history on',
+    );
   });
 });
 
@@ -395,12 +394,10 @@ describe('routing observability', () => {
     ]);
     const lines = routeTimeline(history);
     expect(lines).toContain(
-      'Effort change: fixture/a [low] → fixture/a [high] · classifier',
+      'Effort change: ▂▄▆█ A · low → ▂▄ A · high · classifier',
     );
-    expect(lines).toContain(
-      'Model switch: fixture/a [high] → fixture/b [high] · pinned',
-    );
-    expect(lines.at(-1)).toBe('Observed: fixture/a [low]');
+    expect(lines).toContain('Model switch: ▂▄ A · high → ▂▄ B · high · pinned');
+    expect(lines.at(-1)).toBe('Observed: ▂▄ A · low');
     expect(lines.join('\n')).not.toContain('never-generated');
     expect(routeTimeline([])).toEqual(['No retained generation targets.']);
   });
@@ -427,11 +424,12 @@ describe('routing observability', () => {
       ],
     };
     const lines = usageSummary(value).join('\n');
-    expect(lines).toContain('Model switches: 1 · effort changes: 1');
-    expect(lines).toContain('$0.1000 · coverage 1/3');
+    expect(lines).toContain('$0.10 catalog · 3 replies');
+    expect(lines).toContain('1 switch · 1 effort change');
+    expect(lines).toContain('2 replies unpriced: unknown, not free');
     expect(
       usageSummary({ ...value, history: [{ actual: actual('a') }] }).join('\n'),
-    ).toContain('cost: unknown');
+    ).toContain('unknown catalog · 1 reply');
     expect(usageSummary(snapshot).join('\n')).toContain(
       'History collection is off',
     );
@@ -446,4 +444,189 @@ it.each([
   [{ activity: 'debug' as const, routeCell: 'debug' as const }, 'debug'],
 ])('labels activity provenance %j as %s', (route, label) => {
   expect(activityLabel(route)).toBe(label);
+});
+
+describe('usageSummary tiers and comparison', () => {
+  const route = (
+    tier: RouterUIRoute['tier'],
+    model: string,
+  ): RouterUIRoute => ({ tier, provider: 'fixture', model, thinking: 'low' });
+  const value: RouterUISnapshot = {
+    ...snapshot,
+    loggingEnabled: true,
+    history: [
+      { actual: route('micro', 'a'), generationCostUsd: 0.5 },
+      { actual: route('high', 'b'), generationCostUsd: 0.75 },
+      { actual: route('high', 'b'), generationCostUsd: 0.75 },
+    ],
+  };
+
+  it('lists tiers micro to high with replies and cost', () => {
+    const lines = usageSummary(value);
+    const micro = lines.findIndex((line) => line.startsWith('▂ '));
+    const high = lines.findIndex((line) => line.startsWith('▂▄▆█ '));
+    expect(lines[micro]).toMatch(/micro +\[.*\] 1 reply \$0\.50$/u);
+    expect(lines[high]).toMatch(/high +\[.*\] 2 replies \$1\.50$/u);
+    expect(micro).toBeGreaterThanOrEqual(0);
+    expect(micro).toBeLessThan(high);
+    expect(lines.some((line) => line.includes(' low '))).toBe(false);
+  });
+
+  it('shows the same-token comparison only when the snapshot carries one', () => {
+    expect(usageSummary(value).join('\n')).not.toContain('Same tokens');
+    const lines = usageSummary({
+      ...value,
+      comparison: {
+        model: 'claude-opus-5-5',
+        yourUsd: 5,
+        routedUsd: 2,
+        replies: 3,
+      },
+    });
+    expect(lines).toContain('Same tokens on Opus 5.5: $5.00 vs $2.00 routed');
+    expect(lines).toContain('−$3.00 (−60%) · estimate over 3 replies');
+    expect(lines.at(-1)).toBe('Catalog prices, not a bill. Advice excluded.');
+  });
+
+  it('leaves the comparison out when both sides are below half a cent', () => {
+    const lines = usageSummary({
+      ...value,
+      comparison: {
+        model: 'claude-opus-5-5',
+        yourUsd: 0.004,
+        routedUsd: 0.001,
+        replies: 3,
+      },
+    });
+    expect(lines.join('\n')).not.toContain('Same tokens');
+  });
+});
+
+describe('classifier outcome wording', () => {
+  const state = (
+    outcome: NonNullable<RouterUISnapshot['advice']>['outcome'],
+    latencyMs?: number,
+  ): RouterUISnapshot => ({
+    ...snapshot,
+    lifecycle: 'idle',
+    advice: { advisor: 'c', outcome, latencyMs },
+  });
+  it.each([
+    ['selected', 'Classifier advice accepted · 412 ms', '= fits'],
+    ['deadline', 'Classifier timed out · baseline kept', '! timed out'],
+    ['uncertain', 'Classifier abstained · baseline kept', '= unsure'],
+    ['cancelled', 'Classifier cancelled', '= cancelled'],
+    ['unavailable', 'Classifier unavailable · baseline kept', '! unavailable'],
+    [
+      'invalid-response',
+      'Classifier answer invalid · baseline kept',
+      '! bad answer',
+    ],
+    [
+      'input-too-large',
+      'Classifier input too large · baseline kept',
+      '! input too large',
+    ],
+    [
+      'network-error',
+      'Classifier network error · baseline kept',
+      '! network error',
+    ],
+    ['http-error', 'Classifier HTTP error · baseline kept', '! http error'],
+  ] as const)(
+    '%s reads as a sentence and a short reason',
+    (outcome, sentence, short) => {
+      expect(routeReason(state(outcome, 412))).toBe(sentence);
+      expect(shortReason(state(outcome, 412))).toBe(short);
+    },
+  );
+});
+
+describe('shortReason', () => {
+  const route = (tier: RouterUIRoute['tier']): RouterUIRoute => ({
+    tier,
+    provider: 'p',
+    model: 'm',
+    thinking: 'low',
+  });
+  const moved = (from: RouterUIRoute['tier'], to: RouterUIRoute['tier']) => [
+    { actual: { ...route(from), model: 'x' } },
+    { actual: { ...route(to), model: 'y' } },
+  ];
+  const stay: RouterUISnapshot = { ...snapshot, lifecycle: 'idle' };
+  const cost = (
+    reason:
+      | 'cost-held'
+      | 'strong-advice'
+      | 'effort-cache-shared'
+      | 'within-policy',
+  ) => ({
+    reason,
+    horizonRequests: 5,
+    confidenceOverride: reason === 'strong-advice',
+  });
+  const advice = (outcome: 'selected' | 'deadline' | 'uncertain') => ({
+    advisor: 'c',
+    outcome,
+  });
+  it.each<[string, Partial<RouterUISnapshot>, string]>([
+    ['choosing', { lifecycle: 'choosing' }, '… choosing'],
+    ['cancelled', { lifecycle: 'cancelled' }, '= cancelled'],
+    ['failed', { lifecycle: 'failed' }, '! failed · /router log'],
+    ['fallback', { lifecycle: 'fallback' }, '! fallback'],
+    ['budget', { lifecycle: 'budget' }, '↓ over budget'],
+    ['escalation', { reason: 'escalation' }, '↑ tool errors'],
+    ['pinned', { reason: 'pinned' }, '⏵ pinned'],
+    ['bypass pin', { bypassReason: 'pinned' }, '⏵ pinned'],
+    ['reuse', { reuse: 'continuation' }, '= reused'],
+    ['no advice', {}, '= baseline'],
+    [
+      'held stronger',
+      {
+        switchCost: cost('cost-held'),
+        advised: route('high'),
+        actual: route('low'),
+      },
+      '… stronger, waiting',
+    ],
+    [
+      'held cheaper',
+      {
+        switchCost: cost('cost-held'),
+        advised: route('low'),
+        actual: route('high'),
+      },
+      '… cheaper, waiting',
+    ],
+    [
+      'strong advice up',
+      { switchCost: cost('strong-advice'), history: moved('low', 'high') },
+      '↑ clearly stronger',
+    ],
+    [
+      'strong advice down',
+      { switchCost: cost('strong-advice'), history: moved('high', 'low') },
+      '↓ clearly cheaper',
+    ],
+    [
+      'effort changed',
+      { switchCost: cost('effort-cache-shared') },
+      '= effort changed',
+    ],
+    [
+      'within policy up',
+      { switchCost: cost('within-policy'), history: moved('low', 'medium') },
+      '↑ stronger',
+    ],
+    [
+      'within policy down',
+      { switchCost: cost('within-policy'), history: moved('medium', 'low') },
+      '↓ cheaper',
+    ],
+    ['accepted, no move', { advice: advice('selected') }, '= fits'],
+    ['deadline', { advice: advice('deadline') }, '! timed out'],
+    ['uncertain', { advice: advice('uncertain') }, '= unsure'],
+  ])('%s', (_name, patch, expected) => {
+    expect(shortReason({ ...stay, ...patch })).toBe(expected);
+  });
 });

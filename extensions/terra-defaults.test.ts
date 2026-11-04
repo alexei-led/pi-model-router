@@ -235,7 +235,7 @@ it('keeps router Now, strip and recorded effort physical when the host message s
       content({} as TUI, ctx.ui.theme)
         .render(120)
         .join(' '),
-    ).toContain('effort xhigh');
+    ).toContain('GPT 6.1 Terra · xhigh');
 });
 
 const advisedConfig = (profile: object = ladder('scope')) => ({

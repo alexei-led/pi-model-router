@@ -34,8 +34,8 @@ With this profile and no active advisor or pin, the completed route has this
 illustrative two-line strip:
 
 ```text
-gpt-6.1-terra · base · medium · effort medium · last
-Local eligible baseline · auto · balanced (default)
+▂▄▆ GPT 6.1 Terra · medium  = baseline
+auto · balanced (default)
 ```
 
 The baseline is the configured default, not a tier inferred from prompt words.
@@ -44,17 +44,36 @@ The first profile above does not enable one.
 
 ## Understand the result
 
-| Field                          | Meaning                                                                                                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Model ID                       | The actual generation target, not just the advisor's choice.                                                                          |
-| Activity / `base`              | Validated activity, or the base route without an activity choice. [Read activity labels](activity-routing.md#understand-the-display). |
-| Tier / effort                  | The configured tier and reasoning effort that ran. Narrow strips omit secondary fields first.                                         |
-| `last`                         | The last completed route, not a currently running request.                                                                            |
-| Advisor name                   | The configured Pi classifier model reference.                                                                                         |
-| `Tool route reused`            | No new advisor request. Prior latency is not presented as a new request.                                                              |
-| `timed out → baseline`         | Advice failed but an eligible generation baseline ran.                                                                                |
-| `Explicit generation fallback` | Another configured generation target ran, possibly in the same tier.                                                                  |
-| `Next user turn`               | Applied controls waiting for a user turn; actual generation is unchanged.                                                             |
+| Part of the strip             | Meaning                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `▂ ▂▄ ▂▄▆ ▂▄▆█`               | The tier that ran: `micro`, `low`, `medium`, `high`. The same bars name a tier on every surface.                                    |
+| Model name and effort         | The actual generation target, such as `Opus 5.5 · high`, not the classifier's choice. `ui.statusLine: "detailed"` shows `provider/model`. |
+| Activity                      | A noun after the effort when an activity cell ran. A base route shows none. [Read activity labels](activity-routing.md#understand-the-display). |
+| `↑ ↓ = … ! ⏵` and a few words | Why: `↑` stronger, `↓` cheaper, `=` stays, `…` waits, `!` fault, `⏵` pin. Examples: `↑ clearly stronger`, `= fits`, `… cheaper, waiting`, `! timed out`, `⏵ pinned`. |
+| `= reused`                    | A tool turn reused the route. No new classifier request.                                                                              |
+| `! fallback`                  | Another configured generation target ran, possibly in the same tier.                                                                  |
+| Second line                   | Profile, mode with its source, and the classifier time when its advice was accepted.                                                  |
+| `⏵ next turn: …`              | Applied controls waiting for a user turn. The generation does not change until then.                                                  |
+
+The strip drops detail on a narrow screen in this order: the activity, then the
+reason. The tier bars and the model always stay. The footer status is shared
+with other extensions and Pi cuts it at the terminal width, so it carries only
+the bars, the model, the effort and one marker: `⏵` for a pending change and `!`
+for a recovered problem or a budget limit.
+
+Pi's own footer shows the session cost, token counters and context use. The
+strip does not repeat them. [Read costs and cache data](#read-costs-and-cache-data)
+covers the router's own cost figures.
+
+When the router moves to another model between turns, it writes one line:
+
+```text
+Model changed: MiMo V2.6 Flash · high → GLM 5.3 · low · ⏵ pinned
+```
+
+A change of effort alone and a pin that keeps the model do not write a line.
+Pi can replace this line with the next information line, so use `/router` for
+the history.
 
 With the legacy custom provider, Pi's logical `/thinking` selection and saved
 assistant-message `thinkingLevel` are not authoritative physical-effort records;
@@ -85,7 +104,7 @@ The switch trail uses adjacent known generation targets in retained active-branc
 It does not count advisor-only reviews as generation, join transitions across unknown targets,
 or infer a switch before the retained window. It is not a lifetime switching counter.
 
-![Actual model and effort transitions in native Pi](assets/router-ui/tabs-now-dark.png)
+The [README](../README.md#inspect-routing-in-pi) shows the Now tab.
 
 ### Routes and pending edits
 
@@ -105,8 +124,19 @@ cell effort. The editor shows configured and effective values. Clear the tier
 override to use the cell effort. Model catalogs are not authentication checks:
 generation rechecks input, context and credentials.
 
-![Configured route matrix in native Pi](assets/router-ui/tabs-routes-dark.png)
-![Queued route change with actual generation unchanged](assets/router-ui/tabs-routes-pending-dark.png)
+```text
+Activity ▂     ▂▄    ▂▄▆   ▂▄▆█
+code     I     I     I     I
+debug    I     I     I     I
+explore  I     I     I     I
+plan     I     I     I     I
+review   I     I     I     I
+ops      I     I     I     I
+docs     I     I     I     I
+
+B built-in · I inherited · O override · — missing
+* draft · + queued for next user turn
+```
 
 ### Classifier selection and readiness
 
@@ -125,16 +155,36 @@ refresh when classification completes, without waiting for generation to finish.
 The operation model, source and profile are labeled separately from the current
 selection. These are observations, not proof of a new HTTP call on every tool step.
 
-![Classifier readiness and operation provenance](assets/router-ui/tabs-classifier-dark.png)
 
 ### Usage and logging
 
-Usage starts with a compact summary. Missing prices remain unknown, not free.
+Usage starts with the money: the catalog cost of the retained replies, then one
+row per tier. Missing prices remain unknown, not free.
 History collection off is distinct from no generation. Run `/router log on` to
 collect future observations; it does not reconstruct older decisions.
 
-![Compact retained usage, with technical details collapsed](assets/router-ui/tabs-usage-dark.png)
-![Logging-off state in narrow native Pi, light theme](assets/router-ui/tabs-usage-off-narrow-light.png)
+```text
+History collection is on · last 50 observations
+$1.24 catalog · 48 replies
+6 switches · 3 effort changes
+2 replies unpriced: unknown, not free
+
+▂    micro  [█░░░░░░░░░] 4 replies $0.02
+▂▄   low    [██░░░░░░░░] 11 replies $0.11
+▂▄▆  medium [████░░░░░░] 20 replies $0.71
+▂▄▆█ high   [███░░░░░░░] 13 replies $0.40
+
+Same tokens on Opus 5.5: $3.10 vs $1.24 routed
+−$1.86 (−60%) · estimate over 46 replies
+Catalog prices, not a bill. Advice excluded.
+```
+
+The `Same tokens` lines compare the retained replies with the model you selected
+before the router started, priced on the same token counts. They are an estimate:
+another model can write more or fewer tokens, and cache behavior differs. The
+lines are missing when that model has no usable price, when no reply has both
+tokens and a cost, or when both totals are below half a cent. A zero price is
+not a price.
 
 ### Keyboard, resize and session scope
 
@@ -157,8 +207,6 @@ Nothing writes router configuration files or changes provider authentication.
 The inspector is a right overlay at 100 columns or wider. Narrow terminals use
 a custom screen. Resize preserves the active tab, expanded details and drafts,
 then restores focus to the tab row. Mouse input is not required.
-
-![Classifier draft retained after resizing to a narrow light-theme screen](assets/router-ui/tabs-classifier-draft-narrow-light.png)
 
 Pin, tier effort and baseline are profile-scoped. The activated mode override is session-wide and survives resume. Cell route edits are session-only
 profile overrides. Advisor, deadline, budget, review cadence and switch-cost
@@ -273,15 +321,15 @@ Use `/router thinking auto` to clear the override.
 | `/router`                                         | Open Now, or return text outside TUI.                                |
 | `/router routes`                                  | Open the configured route grid and per-cell editor.                  |
 | `/router classifier`                              | Open classifier readiness, selection and last-operation diagnostics. |
-| `/router usage`                                   | Inspect retained decisions and known costs.                          |
+| `/router usage`                                   | Inspect retained decisions and catalog costs.                        |
 | `/router settings`                                | Inspect and edit session controls in TUI.                            |
-| `/router status`                                  | Return short text status.                                            |
+| `/router status`                                  | Show status. In the TUI it is a transcript entry, not sent to the model. |
 | `/router profile <name>`                          | Select a profile and enable the router.                              |
 | `/router off`                                     | Restore the previous non-router model.                               |
 | `/router pin <tier\|auto>`                        | Pin a tier or return to automatic selection.                         |
 | `/router thinking <level\|auto>`                  | Override effort for the profile or clear the override.               |
 | `/router mode [cost\|balanced\|quality\|default]` | Show the routing mode, set a session override, or clear it.          |
-| `/router log [on\|off\|clear]`                    | Show recent decisions, control collection, or clear history.         |
+| `/router log [on\|off\|clear]`                    | Show recent decisions (a transcript entry in the TUI), control collection, or clear history. |
 | `/router widget`                                  | Toggle the status widget.                                            |
 | `/router reload`                                  | Reload router configuration, not Pi provider extensions.             |
 | `/router help`                                    | Show command help.                                                   |
@@ -354,6 +402,21 @@ After a terminal response, `/router log` exposes:
 An attempt without terminal usage makes the request total unknown. The session total still includes known costs.
 Zero placeholder tariffs do not establish free generation.
 Catalog prices do not establish subscription charges.
+
+Every dollar figure in the router is a catalog estimate and says so with the word
+`catalog`. One format applies everywhere: `$1.24`, `<$0.01` below half a cent,
+`unknown` when no price or usage exists, and `$0.0042` with four decimals in the
+log and the Details view. Differences read `−$1.86 (−60%)`. Times read `412 ms` and `1.2 s`.
+The router does not know whether a provider bills you or counts the use against a
+plan, so it never labels a figure as a bill or as plan value. Pi's footer shows its
+own session cost; the router's total leaves out classifier advice, so the two can differ.
+
+The router holds no price list. Prices come from Pi's model catalog, and the
+router reports them as Pi gives them. A catalog price that differs from the
+provider's page is a catalog issue: report it to Pi. Known limits of today's catalog:
+Sonnet 5.5 cache reads are listed at $0.20 per million tokens, where Anthropic's page
+says $0.10, and DeepSeek is listed at its peak price, so off-peak use reads twice as costly
+as billed (checked on 2026-11-04).
 
 The diagnostics-only shadow comparison still does not predict savings. Fresh in-loop advice separately estimates stay versus switching over the configured horizon: the first target request is cold (using the greater of ordinary input/cache-write catalog cost, with request-wide output pricing); later target requests and staying use the same last-observed read-share scenario, or an explicit all-read scenario if no share is known. Output volume is reused from the latest request. Rebuild premium and steady generation-price difference are separate diagnostics. Initial new-user advice is not held by the previous task's estimate. This is an explicit catalog scenario, not a prediction, invoice, cache-hit promise, or quality score.
 
