@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { observeGeneration } from './economics';
+import { observeGeneration, repriceTokens } from './economics';
 import { message, model } from './test/fixtures';
 
 const expensive = model('expensive', {
@@ -230,5 +230,79 @@ describe('generation economics', () => {
         reportedCostUsd: 0,
       })?.reportedCostUsd,
     ).toBeUndefined();
+  });
+});
+
+describe('repriceTokens', () => {
+  it('prices every counter at the model per-million rates', () => {
+    expect(
+      repriceTokens(expensive, {
+        input: 1_000_000,
+        output: 500_000,
+        cacheRead: 2_000_000,
+        cacheWrite: 100_000,
+      }),
+    ).toBeCloseTo(10 + 10 + 2 + 1.25, 10);
+  });
+
+  it('returns zero for no tokens on a priced model', () => {
+    expect(
+      repriceTokens(cheap, {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      }),
+    ).toBe(0);
+  });
+
+  it.each([
+    ['a model with no tariff', model()],
+    [
+      'a model that does not price cache reads',
+      model('no-cache', {
+        cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ],
+  ])('returns undefined for %s, never a free cost', (_name, unpriced) => {
+    expect(
+      repriceTokens(unpriced, {
+        input: 1000,
+        output: 1000,
+        cacheRead: 1000,
+        cacheWrite: 0,
+      }),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    [200_000, 0.2 + 2],
+    [200_001, 200_001 * 2e-6 + 4],
+  ])('applies the input-size tier at %i input tokens', (input, expected) => {
+    const tiered = model('tiered', {
+      cost: {
+        input: 1,
+        output: 2,
+        cacheRead: 0.1,
+        cacheWrite: 0,
+        tiers: [
+          {
+            inputTokensAbove: 200_000,
+            input: 2,
+            output: 4,
+            cacheRead: 0.2,
+            cacheWrite: 0,
+          },
+        ],
+      },
+    });
+    expect(
+      repriceTokens(tiered, {
+        input,
+        output: 1_000_000,
+        cacheRead: 0,
+        cacheWrite: 0,
+      }),
+    ).toBeCloseTo(expected, 10);
   });
 });

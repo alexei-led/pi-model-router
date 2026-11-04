@@ -29,6 +29,7 @@ const buildMockPi = () => {
       if (name === 'router') registered = cmd;
     },
     setModel: vi.fn().mockResolvedValue(true),
+    appendEntry: vi.fn(),
     command: () => {
       if (!registered?.getArgumentCompletions)
         throw new Error('Router command with completions was not registered');
@@ -189,12 +190,12 @@ describe('/router surface', () => {
       'usage',
       'settings',
       'profile',
+      'off',
       'pin',
       'thinking',
       'mode',
       'log',
       'widget',
-      'off',
       'reload',
       'help',
     ]);
@@ -273,19 +274,49 @@ describe('/router status', () => {
     await run('');
     const [text, level] = lastNotice();
     expect(level).toBe('info');
-    expect(text).toContain(
-      'Router: on · profile balanced · available: balanced, cheap',
-    );
+    expect(text.split('\n')[0]).toBe('Router on');
+    expect(text).toContain('Profile balanced · available: balanced, cheap');
     expect(text).toContain('Pin: balanced:high');
-    expect(text).toContain('$0.0500 / $10.00');
+    expect(text).toContain(
+      'Cost $0.05 catalog, advice excluded · soft budget $10.00',
+    );
     expect(text).toContain('/router settings');
-    expect(text).toContain('Activity preset: none (unrecognized routes)');
-    expect(text.split('\n').length).toBeLessThanOrEqual(7);
-    expect(text).toContain('Last: medium → openai/gpt-4o-mini (medium)');
+    expect(text).toContain('preset none (unrecognized routes)');
+    expect(text.split('\n').length).toBeLessThanOrEqual(8);
+    expect(text).toContain('▂▄▆ GPT 4o Mini · medium  = baseline');
     expect(text).toContain('Warning 1');
     state.lastDecision = undefined;
     await run('');
-    expect(lastNotice()[0]).not.toContain('Last:');
+    expect(lastNotice()[0]).not.toContain('GPT 4o Mini');
+  });
+
+  it('draws status and log as session entries in the TUI, not as notices', async () => {
+    const { run, pi, ctx } = setup();
+    Object.assign(ctx, { mode: 'tui' });
+    await run('status');
+    await run('log');
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+    expect(pi.appendEntry).toHaveBeenNthCalledWith(1, 'router-output', {
+      title: 'Router on',
+      lines: expect.arrayContaining([
+        expect.stringContaining('▂▄▆ GPT 4o Mini · medium'),
+      ]),
+    });
+    expect(pi.appendEntry).toHaveBeenNthCalledWith(2, 'router-output', {
+      title: 'Router log: off; /router log on collects new decisions',
+      lines: expect.arrayContaining(['Recent decisions:']),
+    });
+  });
+
+  it('keeps one-line confirmations as notices in the TUI', async () => {
+    const { run, pi, ctx } = setup();
+    Object.assign(ctx, { mode: 'tui' });
+    await run('pin high');
+    expect(ctx.ui.notify).toHaveBeenLastCalledWith(
+      'Router pinned to high',
+      'info',
+    );
+    expect(pi.appendEntry).not.toHaveBeenCalled();
   });
 
   it('keeps advisor credentials out of short status', async () => {
@@ -504,13 +535,15 @@ describe('/router log', () => {
     await run('log');
     const [text, level] = lastNotice();
     expect(level).toBe('info');
-    expect(text).toContain('Log: off; /router log on collects new decisions');
+    expect(text).toContain(
+      'Router log: off; /router log on collects new decisions',
+    );
     expect(text).toContain('Recent decisions:');
     expect(text).toContain('gpt-4o-mini');
     state.debugHistory.length = 0;
     state.debugEnabled = true;
     await run('log');
-    expect(lastNotice()[0]).toContain('Log: on');
+    expect(lastNotice()[0]).toContain('Router log: on');
     expect(lastNotice()[0]).toContain('No recent routing decisions.');
   });
 
@@ -653,7 +686,7 @@ describe('/router mode', () => {
     });
     await run('status');
     expect(lastNotice()[0]).toContain(
-      'Mode: cost (session) · activity routing: on (configuration)',
+      'Mode: cost (session) · activity routing: on · preset',
     );
   });
 });

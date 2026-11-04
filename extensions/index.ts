@@ -26,6 +26,8 @@ import type {
 } from './types';
 import { ROUTER_TIERS } from './types';
 import { openRouterInspector, updateRouterUIStrip } from './ui';
+import { thinkingSet, thinkingUnchanged } from './ui/notices';
+import { ROUTER_OUTPUT_ENTRY, renderRouterOutput } from './ui/output';
 import { createRouterUIRuntime } from './ui/runtime';
 
 const hasExplicitCliModel = () =>
@@ -521,6 +523,8 @@ const routerExtension = (pi: ExtensionAPI) => {
     actions.updateStatus(ctx);
   };
 
+  pi.registerEntryRenderer(ROUTER_OUTPUT_ENTRY, renderRouterOutput);
+
   registerCommands(pi, runtimeState, actions, async (ctx, tab) => {
     const text = await openRouterInspector(ctx, routerUI.adapters, tab);
     if (!text) return;
@@ -713,10 +717,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       ) === false
     ) {
       actions.syncPiThinkingLevel(event.previousLevel);
-      ctx.ui.notify(
-        `Router thinking unchanged: '${event.level}' leaves no eligible route.`,
-        'warning',
-      );
+      ctx.ui.notify(thinkingUnchanged(event.level), 'warning');
       return;
     }
     thinkingByProfile[selectedProfile] = overrides;
@@ -729,10 +730,7 @@ const routerExtension = (pi: ExtensionAPI) => {
       currentConfig.activityRouting !== 'off',
     );
     if (adjusted.length > 0)
-      ctx.ui.notify(
-        `Router thinking (all) set to ${event.level}; ${adjusted.join(', ')}`,
-        'info',
-      );
+      ctx.ui.notify(thinkingSet(event.level, adjusted), 'info');
   });
 };
 

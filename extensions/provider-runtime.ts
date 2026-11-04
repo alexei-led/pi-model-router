@@ -26,6 +26,7 @@ import type {
   RouterThinkingByProfile,
   RoutingDecision,
 } from './types';
+import { modelChangeNotice } from './ui/notices';
 
 const REGISTRY_WAIT_TIMEOUT_MS = 5000;
 const REGISTRY_WAIT_INITIAL_DELAY_MS = 50;
@@ -36,7 +37,9 @@ type RequestContext = {
     ExtensionContext['sessionManager'],
     'getBranch' | 'getSessionId'
   >;
-  ui: Pick<ExtensionContext['ui'], 'setHiddenThinkingLabel'>;
+  mode?: ExtensionContext['mode'];
+  ui: Pick<ExtensionContext['ui'], 'setHiddenThinkingLabel'> &
+    Partial<Pick<ExtensionContext['ui'], 'notify'>>;
 };
 
 interface ProviderStreamState {
@@ -198,8 +201,16 @@ const runGeneration = async (
   const { model, context, options, state, actions, stream, cache } = input;
   const { request, registry } = prepared;
   const decision = request.decision;
+  const previousDecision = state.lastDecision;
   state.lastDecision = decision;
   observe({ stage: 'selected', decision });
+  try {
+    const context = state.lastExtensionContext;
+    const notice = modelChangeNotice(previousDecision, decision);
+    if (notice && context?.mode === 'tui') context.ui.notify?.(notice, 'info');
+  } catch {
+    // Stale extension context — a notice is not worth failing the request.
+  }
 
   let shownThinking = decision.thinking;
   try {

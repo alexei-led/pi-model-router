@@ -5,6 +5,7 @@ import type {
   RouterPinByProfile,
   RouterThinkingByProfile,
   RouterUIPreferences,
+  RouterUIRoute,
   RouterUISnapshot,
   RoutingDecision,
   StatusLineMode,
@@ -13,16 +14,23 @@ import {
   CLASSIFIER_OUTCOMES,
   isAdvisorOutcome,
   isRoutingReasonCode,
-  ROUTER_TIERS,
 } from './types';
 import {
-  activityLabel,
-  formatMode,
-  routeReason,
-  routerTone,
-} from './ui/presentation';
+  clock,
+  latency,
+  modelName,
+  percent,
+  TIER_DISPLAY_ORDER,
+  tierMeter,
+  usdFine,
+} from './ui/format';
+import { formatMode, routerTone, shortReason } from './ui/presentation';
 
 export { openRouterInspector } from './ui/inspector';
+
+/** The status line is shared with other extensions; Pi cuts the joined line. Stay short. */
+const STATUS_COLUMNS = 40;
+const PART_SEPARATOR = '  ';
 
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
@@ -67,15 +75,15 @@ export const formatAdvisorLabel = (
   if (!isAdvisorOutcome(decision.advisor)) return undefined;
   switch (decision.advisor) {
     case 'none':
-      return 'local baseline';
+      return 'baseline only';
     case 'bypassed': {
       const reason = formatBypassReason(decision);
       return reason ? `advice skipped: ${reason}` : 'advice bypassed';
     }
     case 'classifier':
-      return '🧠 Classifier ✓';
+      return 'classifier ✓';
     case 'classifier-fallback':
-      return '🧠 Classifier ↪ base';
+      return 'classifier · baseline kept';
     default:
       return undefined;
   }
@@ -86,7 +94,7 @@ const formatRunTime = (startedAt: number | undefined): string | undefined =>
   Number.isFinite(startedAt) &&
   startedAt >= 0 &&
   startedAt <= 8.64e15
-    ? new Date(startedAt).toLocaleTimeString('en-GB', { hour12: false })
+    ? clock(startedAt)
     : undefined;
 
 const activityDiagnostics = (metrics: ClassifierDiagnostics): string[] =>
@@ -119,26 +127,24 @@ export const formatAdvisorDetail = (
       parts.push(`selected=${metrics.selectedTier}`);
     if (metrics.selectionBasis) parts.push(`basis=${metrics.selectionBasis}`);
     if (metrics.routeProbability !== undefined)
-      parts.push(`route-p=${(metrics.routeProbability * 100).toFixed(1)}%`);
+      parts.push(`route-p=${percent(metrics.routeProbability)}`);
     if (metrics.probability !== undefined)
       parts.push(
-        `${metrics.outcome === 'uncertain' ? 'abstention-p' : 'p'}=${(metrics.probability * 100).toFixed(1)}%`,
+        `${metrics.outcome === 'uncertain' ? 'abstention-p' : 'p'}=${percent(metrics.probability)}`,
       );
     if (metrics.confidence !== undefined)
       parts.push(
-        `${metrics.outcome === 'uncertain' ? 'abstention-confidence' : 'confidence'}=${(metrics.confidence * 100).toFixed(1)}%`,
+        `${metrics.outcome === 'uncertain' ? 'abstention-confidence' : 'confidence'}=${percent(metrics.confidence)}`,
       );
     if (metrics.threshold !== undefined && metrics.outcome !== 'uncertain')
-      parts.push(`threshold=${(metrics.threshold * 100).toFixed(1)}%`);
+      parts.push(`threshold=${percent(metrics.threshold)}`);
     if (
       metrics.probabilityThreshold !== undefined &&
       metrics.selectionBasis === 'probability'
     )
-      parts.push(
-        `route-threshold=${(metrics.probabilityThreshold * 100).toFixed(1)}%`,
-      );
+      parts.push(`route-threshold=${percent(metrics.probabilityThreshold)}`);
     if (metrics.timeoutMs !== undefined)
-      parts.push(`budget=${metrics.timeoutMs}ms`);
+      parts.push(`deadline=${latency(metrics.timeoutMs)}`);
     if (metrics.candidateCount !== undefined)
       parts.push(`candidates=${metrics.candidateCount}`);
     if (metrics.context) {
@@ -154,9 +160,7 @@ export const formatAdvisorDetail = (
     if (metrics.actualOutputTokens !== undefined)
       parts.push(`output=${metrics.actualOutputTokens} tokens`);
     if (metrics.costUsd !== undefined)
-      parts.push(
-        `advisor cost=${metrics.costUsd.toFixed(6)} (catalog, not billing)`,
-      );
+      parts.push(`classifier cost ${usdFine(metrics.costUsd)} (catalog)`);
     if (metrics.httpStatus !== undefined)
       parts.push(`HTTP ${metrics.httpStatus}`);
     if (metrics.attempts !== undefined && metrics.attempts > 1)
@@ -174,71 +178,9 @@ export const formatAdvisorDetail = (
     parts.push(decision.errorClass);
   }
   if (latencyMs !== undefined && Number.isFinite(latencyMs))
-    parts.push(`${Math.round(latencyMs)}ms`);
+    parts.push(latency(latencyMs));
   if (decision.reuse) parts.push(`reuse=${decision.reuse}`);
   return parts.join(' · ');
-};
-
-export const formatAdvisorFooter = (
-  decision: RoutingDecision,
-  mode: StatusLineMode = 'compact',
-): string => {
-  const label = formatAdvisorLabel(decision);
-  if (!label) return '';
-  const metrics = decision.classification;
-  const service = metrics?.model ?? 'Classifier';
-  if (!metrics)
-    return ` · ${label}${decision.errorClass ? `: ${decision.errorClass}` : ''}`;
-  const confidence =
-    metrics.confidence !== undefined
-      ? ` c${Math.round(metrics.confidence * 100)}%`
-      : '';
-  let summary: string;
-  switch (metrics.outcome) {
-    case 'selected':
-      summary =
-        metrics.selectionBasis === 'probability'
-          ? `${metrics.choice ?? 'choice'}${confidence}${metrics.threshold !== undefined ? ` <${Math.round(metrics.threshold * 100)}%` : ''} → ${metrics.selectedTier ?? decision.tier}`
-          : `→ ${metrics.choice ?? decision.tier}${confidence}`;
-      break;
-    case 'uncertain':
-      summary = ': no tier chosen → baseline';
-      break;
-    case 'deadline':
-      summary = ': timeout → baseline';
-      break;
-    case 'http-error':
-      summary = `: HTTP ${metrics.httpStatus ?? 'error'} → baseline`;
-      break;
-    case 'network-error':
-      summary = ': network error → baseline';
-      break;
-    case 'invalid-response':
-      summary = `: invalid response${metrics.responseIssue ? ` (${metrics.responseIssue})` : ''} → baseline`;
-      break;
-    case 'cancelled':
-      summary = ': cancelled';
-      break;
-    case 'unavailable':
-      summary = `: ${metrics.choice ? 'target' : 'advice'} unavailable → baseline`;
-      break;
-    case 'input-too-large':
-      summary = ': estimated request too large → baseline';
-      break;
-  }
-  const latency =
-    metrics.latencyMs >= 1000
-      ? `${(metrics.latencyMs / 1000).toFixed(1)}s`
-      : `${Math.round(metrics.latencyMs)}ms`;
-  const reuse = decision.reuse
-    ? ` · ${mode === 'detailed' && decision.reuse === 'continuation' ? 'tool route' : 'reuse'}`
-    : '';
-  const time = formatRunTime(metrics.startedAt);
-  const extra =
-    mode === 'detailed'
-      ? `${metrics.probability !== undefined ? ` · ${metrics.outcome === 'uncertain' ? 'abstain ' : ''}p${Math.round(metrics.probability * 100)}%` : ''}${time ? ` @${time}` : ''}`
-      : '';
-  return ` · 🧭 ${service}${summary.startsWith(':') ? '' : ' '}${summary} · ${latency}${extra}${reuse}`;
 };
 
 export const formatClassifierStats = (
@@ -280,14 +222,14 @@ export const formatClassifierStats = (
   );
   return [
     `${service} stats: ${samples.length} unique advice requests in ${history.length} retained decisions (not session lifetime).`,
-    `Advised tiers: ${ROUTER_TIERS.map((tier) => `${tier}=${samples.filter((entry) => entry.choice === tier).length}`).join(', ')}.`,
+    `Advised tiers: ${TIER_DISPLAY_ORDER.map((tier) => `${tier}=${samples.filter((entry) => entry.choice === tier).length}`).join(', ')}.`,
     ...outcomes
       .filter(([, count]) => count > 0)
       .map(
         ([outcome, count]) =>
-          `${outcome}: ${count}/${samples.length} (${((100 * count) / samples.length).toFixed(1)}%)`,
+          `${outcome}: ${count}/${samples.length} (${percent(count / samples.length)})`,
       ),
-    `Median ${service} latency: ${median === undefined ? 'n/a' : `${Math.round(median)}ms`}. Reused decisions are not new requests.`,
+    `Median ${service.toLowerCase()} latency: ${median === undefined ? 'n/a' : latency(median)}. Reused decisions are not new requests.`,
     ...(legacy
       ? [
           `${legacy} decisions without request IDs excluded (legacy or no HTTP request).`,
@@ -305,15 +247,14 @@ export const formatGenerationDetail = (
     `Generation: ${usage.transition}`,
     `input=${usage.inputTokens} output=${usage.outputTokens} cache-read=${usage.cacheReadTokens} cache-write=${usage.cacheWriteTokens}`,
     `attempts=${usage.attempts}`,
-    `reported cost=${usage.reportedCostUsd === undefined ? 'unknown' : `$${usage.reportedCostUsd.toFixed(4)}`} (catalog/list-price, not billing)`,
-    'future cache warmth=unknown',
+    `cost ${usdFine(usage.reportedCostUsd)} (catalog)`,
   ];
   if (usage.contextTruncated) parts.push('context truncated');
   const shadow = usage.shadow;
   parts.push(
     shadow
-      ? `shadow same-token all-read/all-new: stay ${shadow.previousModel}=$${shadow.stayAllReadUsd.toFixed(4)}/$${shadow.stayAllNewUsd.toFixed(4)}, switch=$${shadow.switchAllReadUsd.toFixed(4)}/$${shadow.switchAllNewUsd.toFixed(4)} (includes output; not predicted savings)`
-      : 'shadow unavailable',
+      ? `same tokens, all read / all new: stay ${shadow.previousModel} ${usdFine(shadow.stayAllReadUsd)} / ${usdFine(shadow.stayAllNewUsd)}, switch ${usdFine(shadow.switchAllReadUsd)} / ${usdFine(shadow.switchAllNewUsd)} (includes output; not predicted savings)`
+      : 'same-token comparison unavailable',
   );
   return parts.join(' · ');
 };
@@ -325,7 +266,7 @@ export const formatDecision = (decision: RoutingDecision): string => {
   const advisor = formatAdvisorDetail(decision);
   const generation = formatGenerationDetail(decision);
   const switchCost = decision.switchCost
-    ? `switch ${decision.switchCost.reason} · horizon ${decision.switchCost.horizonRequests} · stay ${decision.switchCost.stayUsd === undefined ? 'unknown' : `$${decision.switchCost.stayUsd.toFixed(4)}`} · target ${decision.switchCost.switchUsd === undefined ? 'unknown' : `$${decision.switchCost.switchUsd.toFixed(4)}`}${decision.proposedRoute ? ` · proposed ${decision.proposedRoute.tier}/${decision.proposedRoute.activity ?? 'base'} ${decision.proposedRoute.model} [${decision.proposedRoute.thinking}]` : ''}`
+    ? `switch ${decision.switchCost.reason} · horizon ${decision.switchCost.horizonRequests} · stay ${usdFine(decision.switchCost.stayUsd)} · target ${usdFine(decision.switchCost.switchUsd)}${decision.proposedRoute ? ` · proposed ${decision.proposedRoute.tier}/${decision.proposedRoute.activity ?? 'base'} ${decision.proposedRoute.model} [${decision.proposedRoute.thinking}]` : ''}`
     : undefined;
   const mode = decision.mode
     ? ` {mode ${decision.mode}${decision.modeSource ? ` (${decision.modeSource})` : ''}${decision.modeLever && decision.modeLever !== 'none' ? ` · ${decision.modeLever === 'model' && decision.modeSourceTier === decision.tier ? 'mode model preference' : `${decision.modeLever} lever from ${decision.modeSourceTier ?? decision.tier}`}` : ''}}`
@@ -333,7 +274,7 @@ export const formatDecision = (decision: RoutingDecision): string => {
   const escalated = decision.escalatedFrom
     ? ` {escalated from ${decision.escalatedFrom}}`
     : '';
-  return `${decision.profile}: ${decision.tier} -> ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${mode}${escalated}${advisor ? ` [${advisor}]` : ''}${switchCost ? ` [${switchCost}]` : ''}${generation ? ` [${generation}]` : ''}`;
+  return `${decision.profile}: ${decision.tier} → ${decision.targetProvider}/${decision.targetModelId} [${decision.thinking}]${flagsStr}${source ? ` (${source})` : ''}${mode}${escalated}${advisor ? ` [${advisor}]` : ''}${switchCost ? ` [${switchCost}]` : ''}${generation ? ` [${generation}]` : ''}`;
 };
 
 export const formatPinSummary = (
@@ -363,6 +304,41 @@ export const formatModelRef = (ref: string | undefined): string => {
   return ref ?? 'none';
 };
 
+interface StripPart {
+  text: string;
+  /** 0 never drops; higher numbers drop first when the line is too narrow. */
+  priority: number;
+}
+
+/** Drops the highest-priority parts until the line fits, then cuts what is left. */
+const fitParts = (parts: readonly StripPart[], width: number): string => {
+  const kept = [...parts];
+  const joined = () => kept.map((part) => part.text).join(PART_SEPARATOR);
+  while (visibleWidth(joined()) > width) {
+    let drop = -1;
+    let dropPriority = 0;
+    kept.forEach((part, index) => {
+      if (part.priority > 0 && part.priority >= dropPriority) {
+        drop = index;
+        dropPriority = part.priority;
+      }
+    });
+    if (drop < 0) break;
+    kept.splice(drop, 1);
+  }
+  return truncateToWidth(joined(), width);
+};
+
+const routeCore = (
+  route: RouterUIRoute,
+  statusLine: StatusLineMode | undefined,
+): string =>
+  `${tierMeter(route.tier)} ${
+    statusLine === 'detailed'
+      ? `${route.provider}/${route.model}`
+      : modelName(route.model)
+  } · ${route.thinking}`;
+
 export const updateRouterUIStrip = (
   ctx: ExtensionContext,
   snapshot: RouterUISnapshot,
@@ -372,26 +348,10 @@ export const updateRouterUIStrip = (
   const tone = routerTone(snapshot);
   const pending = snapshot.pendingControls;
   const hasPending = pending !== undefined || snapshot.pendingRoutes === true;
-  const reason = routeReason(snapshot);
-  const state = snapshot.lifecycle === 'idle' ? 'last' : snapshot.lifecycle;
-  const identity = (width: number): string => {
-    const route = snapshot.actual;
-    const suffix = ` · ${state}`;
-    if (!route)
-      return truncateToWidth(`Router / ${snapshot.profile} · ${state}`, width);
-    const detail =
-      width >= 70
-        ? ` · ${activityLabel(route)} · ${route.tier} · effort ${route.thinking}`
-        : width >= 30
-          ? ` · ${activityLabel(route)}`
-          : '';
-    const modelWidth = Math.max(1, width - visibleWidth(suffix + detail));
-    const model =
-      preferences.statusLine === 'detailed'
-        ? `${route.provider}/${route.model}`
-        : route.model;
-    return truncateToWidth(model, modelWidth) + detail + suffix;
-  };
+  const route = snapshot.actual;
+  const core = route
+    ? routeCore(route, preferences.statusLine)
+    : `Router · ${snapshot.profile}`;
   if (snapshot.lifecycle === 'off') {
     ctx.ui.setStatus('router', undefined);
     ctx.ui.setWidget('router', undefined);
@@ -399,44 +359,66 @@ export const updateRouterUIStrip = (
   }
   if (!preferences.widgetEnabled) {
     ctx.ui.setWidget('router', undefined);
-    const width = Math.max(1, process.stdout.columns ?? 80);
-    // Model identity wins on narrow terminals; the widget always shows the mode.
-    const mode =
-      width >= 70 ? ` · ${snapshot.mode.mode} (${snapshot.mode.source})` : '';
-    const suffix = hasPending
-      ? `${mode} · pending`
-      : snapshot.switchCost?.reason === 'cost-held'
-        ? `${mode} · held`
-        : ['fallback', 'timeout', 'budget'].includes(snapshot.lifecycle)
-          ? `${mode} · ${snapshot.lifecycle}`
-          : snapshot.advice?.outcome === 'selected'
-            ? `${mode} · advised`
-            : mode;
+    const fault = ['fallback', 'timeout', 'budget', 'failed'].includes(
+      snapshot.lifecycle,
+    );
+    const columns = process.stdout.columns ?? 80;
     ctx.ui.setStatus(
       'router',
       ctx.ui.theme.fg(
         tone,
-        truncateToWidth(
-          identity(Math.max(1, width - visibleWidth(suffix))) + suffix,
-          width,
+        fitParts(
+          [
+            // The marker leads so the cut at the end never hides pending or fault state.
+            {
+              text: `${hasPending ? '⏵ ' : fault ? '! ' : ''}${core}`,
+              priority: 0,
+            },
+            ...(route?.activity ? [{ text: route.activity, priority: 2 }] : []),
+          ],
+          Math.max(1, Math.min(columns, STATUS_COLUMNS)),
         ),
       ),
     );
     return;
   }
   ctx.ui.setStatus('router', undefined);
+  const pendingLabel =
+    pending !== undefined
+      ? pending.pin !== snapshot.controls.pin
+        ? `pin ${pending.pin}`
+        : 'settings changed'
+      : 'route edits queued';
+  const advice = snapshot.advice;
+  const adviceDetail =
+    advice?.outcome === 'selected' && advice.latencyMs !== undefined
+      ? `classifier ${latency(advice.latencyMs)}`
+      : undefined;
   ctx.ui.setWidget('router', (_tui, theme) => ({
     invalidate: () => {},
     render: (width: number): string[] => {
       const w = Math.max(1, width);
-      const next = pending
-        ? `Next user turn: ${pending.pin !== snapshot.controls.pin ? `pin ${pending.pin}` : 'settings changed'} (pending) · ${reason}`
-        : snapshot.pendingRoutes
-          ? `Next user turn: route edits queued (pending) · ${reason}`
-          : `${reason} · ${snapshot.profile} · ${formatMode(snapshot)}${preferences.statusLine === 'detailed' && snapshot.accumulatedCost !== undefined ? ` · recorded $${snapshot.accumulatedCost.toFixed(4)}` : ''}`;
+      const second = [
+        ...(hasPending ? [`⏵ next turn: ${pendingLabel}`] : []),
+        snapshot.profile,
+        formatMode(snapshot),
+        ...(adviceDetail ? [adviceDetail] : []),
+      ].join(' · ');
       return [
-        theme.fg(tone, truncateToWidth(identity(w), w)),
-        theme.fg(hasPending ? 'warning' : 'muted', truncateToWidth(next, w)),
+        theme.fg(
+          tone,
+          fitParts(
+            [
+              { text: core, priority: 0 },
+              ...(route?.activity
+                ? [{ text: route.activity, priority: 2 }]
+                : []),
+              { text: shortReason(snapshot), priority: 1 },
+            ],
+            w,
+          ),
+        ),
+        theme.fg(hasPending ? 'warning' : 'muted', truncateToWidth(second, w)),
       ];
     },
   }));

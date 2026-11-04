@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RouterUISnapshot, RoutingDecision } from './types';
 import {
   formatAdvisorDetail,
-  formatAdvisorFooter,
   formatClassifierStats,
   formatDecision,
   formatGenerationDetail,
@@ -62,54 +61,67 @@ describe('ui.ts', () => {
     };
     const detail = formatGenerationDetail({ ...decision, generation });
     expect(detail).toContain('cache-read=800');
-    expect(detail).toContain('reported cost=unknown');
-    expect(detail).toContain('catalog/list-price, not billing');
-    expect(detail).toContain('future cache warmth=unknown');
-    expect(detail).toContain('stay test/old=$0.1000/$1.0000');
+    expect(detail).toContain('cost unknown (catalog)');
+    expect(detail).not.toContain('future cache warmth');
+    expect(detail).toContain(
+      'same tokens, all read / all new: stay test/old $0.1000 / $1.0000, switch $0.0500 / $0.5000',
+    );
     expect(detail).toContain('not predicted savings');
+    expect(
+      formatGenerationDetail({
+        ...decision,
+        generation: { ...generation, reportedCostUsd: 0.0042 },
+      }),
+    ).toContain('cost $0.0042 (catalog)');
     expect(formatDecision({ ...decision, generation })).toContain(detail);
     const truncated = formatGenerationDetail({
       ...decision,
       generation: { ...generation, contextTruncated: true, shadow: undefined },
     });
     expect(truncated).toContain('context truncated');
-    expect(truncated).toContain('shadow unavailable');
+    expect(truncated).toContain('same-token comparison unavailable');
   });
 
   it('formats only fixed local decision metadata', () => {
     expect(formatDecision(decision)).toBe(
-      'p: medium -> test/model [medium] (baseline)',
+      'p: medium → test/model [medium] (baseline)',
     );
     expect(
       formatDecision({
         ...decision,
         advisor: 'classifier',
       } as unknown as RoutingDecision),
-    ).toContain('[🧠 Classifier ✓]');
+    ).toContain('[classifier ✓]');
     expect(formatModelRef('openai/gpt-4o')).toBe('openai/gpt-4o');
     expect(formatModelRef(undefined)).toBe('none');
   });
 
   it('renders a [failed] marker for a debugHistory entry flagged as a total generation failure', () => {
     expect(formatDecision({ ...decision, isGenerationFailed: true })).toBe(
-      'p: medium -> test/model [medium] [failed] (baseline)',
+      'p: medium → test/model [medium] [failed] (baseline)',
     );
   });
 
-  it('labels uncertainty once in compact mode', () => {
-    const footer = formatAdvisorFooter({
+  it.each([
+    ['none', 'baseline only'],
+    ['classifier', 'classifier ✓'],
+    ['classifier-fallback', 'classifier · baseline kept'],
+  ] as const)('labels the %s advisor outcome as %s', (advisor, label) => {
+    expect(formatAdvisorDetail({ ...decision, advisor })).toBe(label);
+  });
+
+  it('formats the classifier deadline as a short duration', () => {
+    const detail = formatAdvisorDetail({
       ...decision,
       advisor: 'classifier-fallback',
-      classification: {
-        outcome: 'uncertain',
-        choice: 'uncertain',
-        confidence: 0.73,
-        latencyMs: 860,
-      },
+      classification: { outcome: 'deadline', latencyMs: 412, timeoutMs: 10000 },
     });
-    expect(footer).toContain('no tier chosen → baseline · 860ms');
-    expect(footer).not.toContain('uncertain');
-    expect(footer).not.toContain('73%');
+    expect(detail).toContain('deadline=10 s');
+    expect(detail).not.toContain('10000ms');
+    expect(detail?.endsWith('412 ms')).toBe(true);
+  });
+
+  it('labels uncertainty once in the detail', () => {
     const detail = formatAdvisorDetail({
       ...decision,
       advisor: 'classifier-fallback',
@@ -122,27 +134,28 @@ describe('ui.ts', () => {
       },
     });
     expect(detail).toContain('could not judge the required capability');
-    expect(detail).toContain('abstention-confidence=73.0%');
+    expect(detail).toContain('abstention-confidence=73%');
     expect(detail).not.toContain('threshold');
   });
 
   it.each([
-    ['deadline', ': timeout → baseline · 5.0s'],
-    ['network-error', ': network error → baseline'],
-    ['invalid-response', ': invalid response → baseline'],
-    ['http-error', ': HTTP 429 → baseline'],
-    ['cancelled', ': cancelled'],
-    ['input-too-large', ': estimated request too large → baseline'],
+    'deadline',
+    'network-error',
+    'invalid-response',
+    'http-error',
+    'cancelled',
+    'input-too-large',
   ] as const)(
-    'explains %s without exposing raw error data',
-    (outcome, expected) => {
-      expect(
-        formatAdvisorFooter({
-          ...decision,
-          advisor: 'classifier-fallback',
-          classification: { outcome, latencyMs: 5000, httpStatus: 429 },
-        }),
-      ).toContain(expected);
+    'explains %s with fixed codes and no raw error data',
+    (outcome) => {
+      const detail = formatAdvisorDetail({
+        ...decision,
+        advisor: 'classifier-fallback',
+        classification: { outcome, latencyMs: 5000, httpStatus: 429 },
+      });
+      expect(detail).toBe(
+        `classifier · baseline kept · ${outcome} · HTTP 429 · Transient Classifier limit; retries are bounded by the advisory budget. · 5 s`,
+      );
     },
   );
 
@@ -179,15 +192,14 @@ describe('ui.ts', () => {
     ];
     const stats = formatClassifierStats(history).join('\n');
     expect(stats).toContain('2 unique advice requests in 8 retained decisions');
-    expect(stats).toContain('selected: 1/2 (50.0%)');
-    expect(stats).toContain('deadline: 1/2 (50.0%)');
-    expect(stats).toContain('high=1');
-    expect(stats).toContain('low=0');
-    expect(stats).toContain('2550ms');
+    expect(stats).toContain('selected: 1/2 (50%)');
+    expect(stats).toContain('deadline: 1/2 (50%)');
+    expect(stats).toContain('Advised tiers: micro=0, low=0, medium=0, high=1.');
+    expect(stats).toContain('Median classifier latency: 2.5 s');
     expect(stats).toContain('1 decisions without request IDs excluded');
     expect(stats).not.toContain('00000000');
     expect(formatClassifierStats([]).join('\n')).toContain(
-      'Median Classifier latency: n/a',
+      'Median classifier latency: n/a',
     );
     expect(formatClassifierStats([]).join('\n')).not.toContain('NaN');
   });
@@ -228,43 +240,128 @@ describe('ui.ts', () => {
   });
 });
 
+const withColumns = (columns: number, run: () => void) => {
+  const previous = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+  Object.defineProperty(process.stdout, 'columns', {
+    configurable: true,
+    value: columns,
+  });
+  try {
+    run();
+  } finally {
+    if (previous) Object.defineProperty(process.stdout, 'columns', previous);
+    else Reflect.deleteProperty(process.stdout, 'columns');
+  }
+};
+
 describe('ui.ts lifecycle strip', () => {
-  it('preserves model identity before optional advisor detail in a narrow footer', () => {
-    const previous = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
-    Object.defineProperty(process.stdout, 'columns', {
-      configurable: true,
-      value: 40,
+  const sonnet = {
+    provider: 'anthropic',
+    model: 'claude-sonnet-5-5',
+    tier: 'medium' as const,
+    activity: 'code' as const,
+    thinking: 'medium' as const,
+  };
+  const footer = (
+    state: Partial<RouterUISnapshot>,
+    preferences: Parameters<typeof updateRouterUIStrip>[2] = {
+      widgetEnabled: false,
+    },
+  ): string => {
+    const ctx = context();
+    Object.assign(ctx, { mode: 'tui' });
+    updateRouterUIStrip(ctx, { ...snapshot, ...state }, preferences);
+    return vi.mocked(ctx.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
+  };
+
+  it.each([
+    [80, '▂▄▆ Sonnet 5.5 · medium  code'],
+    [40, '▂▄▆ Sonnet 5.5 · medium  code'],
+    [24, '▂▄▆ Sonnet 5.5 · medium'],
+  ])(
+    'keeps the footer core and drops the activity first at %i columns',
+    (columns, expected) => {
+      withColumns(columns, () => {
+        const text = footer({ lifecycle: 'idle', actual: sonnet });
+        expect(text).toBe(expected);
+        expect(visibleWidth(text)).toBeLessThanOrEqual(Math.min(columns, 40));
+      });
+    },
+  );
+
+  it('never grows the footer past 40 columns on a wide terminal', () => {
+    withColumns(200, () => {
+      const text = footer({
+        lifecycle: 'generating',
+        pendingRoutes: true,
+        actual: {
+          ...sonnet,
+          model: 'a-very-long-model-identifier-for-testing',
+        },
+      });
+      expect(visibleWidth(text)).toBeLessThanOrEqual(40);
     });
-    try {
+  });
+
+  it.each([
+    ['pending routes', { pendingRoutes: true }, '⏵'],
+    ['fallback', { lifecycle: 'fallback' as const }, '!'],
+    ['timeout', { lifecycle: 'timeout' as const }, '!'],
+    ['budget', { lifecycle: 'budget' as const }, '!'],
+    ['failed', { lifecycle: 'failed' as const }, '!'],
+  ])('marks the footer for %s with %s only', (_name, state, marker) => {
+    withColumns(80, () => {
+      expect(footer({ lifecycle: 'idle', actual: sonnet, ...state })).toBe(
+        `${marker} ▂▄▆ Sonnet 5.5 · medium  code`,
+      );
+    });
+  });
+
+  it('shows no marker, mode text or status words on a calm footer', () => {
+    withColumns(80, () => {
+      const text = footer({
+        lifecycle: 'idle',
+        actual: sonnet,
+        mode: { mode: 'cost', source: 'session' },
+        switchCost: {
+          reason: 'cost-held',
+          horizonRequests: 5,
+          confidenceOverride: false,
+        },
+        advice: { advisor: 'classifier', outcome: 'selected', latencyMs: 9 },
+      });
+      expect(text).toBe('▂▄▆ Sonnet 5.5 · medium  code');
+    });
+  });
+
+  it('names the profile when no route has been observed', () => {
+    withColumns(80, () => {
+      expect(footer({ lifecycle: 'idle' })).toBe('Router · p');
+    });
+  });
+
+  it('shows provider/model on the detailed footer and cuts it at 40 columns', () => {
+    withColumns(80, () => {
+      const text = footer(
+        { lifecycle: 'idle', actual: sonnet },
+        { widgetEnabled: false, statusLine: 'detailed' },
+      );
+      expect(text.startsWith('▂▄▆ anthropic/claude-sonnet-5-5')).toBe(true);
+      expect(visibleWidth(text)).toBeLessThanOrEqual(40);
+    });
+  });
+
+  it('clears the footer and the widget when the router is off', () => {
+    for (const widgetEnabled of [true, false]) {
       const ctx = context();
       Object.assign(ctx, { mode: 'tui' });
       updateRouterUIStrip(
         ctx,
-        {
-          ...snapshot,
-          lifecycle: 'idle',
-          actual: {
-            provider: 'test',
-            model: 'model-medium',
-            tier: 'medium',
-            activity: 'code',
-            thinking: 'medium',
-          },
-          advice: {
-            advisor: 'clef-flash',
-            outcome: 'selected',
-            latencyMs: 1000,
-          },
-        },
-        { widgetEnabled: false },
+        { ...snapshot, lifecycle: 'off', actual: sonnet },
+        { widgetEnabled },
       );
-      const text = vi.mocked(ctx.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
-      expect(text).toContain('model-medium');
-      expect(text).toContain('code');
-      expect(visibleWidth(text)).toBeLessThanOrEqual(40);
-    } finally {
-      if (previous) Object.defineProperty(process.stdout, 'columns', previous);
-      else Reflect.deleteProperty(process.stdout, 'columns');
+      expect(ctx.ui.setStatus).toHaveBeenLastCalledWith('router', undefined);
+      expect(ctx.ui.setWidget).toHaveBeenLastCalledWith('router', undefined);
     }
   });
 
@@ -292,8 +389,10 @@ describe('ui.ts lifecycle strip', () => {
         'router',
         undefined,
       );
-      expect(widget(ctx).join('\n')).toContain('actual-model');
-      expect(widget(ctx).join('\n')).toContain('42 ms');
+      expect(widget(ctx)).toEqual([
+        '▂▄▆ Actual Model · high  = fits',
+        'p · balanced (default) · classifier 42 ms',
+      ]);
       updateRouterUIStrip(
         ctx,
         { ...snapshot, lifecycle: 'off' },
@@ -320,49 +419,82 @@ describe('ui.ts lifecycle strip', () => {
       },
       { widgetEnabled: true },
     );
-    expect(widget(ctx)[0]).toContain('actual-medium');
-    expect(widget(ctx)[1]).toContain('Next user turn: pin high');
+    expect(widget(ctx)).toEqual([
+      '▂▄▆ Actual Medium · medium  = baseline',
+      '⏵ next turn: pin high · p · balanced (default)',
+    ]);
   });
-  it('preserves held and pending route indicators in a detailed narrow footer', () => {
+
+  it.each([
+    ['pin', { pin: 'high' as const }, undefined, '⏵ next turn: pin high'],
+    ['setting', { budget: 3 }, undefined, '⏵ next turn: settings changed'],
+    ['route edits', undefined, true, '⏵ next turn: route edits queued'],
+  ])(
+    'labels queued %s changes on the second widget line',
+    (_name, patch, pendingRoutes, label) => {
+      const ctx = context();
+      Object.assign(ctx, { mode: 'tui' });
+      updateRouterUIStrip(
+        ctx,
+        {
+          ...snapshot,
+          lifecycle: 'generating',
+          actual: sonnet,
+          ...(patch
+            ? { pendingControls: { ...snapshot.controls, ...patch } }
+            : {}),
+          ...(pendingRoutes ? { pendingRoutes } : {}),
+        },
+        { widgetEnabled: true },
+      );
+      expect(widget(ctx)[1]).toBe(`${label} · p · balanced (default)`);
+    },
+  );
+
+  it('keeps cost off the widget, including in detailed mode', () => {
     const ctx = context();
     Object.assign(ctx, { mode: 'tui' });
-    const prior = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
-    Object.defineProperty(process.stdout, 'columns', {
-      configurable: true,
-      value: 80,
-    });
-    try {
-      for (const pendingRoutes of [false, true]) {
-        updateRouterUIStrip(
-          ctx,
-          {
-            ...snapshot,
-            lifecycle: 'generating',
-            pendingRoutes,
-            actual: {
-              tier: 'high',
-              activity: 'code',
-              provider: 'anthropic',
-              model: 'claude-sonnet-4-5-20250929',
-              thinking: 'high',
-            },
-            switchCost: {
-              reason: 'cost-held',
-              horizonRequests: 5,
-              confidenceOverride: false,
-            },
-          },
-          { widgetEnabled: false, statusLine: 'detailed' },
-        );
-        const value = vi.mocked(ctx.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
-        expect(value).toContain(pendingRoutes ? 'pending' : 'held');
-        expect(visibleWidth(value)).toBeLessThanOrEqual(80);
-      }
-    } finally {
-      if (prior) Object.defineProperty(process.stdout, 'columns', prior);
-      else Reflect.deleteProperty(process.stdout, 'columns');
-    }
+    updateRouterUIStrip(
+      ctx,
+      {
+        ...snapshot,
+        lifecycle: 'generating',
+        accumulatedCost: 1.24,
+        actual: sonnet,
+        controls: { ...snapshot.controls, budget: 5 },
+      },
+      { widgetEnabled: true, statusLine: 'detailed' },
+    );
+    const text = widget(ctx).join('\n');
+    expect(text).not.toContain('$');
+    expect(text).not.toContain('recorded');
+    expect(widget(ctx)[0]).toBe(
+      '▂▄▆ anthropic/claude-sonnet-5-5 · medium  code  = baseline',
+    );
   });
+
+  it.each([
+    [120, '▂▄▆ Sonnet 5.5 · medium  code  = baseline'],
+    [36, '▂▄▆ Sonnet 5.5 · medium  = baseline'],
+    [24, '▂▄▆ Sonnet 5.5 · medium'],
+  ])(
+    'drops activity, then reason, then cuts the widget core at %i columns',
+    (width, expected) => {
+      const ctx = context();
+      Object.assign(ctx, { mode: 'tui' });
+      updateRouterUIStrip(
+        ctx,
+        { ...snapshot, lifecycle: 'idle', actual: sonnet },
+        { widgetEnabled: true },
+      );
+      const content = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
+      if (typeof content !== 'function')
+        throw new Error('Expected strip component');
+      expect(content({} as TUI, ctx.ui.theme as Theme).render(width)[0]).toBe(
+        expected,
+      );
+    },
+  );
 
   it('logs the mode, its lever and an escalation', () => {
     expect(
@@ -393,10 +525,7 @@ describe('ui.ts lifecycle strip', () => {
     Object.assign(ctx, { mode: 'tui' });
     updateRouterUIStrip(ctx, snapshot, { widgetEnabled: false });
     expect(ctx.ui.setWidget).toHaveBeenCalledWith('router', undefined);
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith(
-      'router',
-      expect.stringContaining('choosing'),
-    );
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith('router', 'Router · p');
   });
 
   const snapshot: RouterUISnapshot = {
@@ -437,7 +566,7 @@ describe('ui.ts lifecycle strip', () => {
       auth: 'unknown',
     },
   };
-  it('shows the mode and its source in the widget and a wide footer', () => {
+  it('shows the mode and its source in the widget only, never in the footer', () => {
     const moded: RouterUISnapshot = {
       ...snapshot,
       mode: { mode: 'cost', source: 'session' },
@@ -448,10 +577,7 @@ describe('ui.ts lifecycle strip', () => {
     expect(widget(ctx).join('\n')).toContain('p · cost (session)');
     const prior = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
     try {
-      for (const [columns, shown] of [
-        [80, true],
-        [60, false],
-      ] as const) {
+      for (const columns of [80, 60]) {
         Object.defineProperty(process.stdout, 'columns', {
           configurable: true,
           value: columns,
@@ -461,7 +587,7 @@ describe('ui.ts lifecycle strip', () => {
         updateRouterUIStrip(footer, moded, { widgetEnabled: false });
         const text =
           vi.mocked(footer.ui.setStatus).mock.calls.at(-1)?.[1] ?? '';
-        expect(text.includes('cost (session)')).toBe(shown);
+        expect(text).toBe('Router · p');
       }
     } finally {
       if (prior) Object.defineProperty(process.stdout, 'columns', prior);
@@ -484,6 +610,23 @@ describe('ui.ts lifecycle strip', () => {
     expect(widget(ctx).join('\n')).toContain(
       'cost (profile) · bypassed by pin',
     );
+  });
+
+  it('cuts the core only when even it does not fit', () => {
+    const ctx = context();
+    Object.assign(ctx, { mode: 'tui' });
+    updateRouterUIStrip(
+      ctx,
+      { ...snapshot, lifecycle: 'idle', actual: sonnet },
+      { widgetEnabled: true },
+    );
+    const content = vi.mocked(ctx.ui.setWidget).mock.calls[0]?.[1];
+    if (typeof content !== 'function')
+      throw new Error('Expected strip component');
+    const line = content({} as TUI, ctx.ui.theme as Theme).render(12)[0] ?? '';
+    expect(visibleWidth(line)).toBeLessThanOrEqual(12);
+    expect(line.startsWith('▂▄▆ Sonne')).toBe(true);
+    expect(line).not.toContain('baseline');
   });
 
   it.each([40, 60, 80, 120])(
@@ -519,9 +662,10 @@ describe('ui.ts lifecycle strip', () => {
     const ctx = context();
     Object.assign(ctx, { mode: 'tui' });
     updateRouterUIStrip(ctx, snapshot, { widgetEnabled: true });
-    expect(widget(ctx).join('\n')).toContain(
-      'Choosing route · no generation started',
-    );
+    expect(widget(ctx)).toEqual([
+      'Router · p  … choosing',
+      'p · balanced (default)',
+    ]);
     updateRouterUIStrip(ctx, snapshot, { widgetEnabled: false });
     expect(ctx.ui.setWidget).toHaveBeenLastCalledWith('router', undefined);
     const rpc = context();

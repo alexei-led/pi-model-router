@@ -3,6 +3,7 @@ import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { DEFAULT_MODES, normalizeAdvisorConfig } from '../config';
 import { isThinkingLevel, parseCanonicalModelRef } from '../domain';
+import { repriceTokens } from '../economics';
 import { effectivePolicy, modeBypassFor, modeForProfile } from '../modes';
 import {
   availableRoutePairs,
@@ -22,6 +23,7 @@ import type {
   RouterUIActivityCell,
   RouterUIAdapters,
   RouterUIChatModel,
+  RouterUIComparison,
   RouterUIControls,
   RouterUIHistoryEntry,
   RouterUILifecycle,
@@ -169,6 +171,56 @@ const lifecycleOf = (
           : active
             ? 'generating'
             : 'idle';
+
+/**
+ * The retained replies' token counters priced on the model selected before the
+ * router. Only replies with both tokens and a known routed cost count, so both
+ * sides of the comparison cover the same replies.
+ */
+const comparisonOf = (
+  state: RouterUIRuntimeState,
+  history: readonly RouterUIHistoryEntry[],
+): RouterUIComparison | undefined => {
+  const ref = state.lastNonRouterModel;
+  if (!ref || !state.currentModelRegistry) return undefined;
+  let provider: string;
+  let modelId: string;
+  try {
+    ({ provider, modelId } = parseCanonicalModelRef(ref));
+  } catch {
+    return undefined;
+  }
+  const model = state.currentModelRegistry.find(provider, modelId);
+  if (!model) return undefined;
+  let yourUsd = 0;
+  let routedUsd = 0;
+  let covered = 0;
+  for (const entry of history.slice(-50)) {
+    if (
+      entry.reviewOnly ||
+      entry.generationCostUsd === undefined ||
+      entry.inputTokens === undefined ||
+      entry.outputTokens === undefined ||
+      entry.cacheReadTokens === undefined ||
+      entry.cacheWriteTokens === undefined
+    )
+      continue;
+    const cost = repriceTokens(model, {
+      input: entry.inputTokens,
+      output: entry.outputTokens,
+      cacheRead: entry.cacheReadTokens,
+      cacheWrite: entry.cacheWriteTokens,
+    });
+    // One reply without a tariff on your model drops out of both sides.
+    if (cost === undefined) continue;
+    yourUsd += cost;
+    routedUsd += entry.generationCostUsd;
+    covered += 1;
+  }
+  return covered > 0
+    ? { model: modelId, yourUsd, routedUsd, replies: covered }
+    : undefined;
+};
 
 /** Owns transient UI state only. Routing remains in the provider and policy modules. */
 export const createRouterUIRuntime = (
@@ -773,9 +825,11 @@ export const createRouterUIRuntime = (
         };
       }),
     );
+    const comparison = comparisonOf(state, history);
     return {
       profile,
       accumulatedCost: state.accumulatedCost,
+      ...(comparison ? { comparison } : {}),
       chatModels: catalog.entries,
       classifiers:
         (typeof registry?.getModelsOfType === 'function'

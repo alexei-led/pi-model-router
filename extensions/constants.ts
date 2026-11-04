@@ -1,25 +1,50 @@
-/** Profile names are explicit arguments, so command names remain valid profiles. */
+/**
+ * One table for the help text and the completions. Profile names are explicit
+ * arguments, so command names remain valid profiles.
+ */
 export const ROUTER_COMMANDS = [
-  { name: 'status', desc: 'Short text status' },
-  { name: 'routes', desc: 'Configured routes and per-cell editor' },
+  { name: 'status', args: '', desc: 'Short text status' },
+  { name: 'routes', args: '', desc: 'Configured routes and per-cell editor' },
   {
     name: 'classifier',
-    desc: 'Classifier selection, approval and last operation',
+    args: '',
+    desc: 'Classifier status and session selection',
   },
-  { name: 'usage', desc: 'Retained history and known costs' },
-  { name: 'settings', desc: 'Session routing controls' },
-  { name: 'profile', desc: 'Select a router profile' },
-  { name: 'pin', desc: 'Pin the active profile to a tier, or auto' },
-  { name: 'thinking', desc: 'Override thinking for every tier, or auto' },
+  { name: 'usage', args: '', desc: 'Retained usage and catalog costs' },
+  { name: 'settings', args: '', desc: 'Session controls' },
+  {
+    name: 'profile',
+    args: '<name>',
+    desc: 'Switch profile (enables the router)',
+  },
+  {
+    name: 'off',
+    args: '',
+    desc: 'Leave the router; restore the previous model',
+  },
+  {
+    name: 'pin',
+    args: '<tier|auto>',
+    desc: 'Pin the active profile to a tier, or clear',
+  },
+  {
+    name: 'thinking',
+    args: '<level|auto>',
+    desc: 'Override effort for every tier, or clear',
+  },
   {
     name: 'mode',
-    desc: 'Set the session mode: cost, balanced, quality, or default',
+    args: '[cost|balanced|quality|default]',
+    desc: 'Session mode; default clears it',
   },
-  { name: 'log', desc: 'Recent decisions and advisor stats; on, off or clear' },
-  { name: 'widget', desc: 'Toggle the status widget' },
-  { name: 'off', desc: 'Leave the router and restore the previous model' },
-  { name: 'reload', desc: 'Reload model-router.json' },
-  { name: 'help', desc: 'Show usage' },
+  {
+    name: 'log',
+    args: '[on|off|clear]',
+    desc: 'Recent decisions and classifier stats; control collection',
+  },
+  { name: 'widget', args: '', desc: 'Toggle the status widget' },
+  { name: 'reload', args: '', desc: 'Reload model-router.json' },
+  { name: 'help', args: '', desc: 'This text' },
 ] as const;
 
 export const MAX_DEBUG_HISTORY = 50;

@@ -731,6 +731,19 @@ export interface RouterUISnapshot {
   /** Active-branch retained decisions, not a session ledger; UI caps at 50.
    * Replace the array when observations change; keep its identity on token refreshes. */
   history: readonly RouterUIHistoryEntry[];
+  /**
+   * Catalog estimate: the retained replies' token counters priced on the model
+   * selected before the router. Absent without that model, a price, or tokens.
+   */
+  comparison?: RouterUIComparison | undefined;
+}
+export interface RouterUIComparison {
+  /** Model id the user selected before the router. */
+  model: string;
+  yourUsd: number;
+  routedUsd: number;
+  /** Replies with both tokens and a known routed cost. */
+  replies: number;
 }
 export interface RouterUIAdapters {
   getSnapshot: () => RouterUISnapshot;
@@ -774,6 +787,8 @@ export interface RouterUIRuntimeState {
   readonly lastDecision: RoutingDecision | undefined;
   readonly debugHistory: readonly RoutingDecision[];
   readonly debugEnabled?: boolean;
+  /** `provider/model` selected before the router, for the same-tokens estimate. */
+  readonly lastNonRouterModel?: string | undefined;
   readonly currentModelRegistry:
     | Pick<ExtensionContext['modelRegistry'], 'find' | 'getModelsOfType'>
     | undefined;

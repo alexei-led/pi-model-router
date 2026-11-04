@@ -2,7 +2,7 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { normalizeConfig } from '../config';
 import { model, required } from '../test/fixtures';
-import type { RouterThinkingByProfile } from '../types';
+import type { RouterThinkingByProfile, RoutingDecision } from '../types';
 import { createRouterUIRuntime } from './runtime';
 
 const setup = () => {
@@ -1384,5 +1384,89 @@ describe('mode-adjusted route previews', () => {
       bypass: 'effort',
       route: { thinking: 'low' },
     });
+  });
+});
+
+describe('same-token comparison snapshot', () => {
+  const opus = model('claude-opus-5-5', {
+    provider: 'anthropic',
+    cost: { input: 10, output: 20, cacheRead: 1, cacheWrite: 12.5 },
+  });
+  const generated: RoutingDecision = {
+    profile: 'auto',
+    tier: 'medium' as const,
+    targetProvider: 'openai',
+    targetModelId: 'medium',
+    targetLabel: 'openai/medium',
+    reasonCode: 'baseline' as const,
+    thinking: 'medium' as const,
+    timestamp: 1,
+    generation: {
+      transition: 'initial' as const,
+      contextTruncated: false,
+      attempts: 1,
+      inputTokens: 1_000_000,
+      outputTokens: 100_000,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reportedCostUsd: 2,
+    },
+  };
+  const snapshotWith = (
+    lastNonRouterModel: string | undefined,
+    history = [generated],
+  ) => {
+    const { state } = setup();
+    return createRouterUIRuntime(
+      {
+        ...state,
+        debugHistory: history,
+        lastNonRouterModel,
+        currentModelRegistry: {
+          ...state.currentModelRegistry,
+          find: (provider: string, id: string) =>
+            provider === 'anthropic' && id === 'claude-opus-5-5'
+              ? opus
+              : model(id, { provider }),
+        },
+      },
+      () => undefined,
+    ).adapters.getSnapshot();
+  };
+
+  it('prices the same tokens on the model chosen before the router', () => {
+    expect(snapshotWith('anthropic/claude-opus-5-5').comparison).toEqual({
+      model: 'claude-opus-5-5',
+      yourUsd: 12,
+      routedUsd: 2,
+      replies: 1,
+    });
+  });
+
+  it.each([
+    ['no earlier model', undefined, [generated]],
+    ['a malformed reference', 'opus', [generated]],
+    ['a model the registry does not price', 'openai/free', [generated]],
+    [
+      'a reply without a reported cost',
+      'anthropic/claude-opus-5-5',
+      [
+        {
+          ...generated,
+          generation: {
+            transition: 'initial' as const,
+            contextTruncated: false,
+            attempts: 1,
+            inputTokens: 1_000_000,
+            outputTokens: 100_000,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        },
+      ],
+    ],
+    ['no history', 'anthropic/claude-opus-5-5', []],
+  ])('omits the comparison for %s', (_name, ref, history) => {
+    expect(snapshotWith(ref, history).comparison).toBeUndefined();
   });
 });

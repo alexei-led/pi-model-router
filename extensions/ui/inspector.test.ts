@@ -236,10 +236,7 @@ describe('ui/inspector.ts', () => {
     const fg = vi.spyOn(f.theme, 'fg');
     const rows = f.panel.render(60);
     expect(rows.every((row) => visibleWidth(row) === 60)).toBe(true);
-    expect(fg).toHaveBeenCalledWith(
-      'text',
-      expect.stringContaining('Actual generation'),
-    );
+    expect(fg).toHaveBeenCalledWith('text', expect.stringContaining('▂▄▆ '));
     f.panel.dispose();
   });
   it('accepts existing positive fractional deadlines without blocking unrelated edits', async () => {
@@ -273,7 +270,7 @@ describe('ui/inspector.ts', () => {
   it('does not mutate controls while browsing; drafts persist between tabs', () => {
     const f = fixture();
     f.panel.handleInput('1');
-    expect(f.panel.render(80).join('\n')).toContain('Actual generation');
+    expect(f.panel.render(80).join('\n')).toContain('▂▄▆ ');
     f.panel.selectTab('settings');
     f.panel.handleInput('\t'); // pin
     f.panel.handleInput('\r');
@@ -282,7 +279,7 @@ describe('ui/inspector.ts', () => {
     f.panel.handleInput('[Z'); // back to tabs
     f.panel.selectTab('usage');
     expect(f.panel.render(80).join('\n')).toContain(
-      'Retained generation decisions',
+      'History collection is off',
     );
     f.panel.selectTab('settings');
     expect(f.panel.render(80).join('\n')).toContain('Pin tier: high');
@@ -368,9 +365,9 @@ describe('ui/inspector.ts', () => {
       },
     });
     const text = f.panel.render(80).join('\n');
-    expect(text).toContain('Actual generation · fallback');
-    expect(text).toContain('Proposed · high');
-    expect(text).toContain('base · medium · effort high');
+    expect(text).toContain('! fallback');
+    expect(text).toContain('Proposed · ▂▄▆█ high');
+    expect(text).toMatch(/LIGHTtest\/\S+ · effort high/u);
     expect(f.draft.draft.pin).toBe('high');
     f.panel.dispose();
   });
@@ -428,13 +425,65 @@ describe('ui/inspector.ts', () => {
     expect(text).toContain('HTTP attempts: 2');
     expect(text).toContain('Route reuses: 1');
     expect(text).toContain('coverage 1/3');
-    expect(text).toContain('unknown (not free)');
+    expect(text).toContain('Classifier cost: unknown · coverage 0/1');
+    expect(text).not.toContain('not free');
     expect(text).toContain('Cache-read share, last observed request: 70%');
     expect(text).toContain('Catalog cost / request:');
     expect(text).toContain('Observed activity labels: code 1');
     expect(
       formatRouterUIUsage(Array.from({ length: 70 }, () => ({}))).join('\n'),
     ).toContain('50 decisions');
+  });
+  it('prints the Now tab as meter, model name and reason, then identity', () => {
+    const f = fixture();
+    f.update({
+      actual: {
+        tier: 'high',
+        provider: 'anthropic',
+        model: 'claude-opus-5-5',
+        thinking: 'high',
+        activity: 'code',
+      },
+    });
+    const lines = f.panel
+      .render(100)
+      .map((line) => line.replace(/^│ | *│$/gu, ''));
+    const first = lines.findIndex((line) =>
+      line.startsWith('▂▄▆█ Opus 5.5 · high'),
+    );
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(lines[first]).toContain(' · code');
+    expect(lines[first + 1]).toContain(
+      'anthropic/claude-opus-5-5 · effort high',
+    );
+    expect(lines.join('\n')).not.toContain('Actual generation');
+    f.panel.dispose();
+  });
+  it('labels the Routes matrix with tier meters and never med', () => {
+    const f = fixture();
+    f.panel.selectTab('routes');
+    const text = f.panel.render(100).join('\n');
+    expect(text).toContain('Activity ');
+    expect(text).toMatch(/Activity +▂ +▂▄ +▂▄▆ +▂▄▆█/u);
+    expect(text).not.toMatch(/\bmed\b/u);
+    f.panel.dispose();
+  });
+  it('shows control units in the text snapshot', () => {
+    const f = fixture();
+    f.update({
+      controls: { ...controls, costSensitivity: 0.5, reviewEveryRequests: 4 },
+    });
+    const text = formatRouterUISnapshot(f.adapters.getSnapshot(), 'settings');
+    expect(text).toContain('Switch-cost sensitivity: 50%');
+    expect(text).toContain('Classifier review interval: 4 requests');
+    expect(text).toContain('Classifier deadline (ms):');
+    f.panel.dispose();
+  });
+  it('prints unknown cost without calling it free', () => {
+    const text = formatRouterUIUsage([{}]).join('\n');
+    expect(text).toContain('Known generation cost: unknown');
+    expect(text).toContain('Classifier cost: unknown');
+    expect(text).not.toContain('not free');
   });
   it('text/RPC never invokes a terminal factory', async () => {
     const f = fixture();

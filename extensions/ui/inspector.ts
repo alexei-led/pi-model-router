@@ -8,6 +8,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
+import { THINKING_LEVELS } from '../domain';
 import type {
   RouterUIAdapters,
   RouterUIControlChange,
@@ -23,10 +24,16 @@ import type {
 import { ROUTER_ACTIVITIES, ROUTER_TIERS, ROUTER_UI_VIEWS } from '../types';
 import { validateRouterUIControls } from './controls';
 import {
-  activityLabel,
+  latency,
+  modelName,
+  percent,
+  TIER_DISPLAY_ORDER,
+  tierMeter,
+  usdFine,
+} from './format';
+import {
   activityRouteLines,
   activityRoutingSummary,
-  advisorName,
   budgetLines,
   classifierLines,
   formatMode,
@@ -34,10 +41,10 @@ import {
   policySourceNote,
   preferenceLine,
   formatRoute as route,
-  routeMix,
   routeReason,
   routerTone,
   routeTimeline,
+  shortReason,
   textBar,
   usageSummary,
 } from './presentation';
@@ -68,7 +75,7 @@ const fieldNames: Record<keyof RouterUIControls, string> = {
   baseline: 'Baseline',
   budget: 'Soft budget ($)',
   advisor: 'Classifier model',
-  timeout: 'Advisor deadline (ms)',
+  timeout: 'Classifier deadline (ms)',
   reviewEveryRequests: 'Classifier review interval',
   costHorizon: 'Cost comparison horizon',
   costSensitivity: 'Switch-cost sensitivity',
@@ -80,8 +87,6 @@ const fieldNames: Record<keyof RouterUIControls, string> = {
 };
 const display = (value: unknown): string =>
   value === undefined ? 'default / unknown' : String(value);
-const money = (value: number | undefined): string =>
-  value === undefined ? 'unknown (not free)' : `$${value.toFixed(4)}`;
 const controlDisplay = (key: keyof RouterUIControls, value: unknown): string =>
   key === 'mode' && value === undefined
     ? 'inherit (project/profile)'
@@ -91,7 +96,7 @@ const controlDisplay = (key: keyof RouterUIControls, value: unknown): string =>
         ? `${String(value)} requests`
         : (key === 'costSensitivity' || key === 'strongAdviceConfidence') &&
             typeof value === 'number'
-          ? `${Math.round(value * 100)}%`
+          ? percent(value)
           : display(value);
 const controlChoices = (
   field: keyof RouterUIControls,
@@ -111,7 +116,7 @@ const controlChoices = (
             ),
           ]
         : field.startsWith('thinking')
-          ? [undefined, 'off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+          ? [undefined, ...THINKING_LEVELS]
           : field === 'reviewEveryRequests'
             ? [0, 2, 4, 8]
             : field === 'costHorizon'
@@ -250,10 +255,10 @@ export const formatRouterUIUsage = (
     `Retained active-branch history: ${retained.length} decisions`,
     'At most 50; not session lifetime.',
     '',
-    `Known generation cost: ${costs.length ? money(costs.reduce((sum, cost) => sum + cost, 0)) : 'unknown'} · coverage ${costs.length}/${retained.length}`,
+    `Known generation cost: ${costs.length ? usdFine(costs.reduce((sum, cost) => sum + cost, 0)) : 'unknown'} · coverage ${costs.length}/${retained.length}`,
     'Catalog only, not an invoice.',
     `Generation attempts: ${generationAttempts.length ? generationAttempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${generationAttempts.length}/${retained.length}`,
-    `Cache-read share, last observed request: ${cacheReadShare === undefined ? 'unknown' : `${Math.round(cacheReadShare * 100)}%`} · measured, not forecast ${cacheReadShare === undefined ? '' : textBar(cacheReadShare)}`,
+    `Cache-read share, last observed request: ${cacheReadShare === undefined ? 'unknown' : percent(cacheReadShare)} · measured, not forecast ${cacheReadShare === undefined ? '' : textBar(cacheReadShare)}`,
     `Catalog cost / request: ${spark} · ${costSamples.length} known samples · not a savings prediction`,
     `Observed activity labels: ${activityCounts.join(' · ') || 'unknown'} · no inferred phase`,
     '',
@@ -261,11 +266,11 @@ export const formatRouterUIUsage = (
     `HTTP attempts: ${attempts.length ? attempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${attempts.length}/${samples.length}`,
     `Advice accepted: ${samples.length ? `${samples.filter((entry) => entry.outcome === 'selected').length}/${samples.length}` : 'unknown'}`,
     `Timeouts: ${samples.filter((entry) => entry.outcome === 'deadline').length} · abstained: ${samples.filter((entry) => entry.outcome === 'uncertain').length}`,
-    `Median advisory latency: ${median === undefined ? 'unknown' : `${Math.round(median)} ms`} · samples ${latencies.length}/${samples.length}`,
+    `Median classifier latency: ${median === undefined ? 'unknown' : latency(median)} · samples ${latencies.length}/${samples.length}`,
     `Route reuses: ${retained.filter((entry) => entry.reuse !== undefined).length} (not new requests)`,
     `Advice without local IDs: ${retained.filter((entry) => entry.advice && !entry.advice.requestId).length} excluded`,
     '',
-    `Advisor known cost: ${advisorCosts.length ? money(advisorCosts.reduce((sum, cost) => sum + cost, 0)) : 'unknown (not free)'} · coverage ${advisorCosts.length}/${samples.length}`,
+    `Classifier cost: ${advisorCosts.length ? usdFine(advisorCosts.reduce((sum, cost) => sum + cost, 0)) : 'unknown'} · coverage ${advisorCosts.length}/${samples.length}`,
     'Advice excluded from generation budget.',
     'Host totals overlap. Do not add; no savings estimate.',
   ];
@@ -287,7 +292,8 @@ export const formatRouterUISnapshot = (
       : []),
     ...(tab === 'usage'
       ? [
-          ...routeMix(snapshot.history),
+          ...usageSummary(snapshot),
+          '',
           ...formatRouterUIUsage(snapshot.history),
         ]
       : tab === 'classifier'
@@ -308,14 +314,14 @@ export const formatRouterUISnapshot = (
                 'Text eligibility only; generation rechecks input, context and authentication.',
                 ...keys.map(
                   (key) =>
-                    `${fieldNames[key]}: ${display((snapshot.pendingControls ?? snapshot.controls)[key])}${policySourceNote(snapshot, key)}`,
+                    `${fieldNames[key]}: ${controlDisplay(key, (snapshot.pendingControls ?? snapshot.controls)[key])}${policySourceNote(snapshot, key)}`,
                 ),
                 'Classifier models: ' +
                   snapshot.classifiers.map((model) => model.model).join(', '),
-                `Advisor enabled: ${snapshot.privacy.advisorEnabled}`,
+                `Classifier enabled: ${snapshot.privacy.advisorEnabled}`,
                 'Approved models: ' +
                   (snapshot.privacy.approvedModels.join(', ') || 'none'),
-                'Credentials and consent are read-only. Selecting an advisor does not grant approval.',
+                'Credentials and consent are read-only. Selecting a classifier does not grant approval.',
                 'Session edits activate on the next user turn. No configuration file writes.',
               ]
             : [...budgetLines(snapshot)]),
@@ -1056,9 +1062,9 @@ export class RouterUIInspector implements Component {
           ]
         : []),
       `Ordered fallbacks retained: ${state.fallbacks.join(' → ') || 'none'}`,
-      selected(3, 'Reset to generic / inherit'),
+      selected(3, 'Reset to generic'),
       selected(4, 'Apply routes'),
-      selected(5, 'Discard route draft'),
+      selected(5, 'Discard routes'),
       selected(6, 'Back to Routes'),
       ...(draft
         ? [this.theme.fg('warning', 'Draft changes are not applied.')]
@@ -1194,7 +1200,7 @@ export class RouterUIInspector implements Component {
   };
   private routeOverview = (): string[] => {
     const s = this.snapshot;
-    const order = ['micro', 'low', 'medium', 'high'] as const;
+    const order = TIER_DISPLAY_ORDER;
     const dirty = this.editor.dirtyRoutes();
     return [
       this.theme.fg('accent', 'Configured routes · not actual generation'),
@@ -1202,7 +1208,7 @@ export class RouterUIInspector implements Component {
       `Mode: ${formatMode(s)} · preferred text-only routes below`,
       '',
       'Activity'.padEnd(9) +
-        ['micro', 'low', 'med', 'high'].map((tier) => tier.padEnd(6)).join(''),
+        order.map((tier) => tierMeter(tier).padEnd(6)).join(''),
       ...ROUTER_ACTIVITIES.map(
         (activity) =>
           activity.padEnd(9) +
@@ -1237,14 +1243,12 @@ export class RouterUIInspector implements Component {
       'Edit cell opens model, effort and ordered fallback details.',
       '',
       'Generic text-capable routes · not actual',
-      ...order.map(
-        (tier) =>
-          tier +
-          ': ' +
-          (s.eligible[tier]
-            ? route(s.eligible[tier])
-            : 'not eligible / unknown'),
-      ),
+      ...order.map((tier) => {
+        const eligible = s.eligible[tier];
+        return eligible
+          ? route(eligible)
+          : `${tierMeter(tier)} ${tier} · not eligible / unknown`;
+      }),
       'Generation rechecks input, context and authentication.',
       '',
       'Configured activity overrides · not actual',
@@ -1260,7 +1264,6 @@ export class RouterUIInspector implements Component {
     if (this.currentTab() === 'usage')
       return [
         ...usageSummary(s),
-        ...(s.history.length ? ['', ...routeMix(s.history)] : []),
         ...(this.usageDetails ? ['', ...this.usage] : []),
       ];
     if (this.currentTab() === 'now') {
@@ -1273,31 +1276,16 @@ export class RouterUIInspector implements Component {
           s.advised.tier !== actual?.tier ||
           s.advised.activity !== actual?.activity ||
           s.advised.routeCell !== actual?.routeCell);
+      const [tierLine, identityLine] = actual
+        ? [
+            `${tierMeter(actual.tier)} ${modelName(actual.model)} · ${actual.thinking}${actual.activity ? ` · ${actual.activity}` : ''} ${shortReason(s)}`,
+            `${actual.provider}/${actual.model} · effort ${actual.thinking}`,
+          ]
+        : ['unknown / no observed generation', undefined];
       return [
-        muted(
-          (s.lifecycle === 'idle' ? 'Last generation' : 'Actual generation') +
-            ' · ' +
-            s.lifecycle,
-        ),
-        this.theme.fg(
-          'accent',
-          actual
-            ? `${actual.provider}/${actual.model}`
-            : 'unknown / no observed generation',
-        ),
-        ...(actual
-          ? [
-              this.theme.fg(
-                'success',
-                activityLabel(actual) +
-                  ' · ' +
-                  actual.tier +
-                  ' · effort ' +
-                  actual.thinking,
-              ),
-            ]
-          : []),
-        this.theme.fg(routerTone(s), routeReason(s)),
+        this.theme.fg(routerTone(s), tierLine),
+        ...(identityLine ? [muted(identityLine)] : []),
+        routeReason(s),
         muted(`Mode: ${formatMode(s)} · /router mode`),
         ...(differs
           ? [this.theme.fg('warning', `Proposed · ${route(s.advised)}`)]
@@ -1480,7 +1468,7 @@ export class RouterUIInspector implements Component {
           ...wrapTextWithAnsi(
             color(
               selected,
-              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? advisorName(this.editor.draft.advisor ?? 'none (session)') : controlDisplay(field, this.editor.draft[field])}${policySourceNote(this.snapshot, field)}`,
+              `${selected ? '›' : ' '}${fieldNames[field]}: ${field === 'advisor' ? (this.editor.draft.advisor ?? 'none (session)') : controlDisplay(field, this.editor.draft[field])}${policySourceNote(this.snapshot, field)}`,
             ),
             w,
           ),
