@@ -265,10 +265,14 @@ missing profile approval. It labels the active selection separately from the
 last observed operation's model, source and profile. Diagnostics remain available
 with logging off. **Eligible to ask** is not an authentication attestation.
 
-![Missing profile approval is explicit in the native Classifier tab](assets/router-ui/tabs-classifier-unapproved-dark.png)
-![Last timeout diagnostics remain available with history off](assets/router-ui/tabs-classifier-timeout-dark.png)
+```text
+Not approved for this profile · edit user configuration
+Active model: typesafe/jev-1.14.0
+Classifier enabled: true · profile auto
+Last observed advice: deadline · 10 s
+```
 
-See [inspector controls and screenshots](user-guide.md#native-inspector).
+See [inspector controls](user-guide.md#native-inspector).
 
 ## Advisor configuration reference
 

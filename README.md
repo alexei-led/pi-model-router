@@ -59,18 +59,35 @@ Open any tab with `/router routes`, `/router classifier`, `/router usage` or `/r
 `/router status` returns short text.
 The two-line strip is on in new sessions. `/router widget` switches to a quiet footer status instead.
 
-![Five-tab native Pi inspector with physical model and effort switch history](docs/assets/router-ui/tabs-now-dark.png)
+```text
+╭──────────────────────────────────────────────────────╮
+│ Router / auto                                        │
+│ ›Now | Routes | Classifier | Usage | Settings        │
+│ ▂▄ GLM 5.3 Flash · low ⏵ pinned                      │
+│ zai/glm-5.3-flash · effort low                       │
+│ Pinned route                                         │
+│ Mode: balanced (default) · bypassed by pin · /router │
+│ mode                                                 │
+│                                                      │
+│ Switch history · retained active branch              │
+│ History collection is on · last 50 observations      │
+│ Observed: ▂▄▆ MiMo V2.6 Flash · high · baseline      │
+│ Model switch: ▂▄▆ MiMo V2.6 Flash · high → ▂▄ GLM    │
+│ 5.3 Flash · low · pinned                             │
+│ Why this route? | Done                               │
+╰──────────────────────────────────────────────────────╯
+```
 
-Captured from the local dev extension in Pi inside agterm, using synthetic fixture data.
-[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md) · [Native validation and screenshots](docs/testing/router-observability-015-acceptance.md)
+The bars `▂ ▂▄ ▂▄▆ ▂▄▆█` name the tier, `micro` to `high`, on every surface. Captured from Pi 1.5 in agterm with two cheap test models.
+[Inspector controls](docs/user-guide.md#native-inspector) · [Classifier setup](docs/classifier-advisor.md)
 
 ## A turn in Pi
 
 This illustrative strip shows a low-tier choice after completion. It is not a routing promise or a latency benchmark.
 
 ```text
-gpt-6-luna · low · effort off · last
-Classifier advice accepted · 807 ms · auto (illustrative historical capture)
+▂▄ GPT 6 Luna · low  = fits
+auto · balanced (default) · classifier 807 ms
 ```
 
 The model answers and calls tools. Periodic background reviews use bounded current-loop progress; a fresh recommendation may apply at the next request. Cost sensitivity and a short horizon can hold a costly switch, while strong capability advice can override the estimate. Pins, consent and generation safeguards still apply.

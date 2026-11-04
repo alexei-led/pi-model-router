@@ -21,6 +21,9 @@ The `pi-model-router` is an extension-first model router for the Pi coding agent
   - `extensions/provider.ts`: custom `router` provider registration and delegation stream.
   - `extensions/state.ts`: session-persisted state and snapshotting.
   - `extensions/ui/preview.ts`: configured/current/queued text-only route preferences through the shared matrix builder.
+  - `extensions/ui/format.ts`: the one set of number, time, money, model-name and tier-meter formats. Every surface uses it; do not format dollars, latency or percents inline.
+  - `extensions/ui/notices.ts`: model-change line, short decision reasons and the shared thinking messages.
+  - `extensions/ui/output.ts`: transcript entry for multi-line command output; it never enters model context.
   - `extensions/ui.ts`: status line and widget rendering.
   - `extensions/commands.ts`: commands and completions.
   - `extensions/index.ts`: entry point and orchestration.

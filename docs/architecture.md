@@ -286,13 +286,16 @@ Queued controls activate at an owned user boundary: `before_agent_start` handles
 | `ui/runtime.ts`          | Own transient snapshots, queued control transactions, observations, and capability revalidation.                                                             |
 | `ui/controls.ts`         | Validate control edits without terminal dependencies.                                                                                                        |
 | `ui/presentation.ts`     | Format sanitized snapshots and fixed local reasons without host or terminal dependencies.                                                                    |
+| `ui/format.ts`           | Format money, time, percents, model names and tier bars. One source for every surface.                                                                       |
+| `ui/notices.ts`          | Build the model-change line, short decision reasons and the shared thinking messages.                                                                        |
+| `ui/output.ts`           | Draw multi-line command output as a session entry that stays out of model context.                                                                           |
 | `ui/inspector.ts`        | Render and operate the native Pi terminal inspector.                                                                                                         |
 | `types.ts`               | Define shared contracts.                                                                                                                                     |
 
 Request preparation applies routing policy and uses provider-scoped coordination for classifier advice. Generation validates and delegates each physical target through Pi. State and UI do not import provider or classifier transport. `ui/controls.ts` and `ui/presentation.ts` do not import the terminal inspector, TUI, or Pi transport APIs. `domain.ts` has no configuration I/O. Structured classification and generation both use Pi's registry, not a parallel authentication layer.
 
 The Signal Panel reads a sanitized presentation snapshot through one `/router`
-command family. `ui/presentation.ts` formats fixed local reasons and bounded bars.
+command family. `ui/presentation.ts` formats fixed local reasons, short glyph reasons and per-tier usage rows. `economics.ts` also reprices measured token counters on another model for the Usage estimate; a model without a positive tariff yields no estimate.
 It makes no advisor calls. The widget and fallback footer status are mutually
 exclusive. Wide inspectors are floating right overlays, not transcript-reflowing sidebars; narrow custom screens replace the editor area while preserving the host footer and widgets. The host footer stays intact. Now, Routes, Classifier, Usage and Settings share one inspector interaction. Classifier and Settings share a compare-and-set control draft; Routes keeps a separate sparse-cell draft.
 Recorded session cost is projected separately from retained-window history.

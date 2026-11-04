@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.19.0] - 2026-11-04
+
+Show the route the same way on every surface, and show one set of catalog costs.
+
+### Changes
+
+- Name tiers with bars on every surface: `▂` micro, `▂▄` low, `▂▄▆` medium, `▂▄▆█` high. Lists run micro to high everywhere.
+- Redraw the widget as two short lines: bars, model name, effort, activity noun and a reason in a glyph and at most three words (`↑ stronger`, `↓ cheaper`, `= fits`, `… waiting`, `! timed out`, `⏵ pinned`). The second line holds profile, mode and classifier time. The widget no longer shows cost; Pi's footer already does.
+- Keep the footer status (widget off) to one short line: bars, model, effort and one marker, `⏵` for a pending change or `!` for a recovered problem. It no longer fills the whole terminal width, which other extensions share.
+- Write one `Model changed: A → B · reason` line when the router moves to another model between turns. An effort-only change does not write it.
+- Draw `/router status` and `/router log` as transcript entries kept in the session and out of model context. One-line confirmations stay notices. Print and JSON modes are unchanged.
+- Put money first in the Usage tab: the catalog cost, one row per tier, and an estimate of the same tokens on the model you selected before the router. The estimate is missing without a positive price for that model.
+- Use one format for money (`$1.24`, `<$0.01`, `unknown`), differences (`−$1.86 (−60%)`), time (`412 ms`, `1.2 s`) and percents (`13%`). Label every figure `catalog`. Diagnostic lines keep four decimals.
+- Say `classifier` for the advice service in every label. Configuration keys stay `advisor.*`.
+- Generate the help text and the completions from one command table. Share the thinking messages between the command and the Pi thinking-level handler.
+- Offer `max` in the inspector's effort selector, as `/router thinking` already accepts it.
+- Remove unused `formatAdvisorFooter`, the `🧠` and `🧭` emoji, `Pi classifier`, and the `future cache warmth=unknown` log text.
+
+### Upgrade
+
+Update the extension and run `/reload`. No configuration change is needed. Pi 1.1 or newer is required, as before.
+
+Text output changed. A script that parses `/router status`, `/router log` or the strip must read the new lines: the status title is now `Router on` or `Router off`, the log uses `→` and integer percents, and the widget no longer prints tier words, `last`, or `recorded $…`. No action is needed if you only read the screen.
+
+The router holds no prices. Pi's catalog lists Sonnet 5.5 cache reads at $0.20 per million tokens where Anthropic's page lists $0.10, and DeepSeek at its peak price. Costs for those models read high until Pi's catalog changes.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.18.2...v0.19.0)
+
 ## [0.18.2] - 2026-10-28
 
 Tune classifier confidence, switching and notification handling per user profile without changing other profiles.
