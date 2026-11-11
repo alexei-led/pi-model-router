@@ -139,7 +139,7 @@ Old Jev/Clef/chat-classifier settings do not enable the current advisor. Follow 
 ## Install
 
 Requires Pi **1.1.0 or later in the 1.x series** and Node.js **22.19.0+**.
-Automated SDK/host gates run against Pi 1.1.0. The [0.15 native TUI checks](docs/testing/router-observability-015-acceptance.md) use Pi 1.3.0 in agterm. The optional classifier-catalog example requires Pi 1.3+.
+Automated SDK/host gates run against Pi 1.5.2; the supported minimum remains Pi 1.1.0. The [0.15 native TUI checks](docs/testing/router-observability-015-acceptance.md) use Pi 1.3.0 in agterm. The optional classifier-catalog example requires Pi 1.3+.
 
 ```sh
 pi install npm:@alexeiled/pi-model-router

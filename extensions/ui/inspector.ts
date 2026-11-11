@@ -560,6 +560,7 @@ export class RouterUIInspector implements Component {
   private tab = 0;
   advanced = false;
   details = false;
+  routeDetails = false;
   usageDetails = false;
   private focus = 0;
   private scroll = 0;
@@ -687,6 +688,12 @@ export class RouterUIInspector implements Component {
       ? keys.filter((key) => !classifierFields.some((field) => field === key))
       : ['pin', 'mode'];
   };
+  private toggleDetails = (): void => {
+    if (this.currentTab() === 'usage') this.usageDetails = !this.usageDetails;
+    else if (this.currentTab() === 'routes')
+      this.routeDetails = !this.routeDetails;
+    else this.details = !this.details;
+  };
   private actions = (): string[] => [
     ...(this.currentTab() === 'now' ? ['Why this route?'] : []),
     ...(this.currentTab() === 'routes' && this.snapshot.routeCells.length
@@ -695,7 +702,7 @@ export class RouterUIInspector implements Component {
     ...(this.currentTab() === 'usage'
       ? [this.usageDetails ? 'Less detail' : 'Details']
       : this.currentTab() === 'routes'
-        ? [this.details ? 'Less detail' : 'Details']
+        ? [this.routeDetails ? 'Less detail' : 'Details']
         : []),
     ...(this.currentTab() === 'settings'
       ? [this.advanced ? 'Less settings' : 'Advanced']
@@ -1168,11 +1175,8 @@ export class RouterUIInspector implements Component {
         this.focus = this.advanced ? 2 : 1;
         this.scroll = 0;
       }
-      if (action === 'Details' || action === 'Less detail') {
-        if (this.currentTab() === 'usage')
-          this.usageDetails = !this.usageDetails;
-        else this.details = !this.details;
-      }
+      if (action === 'Details' || action === 'Less detail')
+        this.toggleDetails();
       if (action === 'Edit cell') {
         this.routesOpen = true;
         this.routeFocus = 0;
@@ -1252,7 +1256,7 @@ export class RouterUIInspector implements Component {
           : `${tierMeter(tier)} ${tier} · not eligible / unknown`;
       }),
       '',
-      ...(this.details
+      ...(this.routeDetails
         ? ['Activity overrides', ...activityRouteLines(s)]
         : [
             `Overrides · ${
@@ -1551,6 +1555,7 @@ export const openRouterInspector = async (
   let repeat = true;
   let advanced = false;
   let details = false;
+  let routeDetails = false;
   let usageDetails = false;
   const initialRouteCell =
     adapters
@@ -1584,6 +1589,7 @@ export const openRouterInspector = async (
           component.selectTab(initialTab);
           component.advanced = advanced;
           component.details = details;
+          component.routeDetails = routeDetails;
           component.usageDetails = usageDetails;
           component.restoreRouteEditor(routeEditor.open, routeEditor.cell);
           return component;
@@ -1603,6 +1609,7 @@ export const openRouterInspector = async (
       initialTab = component?.currentTab() ?? initialTab;
       advanced = component?.advanced ?? advanced;
       details = component?.details ?? details;
+      routeDetails = component?.routeDetails ?? routeDetails;
       usageDetails = component?.usageDetails ?? usageDetails;
       routeEditor = component?.routeEditorState() ?? routeEditor;
     } finally {

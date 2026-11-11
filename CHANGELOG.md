@@ -6,12 +6,12 @@ Make the router inspector easier to scan without changing routing policy.
 
 ### Changes
 
-- Keep the Routes grid and generic routes visible; move long activity-override and fallback listings behind **Details**.
+- Keep the Routes grid and generic routes visible; move long activity-override and fallback listings behind **Details**. Now, Routes and Usage keep independent detail states.
 - Shorten Now, Classifier and Settings text. Keep actual generation, proposals and queued edits separate; keep approval and credentials in user configuration.
 - Let **1–5** switch tabs while selectors or actions have focus. Digits still edit focused budget and deadline inputs; route pickers retain their own input handling.
 - Show missing current generation observations without claiming the profile has never generated.
 - Fix classifier readiness when drafting **None**: it no longer substitutes the active classifier for the cleared selection.
-- Refresh locked development Pi packages to 1.5.2, removing the minimatch advisory from this repository's dependency graph. This does not update a separately installed Pi host.
+- Refresh locked development Pi packages to 1.5.2, removing the minimatch advisory from this repository's dependency graph. This does not update a separately installed Pi host. Docs now distinguish the tested Pi SDK 1.5.2 from the supported minimum 1.1.0.
 
 ### Upgrade
 

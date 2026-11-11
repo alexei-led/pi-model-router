@@ -839,12 +839,43 @@ describe('read-only activity routes in Routes', () => {
     return pages.join('\n');
   };
 
-  const showRouteDetails = (panel: RouterUIInspector) => {
+  const showRouteDetails = (
+    panel: RouterUIInspector,
+    hasRouteCells = false,
+  ) => {
     panel.selectTab('routes');
     panel.handleInput('\t');
+    if (hasRouteCells) panel.handleInput('\t');
     panel.handleInput('\r');
   };
 
+  it('keeps Routes expansion independent from Now details', () => {
+    const f = fixture();
+    f.update({ activityCells: cells });
+    f.panel.selectTab('now');
+    f.panel.handleInput('\t');
+    f.panel.handleInput('\r');
+    expect(readPages(f.panel, 80)).toContain('Actual  ');
+
+    f.panel.selectTab('routes');
+    const compact = readPages(f.panel, 80);
+    expect(compact).not.toContain('code/medium: configured test/code');
+    showRouteDetails(f.panel);
+    expect(readPages(f.panel, 80)).toContain(
+      'code/medium: configured test/code',
+    );
+
+    f.panel.selectTab('now');
+    expect(readPages(f.panel, 80)).toContain('Actual  ');
+    f.panel.selectTab('routes');
+    showRouteDetails(f.panel);
+    expect(readPages(f.panel, 80)).not.toContain(
+      'code/medium: configured test/code',
+    );
+    f.panel.selectTab('now');
+    expect(readPages(f.panel, 80)).toContain('Actual  ');
+    f.panel.dispose();
+  });
   it('shows mode/count in Settings and promotes the override list into Routes', () => {
     const f = fixture();
     f.update({ activityCells: cells });
@@ -854,6 +885,9 @@ describe('read-only activity routes in Routes', () => {
     expect(normal).not.toContain('code/medium');
     expect(normal).not.toContain(' | Apply');
     openAdvanced(f.panel);
+    const collapsed = readPages(f.panel, 80);
+    expect(collapsed).toContain('Overrides · code · docs');
+    expect(collapsed).not.toContain('code/medium: configured test/code');
     showRouteDetails(f.panel);
     const advanced = readPages(f.panel, 80);
     expect(advanced).toContain('Activity overrides');
@@ -890,6 +924,9 @@ describe('read-only activity routes in Routes', () => {
         wide,
       );
       openAdvanced(panel);
+      const collapsed = readPages(panel, width);
+      expect(collapsed).toContain('Overrides · code · docs');
+      expect(collapsed).not.toContain('code/medium: configured test/code');
       showRouteDetails(panel);
       const before = panel.render(width).join('\n');
       const text = readPages(panel, width);
@@ -897,6 +934,12 @@ describe('read-only activity routes in Routes', () => {
       expect(text).toContain('docs/micro: configured test/docs');
       expect(text).toContain('No text-eligible attempt');
       expect(text).not.toBe(before);
+      panel.selectTab('routes');
+      panel.handleInput('\t');
+      if (f.adapters.getSnapshot().routeCells.length) panel.handleInput('\t');
+      panel.handleInput('\r');
+      const collapsedAgain = readPages(panel, width);
+      expect(collapsedAgain).not.toContain('code/medium: configured test/code');
       for (const line of text.split('\n'))
         expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       expect(panel.render(width).length).toBeLessThanOrEqual(
