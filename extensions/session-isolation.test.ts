@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import {
   InMemoryCredentialStore,
   type ProviderClassifier,
-  Type,
 } from '@earendil-works/pi-ai';
 import {
   createAgentSession,
@@ -167,7 +166,7 @@ test('fresh Pi SDK sessions share a profile, not controls, cost, advice caches o
           name: 'inspect',
           label: 'Inspect fixture',
           description: 'Return synthetic evidence.',
-          parameters: Type.Object({}),
+          parameters: { type: 'object', properties: {} },
           execute: async () => {
             await steer?.();
             return {

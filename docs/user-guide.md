@@ -104,7 +104,7 @@ The switch trail uses adjacent known generation targets in retained active-branc
 It does not count advisor-only reviews as generation, join transitions across unknown targets,
 or infer a switch before the retained window. It is not a lifetime switching counter.
 
-Use **1–5** to jump to a tab and **Left/Right** to switch tabs or cycle a focused value. In Routes, **Details** expands the long activity/fallback listing so the grid stays in view. The [README](../README.md#inspect-routing-in-pi) shows the Now tab.
+Use **1–5** to jump to a tab from selectors and actions; digits still edit a focused budget or deadline input. Route pickers keep their own keyboard controls. **Left/Right** switches tabs when the tab bar is focused, or cycles a focused selector value. In Routes, **Details** expands the long activity/fallback listing so the grid stays in view. The [README](../README.md#inspect-routing-in-pi) shows the Now tab.
 
 ### Routes and pending edits
 
