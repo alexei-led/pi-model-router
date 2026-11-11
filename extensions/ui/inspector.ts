@@ -297,7 +297,7 @@ export const formatRouterUISnapshot = (
           ...formatRouterUIUsage(snapshot.history),
         ]
       : tab === 'classifier'
-        ? classifierLines(snapshot)
+        ? classifierLines(snapshot, snapshot.controls.advisor)
         : tab === 'routes'
           ? [
               activityRoutingSummary(snapshot),
@@ -560,6 +560,7 @@ export class RouterUIInspector implements Component {
   private tab = 0;
   advanced = false;
   details = false;
+  routeDetails = false;
   usageDetails = false;
   private focus = 0;
   private scroll = 0;
@@ -687,6 +688,12 @@ export class RouterUIInspector implements Component {
       ? keys.filter((key) => !classifierFields.some((field) => field === key))
       : ['pin', 'mode'];
   };
+  private toggleDetails = (): void => {
+    if (this.currentTab() === 'usage') this.usageDetails = !this.usageDetails;
+    else if (this.currentTab() === 'routes')
+      this.routeDetails = !this.routeDetails;
+    else this.details = !this.details;
+  };
   private actions = (): string[] => [
     ...(this.currentTab() === 'now' ? ['Why this route?'] : []),
     ...(this.currentTab() === 'routes' && this.snapshot.routeCells.length
@@ -694,7 +701,9 @@ export class RouterUIInspector implements Component {
       : []),
     ...(this.currentTab() === 'usage'
       ? [this.usageDetails ? 'Less detail' : 'Details']
-      : []),
+      : this.currentTab() === 'routes'
+        ? [this.routeDetails ? 'Less detail' : 'Details']
+        : []),
     ...(this.currentTab() === 'settings'
       ? [this.advanced ? 'Less settings' : 'Advanced']
       : []),
@@ -1106,7 +1115,7 @@ export class RouterUIInspector implements Component {
     if (this.editor.busy) return;
     const fields = this.fields();
     const field = fields[this.focus - 1];
-    if (this.focus === 0 && /^[1-5]$/u.test(data)) {
+    if (field !== 'budget' && field !== 'timeout' && /^[1-5]$/u.test(data)) {
       this.selectTab(ROUTER_UI_VIEWS[Number(data) - 1] ?? 'now');
     } else if (matchesKey(data, 'tab') || matchesKey(data, 'shift+tab')) {
       const count = fields.length + this.actions().length + 1;
@@ -1167,7 +1176,7 @@ export class RouterUIInspector implements Component {
         this.scroll = 0;
       }
       if (action === 'Details' || action === 'Less detail')
-        this.usageDetails = !this.usageDetails;
+        this.toggleDetails();
       if (action === 'Edit cell') {
         this.routesOpen = true;
         this.routeFocus = 0;
@@ -1203,9 +1212,8 @@ export class RouterUIInspector implements Component {
     const order = TIER_DISPLAY_ORDER;
     const dirty = this.editor.dirtyRoutes();
     return [
-      this.theme.fg('accent', 'Configured routes · not actual generation'),
-      activityRoutingSummary(s),
-      `Mode: ${formatMode(s)} · preferred text-only routes below`,
+      this.theme.fg('accent', 'Routes · configured, not actual'),
+      `${s.activityRouting === 'on' ? '●' : '○'} Activities ${s.activityRouting} · ${s.activityCells.length} cells · ${formatMode(s)}`,
       '',
       'Activity'.padEnd(9) +
         order.map((tier) => tierMeter(tier).padEnd(6)).join(''),
@@ -1238,21 +1246,27 @@ export class RouterUIInspector implements Component {
             .join(''),
       ),
       '',
-      'B built-in · I inherited · O override · — missing',
-      '* draft · + queued for next user turn',
-      'Edit cell opens model, effort and ordered fallback details.',
+      'B built-in · I inherited · O override · — missing · * draft · + queued',
       '',
-      'Generic text-capable routes · not actual',
+      'Generic routes',
       ...order.map((tier) => {
         const eligible = s.eligible[tier];
         return eligible
           ? route(eligible)
           : `${tierMeter(tier)} ${tier} · not eligible / unknown`;
       }),
-      'Generation rechecks input, context and authentication.',
       '',
-      'Configured activity overrides · not actual',
-      ...activityRouteLines(s),
+      ...(this.routeDetails
+        ? ['Activity overrides', ...activityRouteLines(s)]
+        : [
+            `Overrides · ${
+              s.activityCells
+                .map((cell) => cell.activity)
+                .filter((value, index, all) => all.indexOf(value) === index)
+                .join(' · ') || 'none'
+            }`,
+            'Details shows per-cell routes and fallbacks.',
+          ]),
     ];
   };
   private content = (): string[] => {
@@ -1281,12 +1295,12 @@ export class RouterUIInspector implements Component {
             `${tierMeter(actual.tier)} ${modelName(actual.model)} · ${actual.thinking}${actual.activity ? ` · ${actual.activity}` : ''} ${shortReason(s)}`,
             `${actual.provider}/${actual.model} · effort ${actual.thinking}`,
           ]
-        : ['unknown / no observed generation', undefined];
+        : ['No current generation observed', undefined];
       return [
         this.theme.fg(routerTone(s), tierLine),
         ...(identityLine ? [muted(identityLine)] : []),
         routeReason(s),
-        muted(`Mode: ${formatMode(s)} · /router mode`),
+        muted(`${formatMode(s)} · /router mode`),
         ...(differs
           ? [this.theme.fg('warning', `Proposed · ${route(s.advised)}`)]
           : []),
@@ -1314,41 +1328,37 @@ export class RouterUIInspector implements Component {
             ]
           : []),
         '',
-        'Switch history · retained active branch',
-        historyStatus(s),
-        ...routeTimeline(s.history),
+        ...(s.history.length
+          ? [
+              this.theme.fg('accent', `Recent · ${s.history.length}`),
+              ...routeTimeline(s.history),
+            ]
+          : [muted('No routing history yet')]),
         ...(this.details
           ? [
               '',
               ...budgetLines(s),
-              `Actual: ${route(actual)}`,
-              `Advised (not actual): ${route(s.advised)}`,
-              `Next pin: ${(s.pendingControls ?? s.controls).pin}`,
-              'Advice is not generation. Tier is not a quality score.',
+              `Actual  ${route(actual)}`,
+              `Advice  ${route(s.advised)}`,
+              `Pin     ${(s.pendingControls ?? s.controls).pin ?? 'auto'}`,
+              historyStatus(s),
             ]
           : []),
       ];
     }
     return [
+      muted(`${formatMode(s)} · session mode`),
       muted(
-        `Mode: ${formatMode(s)} · queued selector below; /router mode changes next request`,
+        `Activities ${s.activityRouting} · ${s.activityCells.length} configured`,
       ),
-      muted(activityRoutingSummary(s)),
-      muted('Pin / effort / baseline: this profile. Mode: session-wide.'),
-      muted('Budget / switch policy: session-wide.'),
-      muted('Classifier selection and deadline: Classifier tab.'),
-      muted('Apply queues the next user turn; not tool turns.'),
+      muted('Pin and mode are quick controls; Advanced has session overrides.'),
       ...(this.advanced
         ? [
             ...budgetLines(s),
             'Session overrides only. No config file writes.',
             'Pins persist until cleared. Credentials and consent remain in user configuration.',
           ]
-        : [
-            muted(
-              'Pins persist until cleared. Advanced: budget, effort and switch policy.',
-            ),
-          ]),
+        : [muted('Tab to edit · changes apply at the next user turn.')]),
     ];
   };
   private statusMessage = (): string => {
@@ -1441,7 +1451,7 @@ export class RouterUIInspector implements Component {
           ? this.routeModal === 'models'
             ? 'Tab search/results · Enter choose · Esc back'
             : 'Esc back · Tab focus · Enter select · actual generation unchanged'
-          : 'Esc close · Tab focus · ←→ tabs/value · 1–5 tabs · PgUp/Dn',
+          : 'Esc close · Tab focus · ←→ tabs/values · 1–5 switch tabs · PgUp/Dn',
       ),
     ];
     const body = this.routesOpen
@@ -1545,6 +1555,7 @@ export const openRouterInspector = async (
   let repeat = true;
   let advanced = false;
   let details = false;
+  let routeDetails = false;
   let usageDetails = false;
   const initialRouteCell =
     adapters
@@ -1578,6 +1589,7 @@ export const openRouterInspector = async (
           component.selectTab(initialTab);
           component.advanced = advanced;
           component.details = details;
+          component.routeDetails = routeDetails;
           component.usageDetails = usageDetails;
           component.restoreRouteEditor(routeEditor.open, routeEditor.cell);
           return component;
@@ -1597,6 +1609,7 @@ export const openRouterInspector = async (
       initialTab = component?.currentTab() ?? initialTab;
       advanced = component?.advanced ?? advanced;
       details = component?.details ?? details;
+      routeDetails = component?.routeDetails ?? routeDetails;
       usageDetails = component?.usageDetails ?? usageDetails;
       routeEditor = component?.routeEditorState() ?? routeEditor;
     } finally {

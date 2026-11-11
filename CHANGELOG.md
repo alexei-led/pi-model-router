@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.20.0] - 2026-11-11
+
+Make the router inspector easier to scan without changing routing policy.
+
+### Changes
+
+- Keep the Routes grid and generic routes visible; move long activity-override and fallback listings behind **Details**. Now, Routes and Usage keep independent detail states.
+- Shorten Now, Classifier and Settings text. Keep actual generation, proposals and queued edits separate; keep approval and credentials in user configuration.
+- Let **1–5** switch tabs while selectors or actions have focus. Digits still edit focused budget and deadline inputs; route pickers retain their own input handling.
+- Show missing current generation observations without claiming the profile has never generated.
+- Fix classifier readiness when drafting **None**: it no longer substitutes the active classifier for the cleared selection.
+- Refresh locked development Pi packages to 1.5.2, removing the minimatch advisory from this repository's dependency graph. This does not update a separately installed Pi host. Docs now distinguish the tested Pi SDK 1.5.2 from the supported minimum 1.1.0.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. No configuration migration is needed; the router still supports Pi 1.1 or newer. `/router reload` reloads configuration, not extension code.
+
+Mouse support and a persistent sidebar are not part of this release. The inspector keeps its keyboard-driven compact overlay on wide terminals and inline view on narrow terminals.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.19.0...v0.20.0)
+
 ## [0.19.0] - 2026-11-04
 
 Show the route the same way on every surface, and show one set of catalog costs.

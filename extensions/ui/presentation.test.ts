@@ -348,32 +348,49 @@ describe('routing observability', () => {
   ])(
     'explains %s without claiming authentication',
     (_name, value, expected) => {
-      expect(classifierStatus(value)).toContain(expected);
-      expect(classifierStatus(value)).not.toContain('authenticated');
+      expect(classifierStatus(value, value.controls.advisor)).toContain(
+        expected,
+      );
+      expect(classifierStatus(value, value.controls.advisor)).not.toContain(
+        'authenticated',
+      );
     },
   );
+  it('does not substitute the active classifier for an explicit None selection', () => {
+    expect(classifierStatus(enabled, undefined)).toContain('Not configured');
+    const lines = classifierLines(enabled, undefined).join('\n');
+    expect(lines).toContain('Not configured');
+    expect(lines).not.toContain('Eligible to ask');
+    expect(lines).toContain('Model  typesafe/jev-1.14.0');
+  });
   it('labels the actual operation model/profile separately from the selected model', () => {
-    const lines = classifierLines({
-      ...enabled,
-      lastAdvice: {
-        advisor: 'fixture/previous',
-        profile: 'previous-profile',
-        outcome: 'deadline',
-        latencyMs: 12.7,
-        source: 'review',
+    const lines = classifierLines(
+      {
+        ...enabled,
+        lastAdvice: {
+          advisor: 'fixture/previous',
+          profile: 'previous-profile',
+          outcome: 'deadline',
+          latencyMs: 12.7,
+          source: 'review',
+        },
       },
-    }).join('\n');
-    expect(lines).toContain('Active model: typesafe/jev-1.14.0');
+      enabled.controls.advisor,
+    ).join('\n');
+    expect(lines).toContain('Model  typesafe/jev-1.14.0');
     expect(lines).toContain('Last observed advice: deadline · 13 ms');
     expect(lines).toContain(
       'Operation model: fixture/previous · review · profile previous-profile',
     );
-    expect(lines).toContain('read-only');
+    expect(lines).toContain('approval and credentials stay in user config');
     expect(
-      classifierLines({
-        ...snapshot,
-        advice: { advisor: 'fixture/legacy', outcome: 'unavailable' },
-      }).join('\n'),
+      classifierLines(
+        {
+          ...snapshot,
+          advice: { advisor: 'fixture/legacy', outcome: 'unavailable' },
+        },
+        snapshot.controls.advisor,
+      ).join('\n'),
     ).toContain('source unreported');
   });
   it('distinguishes initial observations, physical switches and effort changes', () => {

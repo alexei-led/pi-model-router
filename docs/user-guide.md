@@ -95,16 +95,16 @@ Use `/router routes`, `/router classifier`, `/router usage` or `/router settings
 | Tab            | What it shows and controls                                                                                                                                                                                                                                            |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Now**        | Actual physical model, activity, tier and effort. Up to four recent retained model/effort transitions, with local reasons. Held proposals and queued controls stay separate from actual generation. **Why this route?** expands budget and route details.             |
-| **Routes**     | Activity × tier grid: `B` built-in, `I` inherited, `O` override, `—` missing, `*` draft, `+` queued. **Edit cell** opens the existing activity/tier, searchable physical-model and supported-effort selectors. Configured routes are not advice or actual generation. |
-| **Classifier** | Exact selected and active classifier, enablement, profile approval, registration/text-input problems and last observed operation. Model, deadline and review interval are session controls. Credentials and approval are read-only.                                   |
+| **Routes**     | Compact activity × tier grid: `B` built-in, `I` inherited, `O` override, `—` missing, `*` draft, `+` queued. **Details** expands activity overrides and their fallbacks; generic routes stay visible; **Edit cell** opens activity/tier, searchable model and supported-effort selectors. Configured routes are not actual generation. |
+| **Classifier** | Readiness, selected model, enablement and last operation. Model, deadline and review interval are session controls; approval and credentials stay in user config. |
 | **Usage**      | Retained generation count, model switches versus effort-only changes, known-cost coverage and route mix. **Details** exposes advisor, HTTP, cache and other diagnostics. A prominent logging-off message explains empty history.                                      |
-| **Settings**   | Pin and session mode first. **Advanced** exposes baseline, soft budget, tier-wide effort and switch-cost policy. Route editing and classifier controls live in their own tabs.                                                                                        |
+| **Settings**   | Pin and session mode first. **Advanced** exposes baseline, soft budget, tier-wide effort and switch-cost policy. Route editing and classifier controls live in their own tabs. |
 
 The switch trail uses adjacent known generation targets in retained active-branch history.
 It does not count advisor-only reviews as generation, join transitions across unknown targets,
 or infer a switch before the retained window. It is not a lifetime switching counter.
 
-The [README](../README.md#inspect-routing-in-pi) shows the Now tab.
+Use **1–5** to jump to a tab from selectors and actions; digits still edit a focused budget or deadline input. Route pickers keep their own keyboard controls. **Left/Right** switches tabs when the tab bar is focused, or cycles a focused selector value. In Routes, **Details** expands the long activity/fallback listing so the grid stays in view. The [README](../README.md#inspect-routing-in-pi) shows the Now tab.
 
 ### Routes and pending edits
 
