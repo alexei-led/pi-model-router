@@ -1291,9 +1291,9 @@ export class RouterUIInspector implements Component {
             `${tierMeter(actual.tier)} ${modelName(actual.model)} · ${actual.thinking}${actual.activity ? ` · ${actual.activity}` : ''} ${shortReason(s)}`,
             `${actual.provider}/${actual.model} · effort ${actual.thinking}`,
           ]
-        : s.lifecycle === 'idle'
+        : s.lifecycle === 'idle' && s.history.length === 0
           ? ['No generation yet', undefined]
-          : ['unknown / no observed generation', undefined];
+          : ['No current generation observed', undefined];
       return [
         this.theme.fg(routerTone(s), tierLine),
         ...(identityLine ? [muted(identityLine)] : []),

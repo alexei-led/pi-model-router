@@ -186,6 +186,19 @@ describe('Signal Panel', () => {
     expect(text).not.toContain('No retained generation targets');
     f.panel.dispose();
   });
+  it('distinguishes no history from missing current route observations', () => {
+    const f = fixture();
+    const previous = f.adapters.getSnapshot().actual;
+    f.update({
+      actual: undefined,
+      lifecycle: 'idle',
+      history: [{ actual: previous }],
+    });
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('No current generation observed');
+    expect(text).not.toContain('No generation yet');
+    f.panel.dispose();
+  });
   it('uses five sections with no edit actions while browsing', () => {
     const f = fixture();
     const text = f.panel.render(80).join('\n');
@@ -414,7 +427,9 @@ describe('ui/inspector.ts', () => {
       lifecycle,
     );
     expect(f.panel.render(80).join('\n')).toContain(
-      lifecycle === 'idle' ? 'No generation yet' : 'unknown',
+      lifecycle === 'idle'
+        ? 'No generation yet'
+        : 'No current generation observed',
     );
     f.panel.dispose();
   });
@@ -917,10 +932,12 @@ describe('read-only activity routes in Routes', () => {
         availability: 'disabled',
       })),
     });
-    showRouteDetails(f.panel); // reset to Routes and reveal details
+    f.panel.selectTab('routes'); // reset scroll without collapsing details
     const text = readPages(f.panel, 80);
     expect(text).toContain('Activities off');
-    expect(text).toContain('Overrides · code · docs');
+    expect(text).toContain('Activity overrides');
+    expect(text).toContain('code/medium: configured test/code');
+    expect(text).toContain('Excluded (activity routing off)');
     expect(text).not.toContain('Text eligible:');
     expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
     expect(f.adapters.applyControls).not.toHaveBeenCalled();
