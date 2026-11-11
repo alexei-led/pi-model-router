@@ -363,12 +363,12 @@ describe('routing observability', () => {
         source: 'review',
       },
     }).join('\n');
-    expect(lines).toContain('Active model: typesafe/jev-1.14.0');
+    expect(lines).toContain('Model  typesafe/jev-1.14.0');
     expect(lines).toContain('Last observed advice: deadline · 13 ms');
     expect(lines).toContain(
       'Operation model: fixture/previous · review · profile previous-profile',
     );
-    expect(lines).toContain('read-only');
+    expect(lines).toContain('approval and credentials stay in user config');
     expect(
       classifierLines({
         ...snapshot,

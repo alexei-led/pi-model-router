@@ -369,18 +369,16 @@ export const classifierLines = (
   const last = snapshot.lastAdvice ?? snapshot.advice;
   return [
     classifierStatus(snapshot, selected),
-    `Active model: ${snapshot.controls.advisor ?? 'not configured'}`,
-    `Classifier enabled: ${snapshot.privacy.advisorEnabled} · profile ${snapshot.profile}`,
+    `Model  ${snapshot.controls.advisor ?? 'not configured'}`,
+    `Advice ${snapshot.privacy.advisorEnabled ? 'on' : 'off'} · ${snapshot.profile}`,
     ...(last
       ? [
           `Last observed advice: ${last.outcome}${last.latencyMs === undefined ? '' : ` · ${latency(last.latencyMs)}`}`,
           `Operation model: ${last.advisor} · ${last.source ?? 'source unreported'}${last.profile ? ` · profile ${last.profile}` : ''}`,
         ]
       : ['No classifier calls observed.']),
-    'Credentials and profile approval are read-only.',
-    'Selecting a model does not enable advice or grant approval.',
-    'Session selection applies next user turn. No config writes.',
-    'None stops advice; /router reload restores file settings.',
+    'Model selection is session-only; approval and credentials stay in user config.',
+    'None skips advice · /router reload restores config.',
   ];
 };
 

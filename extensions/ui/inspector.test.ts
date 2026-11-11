@@ -177,6 +177,15 @@ describe('Signal Panel', () => {
     f.panel.dispose();
   });
 
+  it('uses plain empty-state labels before the first generation', () => {
+    const f = fixture();
+    f.update({ actual: undefined, lifecycle: 'idle' });
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('No generation yet');
+    expect(text).toContain('No routing history yet');
+    expect(text).not.toContain('No retained generation targets');
+    f.panel.dispose();
+  });
   it('uses five sections with no edit actions while browsing', () => {
     const f = fixture();
     const text = f.panel.render(80).join('\n');
@@ -187,6 +196,24 @@ describe('Signal Panel', () => {
     expect(text).toContain('Routes');
     expect(text).not.toContain('Apply');
     expect(text).not.toContain('Discard');
+    f.panel.dispose();
+  });
+  it('keeps tab shortcuts active on selectors without stealing numeric input', () => {
+    const f = fixture();
+    f.panel.selectTab('settings');
+    f.panel.handleInput('\t');
+    f.panel.handleInput('2');
+    expect(f.panel.render(80).join('\n')).toContain('›Routes');
+    expect(f.draft.dirty()).toEqual([]);
+
+    f.panel.selectTab('settings');
+    f.panel.advanced = true;
+    for (let index = 0; index < 4; index++) f.panel.handleInput('\t');
+    f.panel.handleInput('2');
+    expect(f.panel.render(80).join('\n')).toContain('Settings');
+    expect(f.draft.dirty().some((change) => change.key === 'budget')).toBe(
+      true,
+    );
     f.panel.dispose();
   });
   it('shows adaptive review and switch-policy controls in Advanced settings', () => {
@@ -386,7 +413,9 @@ describe('ui/inspector.ts', () => {
     expect(formatRouterUISnapshot(f.adapters.getSnapshot())).toContain(
       lifecycle,
     );
-    expect(f.panel.render(80).join('\n')).toContain('unknown');
+    expect(f.panel.render(80).join('\n')).toContain(
+      lifecycle === 'idle' ? 'No generation yet' : 'unknown',
+    );
     f.panel.dispose();
   });
   it('counts retained requests separately from HTTP attempts and reuse with unknown costs', () => {
@@ -797,19 +826,24 @@ describe('read-only activity routes in Routes', () => {
     return pages.join('\n');
   };
 
+  const showRouteDetails = (panel: RouterUIInspector) => {
+    panel.selectTab('routes');
+    panel.handleInput('\t');
+    panel.handleInput('\r');
+  };
+
   it('shows mode/count in Settings and promotes the override list into Routes', () => {
     const f = fixture();
     f.update({ activityCells: cells });
     f.panel.selectTab('settings');
     const normal = f.panel.render(80).join('\n');
-    expect(normal).toContain(
-      'Activity routing: on · 2 activity cells · session Routes editor',
-    );
+    expect(normal).toContain('Activities on · 2 configured');
     expect(normal).not.toContain('code/medium');
     expect(normal).not.toContain(' | Apply');
     openAdvanced(f.panel);
+    showRouteDetails(f.panel);
     const advanced = readPages(f.panel, 80);
-    expect(advanced).toContain('Configured activity overrides · not actual');
+    expect(advanced).toContain('Activity overrides');
     expect(advanced).toContain('code/medium: configured test/code');
     expect(advanced).toContain('requested effort high');
     expect(advanced).toContain('Text eligible: test/code · effort medium');
@@ -818,10 +852,6 @@ describe('read-only activity routes in Routes', () => {
     expect(advanced).toContain('No text-eligible attempt');
     expect(advanced).toContain(
       'Unlisted cells use generic tiers, if configured.',
-    );
-    expect(advanced).toContain('Generic text-capable routes · not actual');
-    expect(advanced).toContain(
-      'Generation rechecks input, context and authentication.',
     );
     expect(f.draft.dirty()).toEqual([]);
     expect(f.adapters.applyControls).not.toHaveBeenCalled();
@@ -847,6 +877,7 @@ describe('read-only activity routes in Routes', () => {
         wide,
       );
       openAdvanced(panel);
+      showRouteDetails(panel);
       const before = panel.render(width).join('\n');
       const text = readPages(panel, width);
       expect(text).toContain('code/medium: configured test/code');
@@ -875,6 +906,7 @@ describe('read-only activity routes in Routes', () => {
     const f = fixture();
     f.update({ activityCells: cells });
     openAdvanced(f.panel);
+    showRouteDetails(f.panel);
     readPages(f.panel, 80);
     f.update({
       activityRouting: 'off',
@@ -885,11 +917,10 @@ describe('read-only activity routes in Routes', () => {
         availability: 'disabled',
       })),
     });
-    f.panel.selectTab('routes'); // reset scroll/focus
+    showRouteDetails(f.panel); // reset to Routes and reveal details
     const text = readPages(f.panel, 80);
-    expect(text).toContain('Activity routing: off');
-    expect(text).toContain('Excluded (activity routing off)');
-    expect(text).toContain('configured test/code');
+    expect(text).toContain('Activities off');
+    expect(text).toContain('Overrides · code · docs');
     expect(text).not.toContain('Text eligible:');
     expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
     expect(f.adapters.applyControls).not.toHaveBeenCalled();
@@ -943,7 +974,7 @@ describe('five-tab routing observability', () => {
     expect(text).toContain('typesafe/jev-1.14.0');
     expect(text).toContain('Not approved');
     expect(text).toContain('No classifier calls observed');
-    expect(text).toContain('read-only');
+    expect(text).toContain('session-only');
     expect(f.adapters.applyControls).not.toHaveBeenCalled();
     f.panel.dispose();
   });
