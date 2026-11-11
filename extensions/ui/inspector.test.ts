@@ -177,11 +177,11 @@ describe('Signal Panel', () => {
     f.panel.dispose();
   });
 
-  it('uses plain empty-state labels before the first generation', () => {
+  it('uses observation-based empty-state labels', () => {
     const f = fixture();
     f.update({ actual: undefined, lifecycle: 'idle' });
     const text = f.panel.render(80).join('\n');
-    expect(text).toContain('No generation yet');
+    expect(text).toContain('No current generation observed');
     expect(text).toContain('No routing history yet');
     expect(text).not.toContain('No retained generation targets');
     f.panel.dispose();
@@ -427,9 +427,7 @@ describe('ui/inspector.ts', () => {
       lifecycle,
     );
     expect(f.panel.render(80).join('\n')).toContain(
-      lifecycle === 'idle'
-        ? 'No generation yet'
-        : 'No current generation observed',
+      'No current generation observed',
     );
     f.panel.dispose();
   });
@@ -986,6 +984,7 @@ describe('five-tab routing observability', () => {
       ],
       privacy: { advisorEnabled: true, approvedModels: [], auth: 'unknown' },
     });
+    f.draft.discard();
     f.panel.selectTab('classifier');
     const text = f.panel.render(80).join('\n');
     expect(text).toContain('typesafe/jev-1.14.0');
@@ -996,6 +995,31 @@ describe('five-tab routing observability', () => {
     f.panel.dispose();
   });
 
+  it('previews None without retaining the active classifier readiness', () => {
+    const f = fixture();
+    f.update({
+      controls: { ...controls, advisor: 'typesafe/jev-1.14.0' },
+      classifiers: [
+        { model: 'typesafe/jev-1.14.0', name: 'Jev', textInput: true },
+      ],
+      privacy: {
+        advisorEnabled: true,
+        approvedModels: ['typesafe/jev-1.14.0'],
+        auth: 'unknown',
+      },
+    });
+    f.draft.discard();
+    f.panel.selectTab('classifier');
+    expect(f.panel.render(80).join('\n')).toContain('Eligible to ask');
+    f.panel.handleInput('\t');
+    f.panel.handleInput('\x1b[D');
+    expect(f.draft.draft.advisor).toBeUndefined();
+    const text = f.panel.render(80).join('\n');
+    expect(text).toContain('Not configured');
+    expect(text).not.toContain('Eligible to ask');
+    expect(f.adapters.applyControls).not.toHaveBeenCalled();
+    f.panel.dispose();
+  });
   it('makes logging-off explicit and hides technical usage counters until Details', () => {
     const f = fixture();
     Object.assign(f.tui.terminal, { rows: 60 });

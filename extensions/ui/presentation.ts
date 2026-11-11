@@ -348,7 +348,7 @@ export const historyStatus = (snapshot: RouterUISnapshot): string =>
 
 export const classifierStatus = (
   snapshot: RouterUISnapshot,
-  selected = snapshot.controls.advisor,
+  selected: string | undefined,
 ): string => {
   if (!snapshot.privacy.advisorEnabled)
     return 'Disabled · set advisor.enabled in user configuration';
@@ -364,7 +364,7 @@ export const classifierStatus = (
 
 export const classifierLines = (
   snapshot: RouterUISnapshot,
-  selected = snapshot.controls.advisor,
+  selected: string | undefined,
 ): string[] => {
   const last = snapshot.lastAdvice ?? snapshot.advice;
   return [
