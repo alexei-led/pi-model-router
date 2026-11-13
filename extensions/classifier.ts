@@ -95,8 +95,7 @@ export const runClassifierDetailed = async (
     if (
       !config?.enabled ||
       !request.profile?.models.includes(config.model) ||
-      (request.askContinuity &&
-        (!request.activeGoal || !request.activityCandidates)) ||
+      (request.askContinuity && !request.activityCandidates) ||
       (request.activeGoal !== undefined &&
         (typeof request.activeGoal.text !== 'string' ||
           typeof request.activeGoal.truncated !== 'boolean' ||
@@ -254,7 +253,8 @@ export const runClassifierDetailed = async (
       const relation = request.askContinuity
         ? parseContinuity(classified, config.confidenceThreshold)
         : undefined;
-      if (request.askContinuity && !relation) return result('uncertain');
+      if (request.askContinuity && request.activeGoal && !relation)
+        return result('uncertain');
       const activity = request.activityCandidates
         ? parseActivity(classified, config.confidenceThreshold)
         : undefined;

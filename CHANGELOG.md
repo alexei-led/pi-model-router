@@ -8,7 +8,7 @@ Keep a task's durable goal distinct from its current work phase when activity ro
 
 - Ask the approved Pi classifier for goal and phase independently. A confident, bounded verification or execution phase can select ops; editing, reasoning and reporting retain the task goal.
 - Keep a bounded runtime-only goal anchor across user turns only when the classifier confirms continuity. New tasks replace it; ambiguous continuity falls back conservatively. Native owner, branch, message-prefix and request-epoch fences prevent stale reuse.
-- Show goal, phase and effective route activity separately; keep historical activity counts separate. Missing, invalid or stale phase retains the goal route. Classifiers that cannot answer continuity fall back to the eligible baseline for cross-turn requests.
+- Show goal, phase and effective route activity separately; keep historical activity counts separate. Missing, invalid or stale phase retains the goal route. Missing continuity never seeds an anchor; ambiguous anchored follow-ups use the eligible baseline.
 
 ### Upgrade
 

@@ -361,11 +361,15 @@ const runBackgroundReview = async (
   const request: ClassifierRequest = {
     context: input.context,
     notificationIndices: input.notificationIndices,
-    ...(activityCandidates &&
-    (input.goalScope?.current ?? input.goalScope?.previous)
+    ...(activityCandidates
       ? {
-          activeGoal: input.goalScope?.current ?? input.goalScope?.previous,
-          askContinuity: !!input.goalScope?.previous,
+          ...((input.goalScope?.current ?? input.goalScope?.previous)
+            ? {
+                activeGoal:
+                  input.goalScope?.current ?? input.goalScope?.previous,
+              }
+            : {}),
+          askContinuity: !input.goalScope?.current,
         }
       : {}),
     candidates,
@@ -532,11 +536,15 @@ const chooseAdvisorRoute = async (
   const request: ClassifierRequest = {
     context: input.context,
     notificationIndices: input.notificationIndices,
-    ...(activityCandidates &&
-    (input.goalScope?.current ?? input.goalScope?.previous)
+    ...(activityCandidates
       ? {
-          activeGoal: input.goalScope?.current ?? input.goalScope?.previous,
-          askContinuity: !!input.goalScope?.previous,
+          ...((input.goalScope?.current ?? input.goalScope?.previous)
+            ? {
+                activeGoal:
+                  input.goalScope?.current ?? input.goalScope?.previous,
+              }
+            : {}),
+          askContinuity: !input.goalScope?.current,
         }
       : {}),
     candidates,
@@ -646,11 +654,13 @@ const chooseAdvisorRoute = async (
       result.goalRelation === 'continuation'
         ? input.goalScope.previous
         : (input.goalScope.current ??
-          currentGoalExcerpt(
-            input.context,
-            Math.min(256, Math.floor((advisor.maxStateTokens ?? 0) / 4)),
-            input.notificationIndices,
-          ));
+          (result.goalRelation === 'new-task'
+            ? currentGoalExcerpt(
+                input.context,
+                Math.min(256, Math.floor((advisor.maxStateTokens ?? 0) / 4)),
+                input.notificationIndices,
+              )
+            : undefined));
     input.cache.finishGoal(input.goalScope, goal?.text ? goal : undefined);
   }
   if (validated)

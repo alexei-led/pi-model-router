@@ -906,3 +906,86 @@ it('rejects an oversized runtime goal anchor before calling Pi', async () => {
   expect(result.diagnostics.outcome).toBe('unavailable');
   expect(current.classify).not.toHaveBeenCalled();
 });
+
+it('asks about final deliverables rather than diagnostic steps or configuration tools', async () => {
+  const current = registry();
+  await runClassifierDetailed(
+    config,
+    request({
+      activityCandidates: [
+        {
+          activity: 'code',
+          candidate: createCandidate({
+            tier: 'high',
+            model: 'generation/code',
+            thinking: 'off',
+          }),
+        },
+      ],
+    }),
+    current,
+  );
+  const goal = vi.mocked(current.classify).mock.calls[0]?.[1].questions
+    .activity;
+  expect(goal?.type).toBe('choice');
+  if (goal?.type !== 'choice') throw new Error('Missing goal question');
+  expect(goal.criteria.code).toContain('required implemented fix');
+  expect(goal.criteria.code).toContain('configuration');
+  expect(goal.criteria.code).toContain('tests');
+  expect(goal.criteria.debug).toContain('without a required implemented fix');
+  expect(goal.criteria.ops).toContain(
+    'specified operations as the final deliverable',
+  );
+  expect(goal.criteria.ops).toContain('not authoring configuration');
+  expect(goal.criteria.code).not.toContain('unknown cause is debug');
+});
+
+it('can judge unanchored new-task evidence without inventing an active goal', async () => {
+  for (const relation of ['new-task', 'continuation', undefined]) {
+    const current = registry();
+    current.classify = vi.fn<ClassifierRegistry['classify']>(async () => ({
+      ...classifierResult(),
+      answers: {
+        ...classifierResult().answers,
+        activity: {
+          type: 'choice',
+          choice: 'code',
+          confidence: 1,
+          probabilities: { code: 1 },
+        },
+        ...(relation
+          ? {
+              continuity: {
+                type: 'choice' as const,
+                choice: relation,
+                confidence: 1,
+                probabilities: { [relation]: 1 },
+              },
+            }
+          : {}),
+      },
+    }));
+    const result = await runClassifierDetailed(
+      config,
+      request({
+        askContinuity: true,
+        activityCandidates: [
+          {
+            activity: 'code',
+            candidate: createCandidate({
+              tier: 'high',
+              model: 'generation/code',
+              thinking: 'off',
+            }),
+          },
+        ],
+      }),
+      current,
+    );
+    expect(result.goalRelation).toBe(relation);
+    expect(result.advice?.activity).toBe('code');
+    const payload = vi.mocked(current.classify).mock.calls[0]?.[1];
+    expect(payload?.state.activeGoal).toBeUndefined();
+    expect(payload?.questions.continuity?.type).toBe('choice');
+  }
+});

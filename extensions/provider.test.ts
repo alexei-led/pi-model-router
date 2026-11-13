@@ -1573,6 +1573,7 @@ describe('activity matrix provider routing', () => {
       activity: 'code',
       phase: undefined as string | undefined,
       relation: 'new-task' as string | undefined,
+      relationConfidence: 0.95,
       confidence: 0.95,
       invalidActivity: false,
       fail: false,
@@ -1593,7 +1594,7 @@ describe('activity matrix provider routing', () => {
                 continuity: {
                   type: 'choice' as const,
                   choice: answer.relation,
-                  confidence: 0.95,
+                  confidence: answer.relationConfidence,
                   probabilities: { [answer.relation]: 1 },
                 },
               }
@@ -1657,7 +1658,7 @@ describe('activity matrix provider routing', () => {
     expect(s.classify).toHaveBeenCalledOnce();
     expect(
       Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
-    ).toEqual(['route', 'activity', 'phase']);
+    ).toEqual(['continuity', 'route', 'activity', 'phase']);
     expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
       'code',
       'code-backup',
@@ -1782,6 +1783,43 @@ describe('activity matrix provider routing', () => {
     expect(s.classify.mock.calls.at(-1)?.[1].state.activeGoal).toBeUndefined();
     expect(s.state.lastDecision?.routeCell).toBe('docs');
   });
+
+  it.each([
+    ['continuation', 0.95],
+    ['uncertain', 0.95],
+    [undefined, 0.95],
+    ['new-task', 0.1],
+  ] as const)(
+    'does not seed an unanchored approval for relation %s at %s',
+    async (relation, confidence) => {
+      const s = activitySetup();
+      let ids = ['root', 'one'];
+      s.state.lastExtensionContext = {
+        sessionManager: {
+          getBranch: () => ids.map((id) => ({ id, type: 'message' })),
+          getSessionId: () => 'native-session',
+        },
+        ui: { setHiddenThinkingLabel: vi.fn() },
+      } as unknown as ExtensionContext;
+      s.answer.relation = relation;
+      s.answer.relationConfidence = confidence;
+      const messages: Context['messages'] = [
+        { role: 'user', content: 'Yes, proceed', timestamp: 1 },
+      ];
+      await consume(s.stream({ messages: [...messages] }));
+      expect(s.state.lastDecision?.activity).toBe('code');
+      expect(s.classify.mock.calls[0]?.[1].state.activeGoal).toBeUndefined();
+      expect(s.classify.mock.calls[0]?.[1].questions.continuity?.type).toBe(
+        'choice',
+      );
+      ids = [...ids, 'two'];
+      messages.push({ role: 'user', content: 'Continue', timestamp: 2 });
+      await consume(s.stream({ messages: [...messages] }));
+      expect(
+        s.classify.mock.calls.at(-1)?.[1].state.activeGoal,
+      ).toBeUndefined();
+    },
+  );
 
   it('does not turn a missing referenced brief into an ops goal', async () => {
     const s = activitySetup();
@@ -2567,7 +2605,7 @@ describe('activity matrix provider routing', () => {
     await consume(s.stream());
     expect(
       Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
-    ).toEqual(['activity', 'phase']);
+    ).toEqual(['continuity', 'activity', 'phase']);
     expect(s.state.lastDecision).toMatchObject({
       activity: 'code',
       targetModelId: 'code',

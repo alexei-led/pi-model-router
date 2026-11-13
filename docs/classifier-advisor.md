@@ -321,10 +321,17 @@ asks the existing typed `route` choice among eligible tier representatives and
 `uncertain`. Candidates show the prevalidated default-owned preferences or custom transforms after the [routing mode](user-guide.md#choose-a-routing-mode) is applied. [Built-in presets](activity-routing.md) supply specialization cells for recognized profiles without enabling or approving advice. With activity routing on and meaningful eligible specialization
 plans, it also asks independent typed `activity` and `phase` choices. The existing
 `activity` wire field now describes the durable task goal, not the immediate
-phase. When a prior goal anchor is available on a new user request, the same
-operation also asks whether the request continues that goal or starts a new task.
+phase. When there is no confirmed current-turn anchor, the same operation also
+asks whether the request independently establishes a new task or continues prior
+work. Only positive new-task evidence can seed an anchor; no anchor is not evidence
+of a new task.
 These answers are not multiplied into a joint distribution. Pi may implement the
 operation using several bounded HTTP requests.
+
+The goal is the requested final deliverable: an implementation, required fix,
+configuration or test artifact is code, including when diagnosis is needed first.
+Debug means a cause/diagnosis report without a required implemented fix. Ops means
+specified operations as the final deliverable, not CLI use or authoring config.
 
 Tier selection keeps the existing rule: accept the top candidate at or above
 `confidenceThreshold`; otherwise choose the lowest tier whose cumulative
@@ -364,7 +371,8 @@ A human request or steering message starts a new routing turn. Pi also converts
 extension messages to user-role messages, but a progress notification must not
 replace the task goal or break a valid tool continuation.
 
-After accepted goal advice, the router keeps a bounded, runtime-only goal anchor.
+After accepted goal advice and positive semantic new-task evidence, the router
+keeps a bounded, runtime-only goal anchor. A short approval is never its own anchor.
 On the next user turn it uses that anchor only when the classifier positively
 identifies a continuation. A new-task answer replaces it with the current request;
 a missing, invalid or uncertain relation discards it and uses the local baseline.
@@ -373,9 +381,11 @@ branch, preceding user-message identity, configuration and request epoch fence t
 anchor; reviews and notifications cannot update it. Reload, native tree navigation or provider disposal
 clears it. Text is not persisted in router state.
 
-A classifier that does not return a valid phase keeps the goal route. If it cannot
-answer the continuity question, the router conservatively uses the baseline on a
-cross-turn request rather than guessing whether the old goal applies.
+A classifier that does not return a valid phase keeps the goal route. Missing or
+uncertain continuity without a prior anchor keeps otherwise valid advice but does
+not seed an anchor. With a prior anchor, ambiguous continuity uses the baseline
+rather than guessing whether the old goal applies. The current request is never
+sent as its own activeGoal candidate.
 
 The router uses native branch metadata, never message wording:
 
