@@ -131,6 +131,13 @@ const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
       decision.advisor === 'classifier' ||
       decision.advisor === 'classifier-fallback'
         ? {
+            ...(metrics?.phaseOutcome
+              ? {
+                  goal: metrics.activity,
+                  phase: metrics.phase,
+                  phaseOutcome: metrics.phaseOutcome,
+                }
+              : {}),
             profile: decision.profile,
             source: decision.adviceSource,
             advisor: metrics?.model ?? 'Classifier',

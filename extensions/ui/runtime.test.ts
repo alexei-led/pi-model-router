@@ -985,6 +985,9 @@ describe('last classifier operation independent of history collection', () => {
         startedAt: 200,
         model: 'fixture/advisor',
         requestId: 'new',
+        activity: 'code' as const,
+        phase: 'verify' as const,
+        phaseOutcome: 'selected' as const,
       },
     };
     runtime.recordAdvice(decision);
@@ -997,6 +1000,9 @@ describe('last classifier operation independent of history collection', () => {
         profile: 'auto',
         outcome: 'selected',
         source: 'review',
+        goal: 'code',
+        phase: 'verify',
+        phaseOutcome: 'selected',
       },
       privacy: { advisorEnabled: false, approvedModels: [] },
     });

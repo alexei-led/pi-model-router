@@ -9,12 +9,13 @@ import { createCandidate, selectedAdviceConfidence } from './choice';
 import { runClassifierDetailed } from './classifier';
 import { advisorForProfile } from './config';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
-import { hasImageAttachment } from './context';
+import { currentGoalExcerpt, hasImageAttachment } from './context';
 import { parseCanonicalModelRef } from './domain';
 import { type EscalationState, updateEscalation } from './escalation';
 import { effectivePolicy } from './modes';
 import {
   createClassifierFlightKey,
+  type GoalScope,
   type ProviderTurnCache,
   type ReviewStamp,
   waitForAbortable,
@@ -49,6 +50,8 @@ type RoutingRegistry = Pick<
 
 export interface RouterRequestIdentity {
   turn?: string;
+  previousTurn?: string;
+  owner?: string;
   branch: string[];
 }
 
@@ -87,6 +90,7 @@ interface RequestRouteInput {
   lastDecision: RoutingDecision | undefined;
   signal?: AbortSignal | undefined;
   cache: ProviderTurnCache;
+  goalScope?: GoalScope | undefined;
   onReview?: ((decision: RoutingDecision) => void) | undefined;
 }
 
@@ -105,23 +109,32 @@ export const createRouterRequestIdentity = (
   context: Context,
   sessionId: string | undefined,
   branch: readonly string[],
+  owner?: string,
 ): RouterRequestIdentity => {
   const lastUserIndex = context.messages.findLastIndex(
     (entry) => entry.role === 'user',
   );
-  const user = context.messages[lastUserIndex];
-  const turn =
-    user?.role === 'user' && user.timestamp > 0
+  const hashTurn = (index: number): string | undefined => {
+    const user = context.messages[index];
+    return user?.role === 'user' && user.timestamp > 0
       ? createHash('sha256')
           .update(
-            JSON.stringify([
-              sessionId,
-              context.messages.slice(0, lastUserIndex + 1),
-            ]),
+            JSON.stringify([sessionId, context.messages.slice(0, index + 1)]),
           )
           .digest('hex')
       : undefined;
-  return { ...(turn ? { turn } : {}), branch: [...branch] };
+  };
+  const turn = hashTurn(lastUserIndex);
+  const previousIndex = context.messages
+    .slice(0, lastUserIndex)
+    .findLastIndex((entry) => entry.role === 'user');
+  const previousTurn = hashTurn(previousIndex);
+  return {
+    ...(turn ? { turn } : {}),
+    ...(previousTurn ? { previousTurn } : {}),
+    ...(owner ? { owner } : {}),
+    branch: [...branch],
+  };
 };
 
 export const estimateRequestTokens = (context: Context): number => {
@@ -348,6 +361,13 @@ const runBackgroundReview = async (
   const request: ClassifierRequest = {
     context: input.context,
     notificationIndices: input.notificationIndices,
+    ...(activityCandidates &&
+    (input.goalScope?.current ?? input.goalScope?.previous)
+      ? {
+          activeGoal: input.goalScope?.current ?? input.goalScope?.previous,
+          askContinuity: !!input.goalScope?.previous,
+        }
+      : {}),
     candidates,
     ...(activityCandidates
       ? { activityCandidates, askRoute: candidates.length > 1 }
@@ -391,10 +411,23 @@ const reviewStamp = (
   policy: string,
   requestCount: number,
 ): ReviewStamp => ({
+  contextLength: input.context.messages.length,
+  contextDigest: createHash('sha256')
+    .update(JSON.stringify(input.context.messages))
+    .digest('hex'),
+  prefixDigest: (length) =>
+    createHash('sha256')
+      .update(JSON.stringify(input.context.messages.slice(0, length)))
+      .digest('hex'),
   identity: JSON.stringify([
     policy,
     selected.plan.id,
     matrix.plans.map((plan) => plan.id),
+    input.goalScope?.current
+      ? createHash('sha256')
+          .update(JSON.stringify(input.goalScope.current))
+          .digest('hex')
+      : undefined,
   ]),
   branch: input.identity.branch,
   requestCount,
@@ -499,6 +532,13 @@ const chooseAdvisorRoute = async (
   const request: ClassifierRequest = {
     context: input.context,
     notificationIndices: input.notificationIndices,
+    ...(activityCandidates &&
+    (input.goalScope?.current ?? input.goalScope?.previous)
+      ? {
+          activeGoal: input.goalScope?.current ?? input.goalScope?.previous,
+          askContinuity: !!input.goalScope?.previous,
+        }
+      : {}),
     candidates,
     ...(activityCandidates
       ? { activityCandidates, askRoute: candidates.length > 1 }
@@ -526,6 +566,12 @@ const chooseAdvisorRoute = async (
           policy,
           matrix.plans.map((plan) => plan.id),
           Boolean(activityCandidates),
+          request.activeGoal
+            ? createHash('sha256')
+                .update(JSON.stringify(request.activeGoal))
+                .digest('hex')
+            : undefined,
+          request.askContinuity,
         ]),
       ),
       advisor,
@@ -588,6 +634,24 @@ const chooseAdvisorRoute = async (
           : 'advisor-unavailable',
     };
     return selected;
+  }
+  if (
+    validated &&
+    !reviewResult &&
+    input.goalScope &&
+    result.diagnostics.activityOutcome === 'selected' &&
+    !input.signal?.aborted
+  ) {
+    const goal =
+      result.goalRelation === 'continuation'
+        ? input.goalScope.previous
+        : (input.goalScope.current ??
+          currentGoalExcerpt(
+            input.context,
+            Math.min(256, Math.floor((advisor.maxStateTokens ?? 0) / 4)),
+            input.notificationIndices,
+          ));
+    input.cache.finishGoal(input.goalScope, goal?.text ? goal : undefined);
   }
   if (validated)
     selected = {
@@ -868,6 +932,17 @@ export const prepareRouterRequest = async (
   input: RequestRouteInput,
 ): Promise<PreparedRouterRequest> => {
   input.signal?.throwIfAborted();
+  input = {
+    ...input,
+    goalScope: input.cache.beginGoal(
+      input.identity.turn,
+      input.identity.previousTurn,
+      input.identity.owner,
+      input.identity.branch,
+      input.profileName,
+      input.config,
+    ),
+  };
   const imageAttached = hasImageAttachment(input.context);
   const contextTokens = estimateRequestTokens(input.context);
   const budget =

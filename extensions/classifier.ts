@@ -3,6 +3,8 @@ import {
   buildChoicePayload,
   parseActivity,
   parseAdvice,
+  parseContinuity,
+  parsePhase,
   selectRoute,
   validCandidates,
 } from './choice';
@@ -11,6 +13,7 @@ import { MAX_CLASSIFIER_ESTIMATED_REQUEST_TOKENS } from './constants';
 import {
   buildClassifierContext,
   estimateClassifierRequestTokens,
+  estimateClassifierTextTokens,
 } from './context';
 import { isRouterActivity, parseCanonicalModelRef } from './domain';
 import type {
@@ -70,8 +73,10 @@ export const runClassifierDetailed = async (
   const result = (
     outcome: ClassifierOutcome,
     advice?: ClassifierResult['advice'],
+    goalRelation?: ClassifierResult['goalRelation'],
   ): ClassifierResult => ({
     ...(advice ? { advice } : {}),
+    ...(goalRelation ? { goalRelation } : {}),
     diagnostics: { ...metrics, outcome, latencyMs: Math.max(0, now() - start) },
   });
   const controller = new AbortController();
@@ -90,6 +95,13 @@ export const runClassifierDetailed = async (
     if (
       !config?.enabled ||
       !request.profile?.models.includes(config.model) ||
+      (request.askContinuity &&
+        (!request.activeGoal || !request.activityCandidates)) ||
+      (request.activeGoal !== undefined &&
+        (typeof request.activeGoal.text !== 'string' ||
+          typeof request.activeGoal.truncated !== 'boolean' ||
+          estimateClassifierTextTokens(request.activeGoal.text) >
+            Math.min(256, Math.floor(config.maxStateTokens / 4)))) ||
       !request.context ||
       !Array.isArray(request.context.messages) ||
       !validCandidates(request.candidates) ||
@@ -122,7 +134,10 @@ export const runClassifierDetailed = async (
       return result('unavailable');
     const selectedContext = buildClassifierContext(
       request.context,
-      config.maxStateTokens,
+      config.maxStateTokens -
+        (request.activeGoal
+          ? estimateClassifierTextTokens(request.activeGoal.text)
+          : 0),
       config.context,
       request.notificationIndices,
     );
@@ -131,6 +146,8 @@ export const runClassifierDetailed = async (
       request.candidates,
       request.activityCandidates,
       request.askRoute,
+      request.activeGoal,
+      request.askContinuity,
     );
     metrics = {
       ...metrics,
@@ -234,6 +251,10 @@ export const runClassifierDetailed = async (
               ? failure
               : 'unavailable',
         );
+      const relation = request.askContinuity
+        ? parseContinuity(classified, config.confidenceThreshold)
+        : undefined;
+      if (request.askContinuity && !relation) return result('uncertain');
       const activity = request.activityCandidates
         ? parseActivity(classified, config.confidenceThreshold)
         : undefined;
@@ -242,6 +263,24 @@ export const runClassifierDetailed = async (
         metrics.activityConfidence = activity.confidence;
         metrics.activityOutcome = activity.outcome;
         metrics.activityResponseIssue = activity.issue;
+      }
+      const phase = request.activityCandidates
+        ? parsePhase(classified, config.confidenceThreshold)
+        : undefined;
+      const notifications = new Set(request.notificationIndices);
+      const latestUser = request.context.messages.findLastIndex(
+        (message, index) =>
+          message.role === 'user' && !notifications.has(index),
+      );
+      // Unassociated progress cannot justify a cheaper phase route.
+      const hasLaterNotification = [...notifications].some(
+        (index) => index > latestUser,
+      );
+      if (phase) {
+        metrics.phase = phase.choice;
+        metrics.phaseConfidence = phase.confidence;
+        metrics.phaseOutcome = phase.outcome;
+        metrics.phaseResponseIssue = phase.issue;
       }
       const onlyCandidate = request.candidates[0];
       const parsed =
@@ -274,12 +313,24 @@ export const runClassifierDetailed = async (
         metrics.selectionBasis = selected.basis;
         metrics.routeProbability = selected.routeProbability;
       }
-      return result('selected', {
-        ...(activity?.activity ? { activity: activity.activity } : {}),
-        candidateId: selected.candidate.id,
-        confidence: parsed.confidence,
-        latencyMs: Math.max(0, now() - start),
-      });
+      return result(
+        'selected',
+        {
+          ...(activity?.activity
+            ? {
+                activity:
+                  !hasLaterNotification &&
+                  (phase?.phase === 'verify' || phase?.phase === 'execute')
+                    ? 'ops'
+                    : activity.activity,
+              }
+            : {}),
+          candidateId: selected.candidate.id,
+          confidence: parsed.confidence,
+          latencyMs: Math.max(0, now() - start),
+        },
+        relation,
+      );
     };
     return await Promise.race([work(), stopped]);
   } catch {

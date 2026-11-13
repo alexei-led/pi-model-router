@@ -838,6 +838,36 @@ describe('index.ts (orchestrator)', () => {
     );
   });
 
+  it('invalidates the old provider runtime on owned native tree navigation only', async () => {
+    routerExtension(mockPi);
+    const ctx = buildMockCtx();
+    Object.assign(ctx.sessionManager, { getSessionId: () => 'owner' });
+    const generate = vi.fn(() => done());
+    Object.assign(ctx.modelRegistry, { streamSimple: generate });
+    for (const handler of handlersFor('session_start'))
+      await handler({ reason: 'new' }, ctx);
+    const oldProvider = mockPi.registerProvider.mock.calls.at(-1)?.[1];
+    const registrations = mockPi.registerProvider.mock.calls.length;
+    const foreign = buildMockCtx();
+    Object.assign(foreign.sessionManager, { getSessionId: () => 'foreign' });
+    for (const handler of handlersFor('session_tree'))
+      await handler({ newLeafId: 'other', oldLeafId: 'old' }, foreign);
+    expect(mockPi.registerProvider).toHaveBeenCalledTimes(registrations);
+    for (const handler of handlersFor('session_tree'))
+      await handler({ newLeafId: 'new', oldLeafId: 'old' }, ctx);
+    expect(mockPi.registerProvider).toHaveBeenCalledTimes(registrations + 1);
+    const stream = oldProvider?.streamSimple?.(
+      model('balanced', { provider: 'router' }),
+      normalizeContext({
+        messages: [{ role: 'user', content: 'old task', timestamp: 1 }],
+      }),
+    );
+    if (!stream) throw new Error('Missing router stream');
+    for await (const event of stream) expect(event).toBeDefined();
+    expect((await stream.result()).stopReason).toBe('aborted');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it('initialize and register commands, provider, and event hooks', () => {
     routerExtension(mockPi);
 

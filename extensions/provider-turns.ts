@@ -1,9 +1,11 @@
 import { MAX_TURN_CACHE_ENTRIES } from './constants';
+import { isRouterActivity } from './domain';
 import type { EscalationState } from './escalation';
 import type {
   AdvisorConfig,
   ClassifierRequest,
   ClassifierResult,
+  ClassifierTextExcerpt,
   RouteCandidate,
   RoutePlan,
   RouterConfig,
@@ -28,6 +30,9 @@ interface AdvisedTurnRecord {
 }
 
 export interface ReviewStamp {
+  contextLength: number;
+  contextDigest: string;
+  prefixDigest: (length: number) => string;
   identity: string;
   branch: readonly string[];
   requestCount: number;
@@ -35,6 +40,8 @@ export interface ReviewStamp {
 }
 
 interface BackgroundReview {
+  contextLength: number;
+  contextDigest: string;
   identity: string;
   branch: readonly string[];
   startedAtRequest: number;
@@ -56,7 +63,30 @@ export interface ClassifierFlightLease {
   release: () => void;
 }
 
+export interface GoalScope {
+  readonly epoch: number;
+  readonly turn: string | undefined;
+  readonly owner: string | undefined;
+  readonly branch: readonly string[];
+  readonly profile: string;
+  readonly config: RouterConfig;
+  readonly current?: ClassifierTextExcerpt | undefined;
+  readonly previous?: ClassifierTextExcerpt | undefined;
+}
+
 export interface ProviderTurnCache {
+  beginGoal: (
+    turn: string | undefined,
+    previousTurn: string | undefined,
+    owner: string | undefined,
+    branch: readonly string[],
+    profile: string,
+    config: RouterConfig,
+  ) => GoalScope;
+  finishGoal: (
+    scope: GoalScope,
+    goal: ClassifierTextExcerpt | undefined,
+  ) => void;
   continuationFor: (turn: string) => ContinuationRecord | undefined;
   deleteContinuation: (turn: string) => void;
   rememberContinuation: (record: ContinuationRecord) => void;
@@ -189,6 +219,17 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
   const turnRequests = new Map<string, number>();
   const reviews = new Map<string, BackgroundReview>();
   let escalation: EscalationState = {};
+  let goalEpoch = 0;
+  let goal:
+    | {
+        turn: string;
+        owner: string;
+        branch: readonly string[];
+        profile: string;
+        config: RouterConfig;
+        text: ClassifierTextExcerpt;
+      }
+    | undefined;
   const rememberBounded = <T>(map: Map<string, T>, key: string, value: T) => {
     map.delete(key);
     map.set(key, value);
@@ -200,6 +241,54 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
   };
 
   return {
+    beginGoal: (turn, previousTurn, owner, branch, profile, config) => {
+      goalEpoch += 1;
+      const compatible =
+        !!turn &&
+        !!owner &&
+        goal?.owner === owner &&
+        (goal?.turn === turn || goal?.turn === previousTurn) &&
+        branch.length > 0 &&
+        branch.every((id) => !!id) &&
+        goal?.config === config &&
+        goal.profile === profile &&
+        goal.branch.length > 0 &&
+        goal.branch.every((id, index) => branch[index] === id);
+      const current = compatible && goal?.turn === turn ? goal.text : undefined;
+      const previous =
+        compatible && goal?.turn !== turn ? goal?.text : undefined;
+      if (!current) goal = undefined;
+      return {
+        epoch: goalEpoch,
+        turn,
+        owner,
+        branch: [...branch],
+        profile,
+        config,
+        current,
+        previous,
+      };
+    },
+    finishGoal: (scope, text) => {
+      if (
+        scope.epoch !== goalEpoch ||
+        !scope.turn ||
+        !scope.owner ||
+        !scope.branch.length ||
+        !scope.branch.every((id) => !!id)
+      )
+        return;
+      goal = text
+        ? {
+            turn: scope.turn,
+            owner: scope.owner,
+            branch: [...scope.branch],
+            profile: scope.profile,
+            config: scope.config,
+            text,
+          }
+        : undefined;
+    },
     continuationFor: (turn) => continuations.get(turn),
     deleteContinuation: (turn) => continuations.delete(turn),
     rememberContinuation: (record) =>
@@ -244,6 +333,8 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
       if (!review) return undefined;
       if (
         review.identity !== stamp.identity ||
+        stamp.contextLength < review.contextLength ||
+        stamp.prefixDigest(review.contextLength) !== review.contextDigest ||
         stamp.requestCount - review.startedAtRequest !== 1 ||
         review.signal.aborted ||
         stamp.signal?.aborted ||
@@ -260,6 +351,34 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
         return undefined;
       }
       reviews.delete(turn);
+      // New evidence can resume implementation; an earlier cheap phase cannot authorize it.
+      if (
+        stamp.contextDigest !== review.contextDigest &&
+        review.result.diagnostics.phaseOutcome === 'selected'
+      ) {
+        const { advice, diagnostics } = review.result;
+        return {
+          ...(advice
+            ? {
+                advice: {
+                  ...advice,
+                  activity:
+                    diagnostics.activityOutcome === 'selected' &&
+                    isRouterActivity(diagnostics.activity)
+                      ? diagnostics.activity
+                      : undefined,
+                },
+              }
+            : {}),
+          diagnostics: {
+            ...diagnostics,
+            phase: undefined,
+            phaseConfidence: undefined,
+            phaseOutcome: 'uncertain',
+            phaseResponseIssue: undefined,
+          },
+        };
+      }
       return review.result;
     },
     clearReviewsExcept: (turn) => {
@@ -283,6 +402,8 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
         ? AbortSignal.any([controller.signal, stamp.signal])
         : controller.signal;
       const review: BackgroundReview = {
+        contextLength: stamp.contextLength,
+        contextDigest: stamp.contextDigest,
         identity: stamp.identity,
         branch: [...stamp.branch],
         startedAtRequest: stamp.requestCount,
@@ -317,6 +438,8 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
       advisedTurns.clear();
       turnRequests.clear();
       escalation = {};
+      goal = undefined;
+      goalEpoch += 1;
     },
     escalation: () => escalation,
     setEscalation: (state) => {

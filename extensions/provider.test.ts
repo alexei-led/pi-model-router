@@ -1535,7 +1535,12 @@ describe('Pi classifier provider integration', () => {
 describe('activity matrix provider routing', () => {
   const activitySetup = () => {
     const s = setup();
-    s.models.push(model('code'), model('code-backup'), model('docs'));
+    s.models.push(
+      model('code'),
+      model('code-backup'),
+      model('docs'),
+      model('ops'),
+    );
     s.state.pinnedTierByProfile = {};
     s.state.currentConfig = normalizeConfig({
       advisor: { enabled: true, model: 'typesafe/jev-latest' },
@@ -1556,6 +1561,9 @@ describe('activity matrix provider routing', () => {
             docs: {
               medium: { model: 'test/docs', thinking: 'low', fallbacks: [] },
             },
+            ops: {
+              medium: { model: 'test/ops', thinking: 'low', fallbacks: [] },
+            },
           },
         },
       },
@@ -1563,6 +1571,8 @@ describe('activity matrix provider routing', () => {
     const answer = {
       tier: 'medium',
       activity: 'code',
+      phase: undefined as string | undefined,
+      relation: 'new-task' as string | undefined,
       confidence: 0.95,
       invalidActivity: false,
       fail: false,
@@ -1578,6 +1588,26 @@ describe('activity matrix provider routing', () => {
               ) ?? 'uncertain')
             : undefined;
         const answers = {
+          ...(context.questions.continuity && answer.relation
+            ? {
+                continuity: {
+                  type: 'choice' as const,
+                  choice: answer.relation,
+                  confidence: 0.95,
+                  probabilities: { [answer.relation]: 1 },
+                },
+              }
+            : {}),
+          ...(answer.phase
+            ? {
+                phase: {
+                  type: 'choice' as const,
+                  choice: answer.phase,
+                  confidence: 0.9,
+                  probabilities: { [answer.phase]: 1 },
+                },
+              }
+            : {}),
           ...(routeId
             ? {
                 route: {
@@ -1627,7 +1657,7 @@ describe('activity matrix provider routing', () => {
     expect(s.classify).toHaveBeenCalledOnce();
     expect(
       Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
-    ).toEqual(['route', 'activity']);
+    ).toEqual(['route', 'activity', 'phase']);
     expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
       'code',
       'code-backup',
@@ -1643,6 +1673,137 @@ describe('activity matrix provider routing', () => {
     expect(s.classify).toHaveBeenCalledOnce();
     expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('code-backup');
     expect(s.state.lastDecision?.reuse).toBe('same-turn');
+  });
+
+  it.each([
+    ['verify', 'ops'],
+    ['execute', 'ops'],
+    ['produce', 'code'],
+    ['report', 'code'],
+  ])(
+    'routes %s with a durable code goal to the %s cell',
+    async (phase, expected) => {
+      const s = activitySetup();
+      s.answer.phase = phase;
+      await consume(s.stream());
+      expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe(expected);
+      expect(s.state.lastDecision).toMatchObject({
+        activity: expected,
+        routeCell: expected,
+        classification: { activity: 'code', phase },
+      });
+    },
+  );
+
+  it('retains a confirmed goal across verify, commit and report and replaces it for a new task', async () => {
+    const s = activitySetup();
+    let ids = ['root', 'one'];
+    s.state.lastExtensionContext = {
+      sessionManager: {
+        getBranch: () => ids.map((id) => ({ id, type: 'message' })),
+        getSessionId: () => 'native-session',
+      },
+      ui: { setHiddenThinkingLabel: vi.fn() },
+    } as unknown as ExtensionContext;
+    const first = {
+      role: 'user' as const,
+      content: 'Implement the feature',
+      timestamp: 1,
+    };
+    const messages: Context['messages'] = [first];
+    await consume(s.stream({ messages: [...messages] }));
+    const steps = [
+      { text: 'Run the specified tests', phase: 'verify', route: 'ops' },
+      { text: 'Commit the verified changes', phase: 'execute', route: 'ops' },
+      { text: 'Report the result', phase: 'report', route: 'code' },
+    ];
+    s.answer.relation = 'continuation';
+    for (const [index, step] of steps.entries()) {
+      ids = [...ids, String(index + 2)];
+      messages.push({ role: 'user', content: step.text, timestamp: index + 2 });
+      s.answer.phase = step.phase;
+      await consume(s.stream({ messages: [...messages] }));
+      expect(s.state.lastDecision?.routeCell).toBe(step.route);
+      const payload = s.classify.mock.calls.at(-1)?.[1];
+      expect(payload?.state.activeGoal).toMatchObject({
+        text: 'Implement the feature',
+      });
+      expect(payload?.questions.continuity?.type).toBe('choice');
+    }
+    ids = [...ids, 'new'];
+    messages.push({
+      role: 'user',
+      content: 'Start a new task: write a manual',
+      timestamp: 8,
+    });
+    s.answer.relation = 'new-task';
+    s.answer.activity = 'docs';
+    s.answer.phase = 'produce';
+    await consume(s.stream({ messages: [...messages] }));
+    expect(s.state.lastDecision?.routeCell).toBe('docs');
+    ids = [...ids, 'follow'];
+    messages.push({ role: 'user', content: 'Continue', timestamp: 9 });
+    s.answer.relation = 'continuation';
+    await consume(s.stream({ messages: [...messages] }));
+    expect(s.classify.mock.calls.at(-1)?.[1].state.activeGoal).toMatchObject({
+      text: 'Start a new task: write a manual',
+    });
+  });
+
+  it('drops an ambiguous cross-turn goal and never reuses it on a later request', async () => {
+    const s = activitySetup();
+    let ids = ['root', 'one'];
+    s.state.lastExtensionContext = {
+      sessionManager: {
+        getBranch: () => ids.map((id) => ({ id, type: 'message' })),
+        getSessionId: () => 'native-session',
+      },
+      ui: { setHiddenThinkingLabel: vi.fn() },
+    } as unknown as ExtensionContext;
+    const messages: Context['messages'] = [
+      { role: 'user', content: 'Implement a feature', timestamp: 1 },
+    ];
+    await consume(s.stream({ messages: [...messages] }));
+    ids = [...ids, 'two'];
+    messages.push({ role: 'user', content: 'Do it', timestamp: 2 });
+    s.answer.relation = undefined;
+    s.answer.phase = 'verify';
+    await consume(s.stream({ messages: [...messages] }));
+    expect(s.state.lastDecision?.advisor).toBe('classifier-fallback');
+    ids = [...ids, 'three'];
+    messages.push({
+      role: 'user',
+      content: 'Start writing a manual',
+      timestamp: 3,
+    });
+    s.answer.activity = 'docs';
+    s.answer.phase = 'produce';
+    await consume(s.stream({ messages: [...messages] }));
+    expect(s.classify.mock.calls.at(-1)?.[1].state.activeGoal).toBeUndefined();
+    expect(s.state.lastDecision?.routeCell).toBe('docs');
+  });
+
+  it('does not turn a missing referenced brief into an ops goal', async () => {
+    const s = activitySetup();
+    s.answer.activity = 'uncertain';
+    s.answer.phase = 'verify';
+    await consume(
+      s.stream({
+        messages: [
+          {
+            role: 'user',
+            content: 'Implement the task in the unavailable brief',
+            timestamp: 1,
+          },
+        ],
+      }),
+    );
+    expect(s.state.lastDecision).toMatchObject({
+      routeCell: undefined,
+      targetModelId: 'primary',
+      classification: { activity: 'uncertain', phase: 'verify' },
+    });
+    expect(s.state.lastDecision?.activity).toBeUndefined();
   });
 
   it('reuses the actual cell on tool continuations and reconsiders each user-role steering message', async () => {
@@ -1712,6 +1873,58 @@ describe('activity matrix provider routing', () => {
       routeCell: 'docs',
       targetModelId: 'docs',
     });
+  });
+
+  it('does not use a review verification phase after new implementation text arrives', async () => {
+    const s = activitySetup();
+    required(s.state.currentConfig.advisor).reviewEveryRequests = 1;
+    s.delegate.mockImplementation((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            { type: 'text', text: 'More implementation edits are needed.' },
+            { type: 'toolCall', name: 'read', id: 'step', arguments: {} },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      { role: 'user', content: 'Implement the feature', timestamp: 1 },
+    ];
+    const append = (
+      assistant: Awaited<ReturnType<typeof consume>>['result'],
+    ) => {
+      messages.push(assistant, {
+        role: 'toolResult',
+        toolCallId: 'step',
+        toolName: 'read',
+        content: [{ type: 'text', text: 'New implementation evidence' }],
+        isError: false,
+        timestamp: messages.length + 1,
+      });
+    };
+    append((await consume(s.stream({ messages: [...messages] }))).result);
+    s.answer.phase = 'verify';
+    append((await consume(s.stream({ messages: [...messages] }))).result);
+    await vi.waitFor(() =>
+      expect(
+        s.actions.recordDebugDecision.mock.calls.some(
+          ([decision]) =>
+            decision.reviewOnly && decision.classification?.phase === 'verify',
+        ),
+      ).toBe(true),
+    );
+    await consume(s.stream({ messages: [...messages] }));
+    expect(s.state.lastDecision).toMatchObject({
+      routeCell: 'code',
+      activity: 'code',
+      classification: { activity: 'code', phaseOutcome: 'uncertain' },
+    });
+    expect(s.state.lastDecision?.classification?.phase).toBeUndefined();
   });
 
   it('reviews current-loop context in the background and applies fresh activity advice on the next request', async () => {
@@ -2354,7 +2567,7 @@ describe('activity matrix provider routing', () => {
     await consume(s.stream());
     expect(
       Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
-    ).toEqual(['activity']);
+    ).toEqual(['activity', 'phase']);
     expect(s.state.lastDecision).toMatchObject({
       activity: 'code',
       targetModelId: 'code',

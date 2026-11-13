@@ -375,6 +375,11 @@ export const classifierLines = (
       ? [
           `Last observed advice: ${last.outcome}${last.latencyMs === undefined ? '' : ` · ${latency(last.latencyMs)}`}`,
           `Operation model: ${last.advisor} · ${last.source ?? 'source unreported'}${last.profile ? ` · profile ${last.profile}` : ''}`,
+          ...(last.phaseOutcome
+            ? [
+                `Goal: ${last.goal ?? 'unknown'} · phase: ${last.phase ?? 'unknown'} (${last.phaseOutcome})`,
+              ]
+            : []),
         ]
       : ['No classifier calls observed.']),
     'Model selection is session-only; approval and credentials stay in user config.',

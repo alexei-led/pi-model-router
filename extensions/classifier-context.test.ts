@@ -51,11 +51,17 @@ describe('buildClassifierContext', () => {
     );
     expect(result.state.recentDialogue).toContainEqual({
       role: 'user',
+      scope: 'notification',
       text: 'worker finished checking',
       truncated: false,
     });
     expect(result.state.recentToolEvidence).toEqual([
-      { text: 'checks passed', isError: false, truncated: false },
+      {
+        text: 'checks passed',
+        isError: false,
+        truncated: false,
+        scope: 'current',
+      },
     ]);
   });
 
@@ -87,7 +93,12 @@ describe('buildClassifierContext', () => {
       12000,
     );
     expect(failed.state.recentToolEvidence).toEqual([
-      { text: 'nonzero exit', isError: true, truncated: false },
+      {
+        text: 'nonzero exit',
+        isError: true,
+        truncated: false,
+        scope: 'previous',
+      },
     ]);
   });
 
@@ -395,7 +406,12 @@ describe('buildClassifierContext', () => {
       options,
     );
     expect(result.state.recentToolEvidence).toEqual([
-      { text: 'FUTURE_RESULT', isError: true, truncated: false },
+      {
+        text: 'FUTURE_RESULT',
+        isError: true,
+        truncated: false,
+        scope: 'current',
+      },
     ]);
     expect(JSON.stringify(result)).not.toContain('OLD_FAILURE');
   });

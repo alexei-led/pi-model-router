@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.20.1] - 2026-11-13
+
+Keep a task's durable goal distinct from its current work phase when activity routing is enabled.
+
+### Changes
+
+- Ask the approved Pi classifier for goal and phase independently. A confident, bounded verification or execution phase can select ops; editing, reasoning and reporting retain the task goal.
+- Keep a bounded runtime-only goal anchor across user turns only when the classifier confirms continuity. New tasks replace it; ambiguous continuity falls back conservatively. Native owner, branch, message-prefix and request-epoch fences prevent stale reuse.
+- Show goal, phase and effective route activity separately; keep historical activity counts separate. Missing, invalid or stale phase retains the goal route. Classifiers that cannot answer continuity fall back to the eligible baseline for cross-turn requests.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. No configuration migration is required. Diagnostic text changes from `activity` to `goal` for new goal/phase decisions.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.20.0...v0.20.1)
+
 ## [0.20.0] - 2026-11-11
 
 Make the router inspector easier to scan without changing routing policy.

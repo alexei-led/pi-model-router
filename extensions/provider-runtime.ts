@@ -157,12 +157,13 @@ const prepareStreamRequest = async (
       (entry) => entry.type !== 'custom' || entry.customType !== 'router-state',
     )
     .map((entry) => entry.id);
-  const sessionId =
-    extensionContext?.sessionManager.getSessionId?.() ?? options?.sessionId;
+  const owner = extensionContext?.sessionManager.getSessionId?.();
+  const sessionId = owner ?? options?.sessionId;
   const identity = createRouterRequestIdentity(
     routingContext,
     sessionId,
     branch,
+    owner,
   );
   onTurnIdentified(identity.turn);
   const modeFor = (current: RouterConfig) =>

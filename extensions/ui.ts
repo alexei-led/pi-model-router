@@ -97,10 +97,16 @@ const formatRunTime = (startedAt: number | undefined): string | undefined =>
     ? clock(startedAt)
     : undefined;
 
-const activityDiagnostics = (metrics: ClassifierDiagnostics): string[] =>
-  metrics.activityOutcome
-    ? [`activity=${metrics.activity ?? 'unknown'} (${metrics.activityOutcome})`]
-    : [];
+const activityDiagnostics = (metrics: ClassifierDiagnostics): string[] => [
+  ...(metrics.activityOutcome
+    ? [
+        `${metrics.phaseOutcome ? 'goal' : 'activity'}=${metrics.activity ?? 'unknown'} (${metrics.activityOutcome})`,
+      ]
+    : []),
+  ...(metrics.phaseOutcome
+    ? [`phase=${metrics.phase ?? 'unknown'} (${metrics.phaseOutcome})`]
+    : []),
+];
 
 export const formatAdvisorDetail = (
   decision: RoutingDecision,

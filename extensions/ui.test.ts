@@ -694,4 +694,19 @@ it('logs sanitized activity diagnostics and keeps availability distinct from inf
       },
     }),
   ).toContain('activity=docs (selected)');
+  const current = formatAdvisorDetail({
+    ...decision,
+    activity: 'ops',
+    advisor: 'classifier',
+    classification: {
+      outcome: 'selected',
+      latencyMs: 1,
+      activity: 'code',
+      activityOutcome: 'selected',
+      phase: 'verify',
+      phaseOutcome: 'selected',
+    },
+  });
+  expect(current).toContain('goal=code (selected)');
+  expect(current).toContain('phase=verify (selected)');
 });

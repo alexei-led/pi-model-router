@@ -585,6 +585,14 @@ const routerExtension = (pi: ExtensionAPI) => {
     if (event.message.role === 'user' && routerUI.hasPending())
       await activatePendingAtUserBoundary(ctx);
   });
+  pi.on('session_tree', (_event, ctx) => {
+    if (!ownsContext(ctx)) return;
+    ownerController.abort();
+    ownerController = new AbortController();
+    requestEpoch += 1;
+    routerUI.reset();
+    actions.registerRouterProvider();
+  });
   pi.on('session_shutdown', (_event, ctx) => {
     if (!ownsContext(ctx)) return;
     ownerController.abort();

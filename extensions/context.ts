@@ -157,6 +157,22 @@ const excerpt = (text: string, tokenLimit: number): ClassifierTextExcerpt => {
   };
 };
 
+/** A bounded runtime-only task anchor, not a persisted transcript. */
+export const currentGoalExcerpt = (
+  context: Context,
+  maxTokens: number,
+  notificationIndices: readonly number[] = [],
+): ClassifierTextExcerpt => {
+  const notifications = new Set(notificationIndices);
+  const message = context.messages.findLast(
+    (entry, index) => entry.role === 'user' && !notifications.has(index),
+  );
+  return excerpt(
+    message ? textOnly(message) : '',
+    Math.max(0, Math.floor(maxTokens)),
+  );
+};
+
 /** Fixed structural selection, not intent scoring. Only selected text reaches the configured classifier. */
 export const buildClassifierContext = (
   context: Context,
@@ -197,12 +213,29 @@ export const buildClassifierContext = (
     turns.push({ start: index, end });
     end = index;
   }
-  const dialogue: { role: 'user' | 'assistant'; text: string; turn: number }[] =
-    [];
+  const dialogue: {
+    role: 'user' | 'assistant';
+    text: string;
+    turn: number;
+    scope: 'current' | 'previous' | 'notification';
+  }[] = [];
   const loopDialogue = currentLoop.flatMap((message, index) => {
     if (message.role !== 'assistant' && message.role !== 'user') return [];
     const text = textOnly(message).trim();
-    return text ? [{ role: message.role, text, turn: -1 - index }] : [];
+    return text
+      ? [
+          {
+            role: message.role,
+            text,
+            turn: -1 - index,
+            scope: notifications.has(
+              context.messages.length - currentLoop.length + index,
+            )
+              ? ('notification' as const)
+              : ('current' as const),
+          },
+        ]
+      : [];
   });
   // Current task progress receives the history budget before older completed turns.
   for (const entry of loopDialogue.reverse()) dialogue.push(entry);
@@ -216,9 +249,19 @@ export const buildClassifierContext = (
         message.role === 'assistant' && textOnly(message).trim().length > 0,
     );
     if (answer)
-      dialogue.push({ role: 'assistant', text: textOnly(answer), turn });
+      dialogue.push({
+        role: 'assistant',
+        text: textOnly(answer),
+        turn,
+        scope: 'previous',
+      });
     if (user && textOnly(user).trim())
-      dialogue.push({ role: 'user', text: textOnly(user), turn });
+      dialogue.push({
+        role: 'user',
+        text: textOnly(user),
+        turn,
+        scope: 'previous',
+      });
   }
   let historyBudget = Math.min(remaining, options.maxHistoryTokens);
   const includedTurns = new Set<number>();
@@ -226,7 +269,11 @@ export const buildClassifierContext = (
     const limit = Math.floor(historyBudget / (dialogue.length - index));
     if (limit < 1) break;
     const selected = excerpt(entry.text, limit);
-    state.recentDialogue.unshift({ role: entry.role, ...selected });
+    state.recentDialogue.unshift({
+      role: entry.role,
+      scope: entry.scope,
+      ...selected,
+    });
     if (entry.turn >= 0) includedTurns.add(entry.turn);
     const selectedTokens = estimateClassifierTextTokens(selected.text);
     historyBudget -= selectedTokens;
@@ -247,7 +294,9 @@ export const buildClassifierContext = (
           : [];
   const loopTools = loopToolSelection.flatMap((message) => {
     const text = textOnly(message).trim();
-    return text ? [{ text, isError: message.isError === true }] : [];
+    return text
+      ? [{ text, isError: message.isError === true, scope: 'current' as const }]
+      : [];
   });
   const priorTool = turns[0]
     ? context.messages
@@ -265,6 +314,7 @@ export const buildClassifierContext = (
           {
             text: textOnly(priorTool).trim(),
             isError: priorTool.isError === true,
+            scope: 'previous' as const,
           },
         ]
       : [];
@@ -274,7 +324,11 @@ export const buildClassifierContext = (
     const limit = Math.floor(toolBudget / (newestTools.length - index));
     if (limit < 1) break;
     const selected = excerpt(entry.text, limit);
-    state.recentToolEvidence.unshift({ ...selected, isError: entry.isError });
+    state.recentToolEvidence.unshift({
+      ...selected,
+      isError: entry.isError,
+      scope: entry.scope,
+    });
     const selectedTokens = estimateClassifierTextTokens(selected.text);
     toolBudget -= selectedTokens;
     remaining -= selectedTokens;
