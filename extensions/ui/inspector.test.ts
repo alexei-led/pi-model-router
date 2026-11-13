@@ -471,7 +471,7 @@ describe('ui/inspector.ts', () => {
     expect(text).not.toContain('not free');
     expect(text).toContain('Cache-read share, last observed request: 70%');
     expect(text).toContain('Catalog cost / request:');
-    expect(text).toContain('Observed activity labels: code 1');
+    expect(text).toContain('Legacy activity labels: code 1');
     expect(
       formatRouterUIUsage(Array.from({ length: 70 }, () => ({}))).join('\n'),
     ).toContain('50 decisions');
@@ -1230,4 +1230,52 @@ it('exposes session mode beside pin and keeps Apply/Undo scoped to the queued ch
   expect(f.adapters.getSnapshot().pendingControls?.mode).toBeUndefined();
   expect(f.adapters.getSnapshot().actual?.model).toBe('漢字-é-🚀');
   f.panel.dispose();
+});
+
+it('keeps legacy activity counts separate from goal/phase effective activity counts', () => {
+  const actual = {
+    tier: 'medium' as const,
+    provider: 'test',
+    model: 'm',
+    thinking: 'off' as const,
+    activity: 'ops' as const,
+  };
+  const text = formatRouterUIUsage([
+    { actual },
+    {
+      actual,
+      advice: {
+        advisor: 'fixture/choice',
+        outcome: 'selected',
+        goal: 'code',
+        phase: 'verify',
+        phaseOutcome: 'selected',
+      },
+    },
+  ]).join('\n');
+  expect(text).toContain('Legacy activity labels: ops 1');
+  expect(text).toContain('Effective activities (goal/phase): ops 1');
+  expect(text).not.toContain('no inferred phase');
+});
+
+it('shows the classifier goal and phase separately from the actual activity', () => {
+  const f = fixture();
+  f.update({
+    actual: {
+      tier: 'medium',
+      provider: 'test',
+      model: 'm',
+      thinking: 'off',
+      activity: 'ops',
+    },
+    lastAdvice: {
+      advisor: 'fixture/choice',
+      outcome: 'selected',
+      goal: 'code',
+      phase: 'verify',
+      phaseOutcome: 'selected',
+    },
+  });
+  const text = formatRouterUISnapshot(f.adapters.getSnapshot(), 'classifier');
+  expect(text).toContain('Goal: code · phase: verify');
 });

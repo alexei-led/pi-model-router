@@ -1,7 +1,7 @@
 # Activity routing: defaults and tuning
 
-**The router chooses two things: task difficulty and kind of work.**
-Together, they select a model and reasoning effort.
+**The router chooses task difficulty and an effective activity.**
+The effective activity normally follows the durable task goal. A bounded verification or execution phase can use the ops activity instead; see [classifier selection](classifier-advisor.md#bounds-and-selection). Together with tier, it selects a model and reasoning effort.
 
 - **Tier:** `micro`, `low`, `medium` or `high`.
 - **Activity:** `code`, `debug`, `explore`, `plan`, `review`, `ops` or `docs`.
@@ -57,7 +57,7 @@ Files are not rewritten. Use the opt-out below to retain tier-only behavior.
 
 | Display                              | Meaning                                                                         |
 | ------------------------------------ | ------------------------------------------------------------------------------- |
-| `debug`, `code`, or another activity | A validated classifier activity selected this route.                            |
+| `debug`, `code`, or another activity | The effective activity selected for this route.                            |
 | `base`                               | No activity-specific cell selected. This replaces the old `generic` label.      |
 | An availability-cell label           | A local eligibility fallback used an activity cell, not an inferred task label. |
 | `last`                               | The displayed generation finished. It is not a running request.                 |

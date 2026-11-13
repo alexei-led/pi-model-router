@@ -562,6 +562,10 @@ describe('activity snapshots and native ownership', () => {
         activityConfidence: 0.9,
         activityOutcome: 'selected',
         activityResponseIssue: 'missing-answer',
+        phase: 'verify',
+        phaseConfidence: 0.8,
+        phaseOutcome: 'selected',
+        phaseResponseIssue: 'missing-answer',
       },
     });
     expect(copy).toMatchObject({
@@ -572,6 +576,10 @@ describe('activity snapshots and native ownership', () => {
         activityConfidence: 0.9,
         activityOutcome: 'selected',
         activityResponseIssue: 'missing-answer',
+        phase: 'verify',
+        phaseConfidence: 0.8,
+        phaseOutcome: 'selected',
+        phaseResponseIssue: 'missing-answer',
       },
     });
     const invalid = JSON.parse(
@@ -585,6 +593,10 @@ describe('activity snapshots and native ownership', () => {
           activityConfidence: 2,
           activityOutcome: 'secret',
           activityResponseIssue: 'secret',
+          phase: 'secret',
+          phaseConfidence: 2,
+          phaseOutcome: 'secret',
+          phaseResponseIssue: 'secret',
           explanation: 'private',
         },
       }),

@@ -70,6 +70,16 @@ test('fresh Pi SDK sessions share a profile, not controls, cost, advice caches o
           timestamp: 1,
           stopReason: 'stop',
           answers: {
+            ...(context.questions.continuity
+              ? {
+                  continuity: {
+                    type: 'choice' as const,
+                    choice: 'new-task',
+                    confidence: 1,
+                    probabilities: { 'new-task': 1 },
+                  },
+                }
+              : {}),
             ...(route
               ? {
                   route: {
@@ -206,10 +216,17 @@ test('fresh Pi SDK sessions share a profile, not controls, cost, advice caches o
   expect(parent.manager.getSessionId()).not.toBe(child.manager.getSessionId());
   await child.session.prompt('Implement the helper');
   expect(child.classify).toHaveBeenCalledOnce();
+  expect(child.classify.mock.calls[0]?.[1].state.activeGoal).toBeUndefined();
   expect(child.generate.mock.calls.at(-1)?.[0].id).toBe('code');
   expect(parent.lastState()).toEqual(parentState);
   await child.session.prompt('Write the guide instead');
   expect(child.classify).toHaveBeenCalledTimes(2);
+  expect(child.classify.mock.calls[1]?.[1].state.activeGoal).toMatchObject({
+    text: 'Implement the helper',
+  });
+  expect(JSON.stringify(child.lastState())).not.toContain(
+    'Implement the helper',
+  );
   expect(child.generate.mock.calls.at(-1)?.[0].id).toBe('docs');
   expect(parent.generate).toHaveBeenCalledOnce();
   expect(parent.lastState()).toEqual(parentState);

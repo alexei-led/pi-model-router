@@ -6,6 +6,9 @@ const result: ClassifierResult = {
   diagnostics: { outcome: 'selected', latencyMs: 1 },
 };
 const stamp = (requestCount: number, branch = ['user']): ReviewStamp => ({
+  contextLength: 1,
+  contextDigest: 'fixture',
+  prefixDigest: () => 'fixture',
   identity: 'policy-and-plan',
   requestCount,
   branch,
@@ -115,4 +118,208 @@ describe('background review lifetime', () => {
       expect(cache.takeReview('turn', stamp(3))).toBeUndefined();
     }
   });
+});
+
+describe('durable goal anchors', () => {
+  it('keeps a bounded anchor only across confirmed continuation and matching ancestry', () => {
+    const cache = createProviderTurnCache();
+    const config = {} as import('./types').RouterConfig;
+    const first = cache.beginGoal(
+      'one',
+      undefined,
+      'owner',
+      ['root', 'one'],
+      'p',
+      config,
+    );
+    cache.finishGoal(first, {
+      text: 'Implement the feature',
+      truncated: false,
+    });
+    const next = cache.beginGoal(
+      'two',
+      'one',
+      'owner',
+      ['root', 'one', 'two'],
+      'p',
+      config,
+    );
+    expect(next.previous?.text).toBe('Implement the feature');
+    cache.finishGoal(next, next.previous);
+    const third = cache.beginGoal(
+      'three',
+      'two',
+      'owner',
+      ['root', 'one', 'two', 'three'],
+      'p',
+      config,
+    );
+    expect(third.previous?.text).toBe('Implement the feature');
+    cache.finishGoal(third, undefined);
+    expect(
+      cache.beginGoal(
+        'four',
+        'three',
+        'owner',
+        ['root', 'one', 'two', 'three', 'four'],
+        'p',
+        config,
+      ).previous,
+    ).toBeUndefined();
+  });
+  it('rejects sibling branches, changed config, stale completions and disposal', () => {
+    const cache = createProviderTurnCache();
+    const config = {} as import('./types').RouterConfig;
+    const first = cache.beginGoal(
+      'one',
+      undefined,
+      'owner',
+      ['root', 'one'],
+      'p',
+      config,
+    );
+    cache.finishGoal(first, { text: 'goal', truncated: false });
+    expect(
+      cache.beginGoal('two', 'one', 'owner', ['root', 'fork'], 'p', config)
+        .previous,
+    ).toBeUndefined();
+    const old = cache.beginGoal(
+      'three',
+      'two',
+      'owner',
+      ['root', 'fork', 'three'],
+      'p',
+      config,
+    );
+    const newer = cache.beginGoal(
+      'four',
+      'three',
+      'owner',
+      ['root', 'fork', 'three', 'four'],
+      'p',
+      config,
+    );
+    cache.finishGoal(old, { text: 'stale', truncated: false });
+    cache.finishGoal(newer, { text: 'current', truncated: false });
+    expect(
+      cache.beginGoal(
+        'five',
+        'four',
+        'owner',
+        ['root', 'fork', 'three', 'four', 'five'],
+        'p',
+        {} as import('./types').RouterConfig,
+      ).previous,
+    ).toBeUndefined();
+    cache.dispose();
+    cache.finishGoal(newer, { text: 'stale', truncated: false });
+    expect(
+      cache.beginGoal('six', undefined, 'owner', ['root', 'six'], 'p', config)
+        .previous,
+    ).toBeUndefined();
+  });
+});
+
+it.each([
+  ['foreign owner', 'one', 'foreign', ['root', 'one', 'two']],
+  [
+    'unmatched prior message prefix',
+    'different',
+    'owner',
+    ['root', 'one', 'two'],
+  ],
+  ['missing native owner', 'one', undefined, ['root', 'one', 'two']],
+  ['missing branch', 'one', 'owner', []],
+])('does not expose a goal to %s', (_name, prior, owner, branch) => {
+  const cache = createProviderTurnCache();
+  const config = {} as import('./types').RouterConfig;
+  const scope = cache.beginGoal(
+    'one',
+    undefined,
+    'owner',
+    ['root', 'one'],
+    'p',
+    config,
+  );
+  cache.finishGoal(scope, { text: 'private synthetic goal', truncated: false });
+  expect(
+    cache.beginGoal('two', prior, owner, branch, 'p', config).previous,
+  ).toBeUndefined();
+});
+
+it('rejects a background review when the request context prefix changed on the same native branch', async () => {
+  const cache = createProviderTurnCache();
+  const original = {
+    ...stamp(2),
+    contextLength: 2,
+    contextDigest: 'original',
+    prefixDigest: () => 'original',
+  };
+  cache.startReview('turn', original, async () => result);
+  await Promise.resolve();
+  const rewritten = {
+    ...stamp(3, ['user', 'assistant', 'tool']),
+    contextLength: 3,
+    contextDigest: 'new',
+    prefixDigest: () => 'rewritten',
+  };
+  expect(cache.takeReview('turn', rewritten)).toBeUndefined();
+});
+
+it('accepts a background review when the request context extends the original prefix', async () => {
+  const cache = createProviderTurnCache();
+  const original = {
+    ...stamp(2),
+    contextLength: 2,
+    contextDigest: 'original',
+    prefixDigest: () => 'original',
+  };
+  cache.startReview('turn', original, async () => result);
+  await Promise.resolve();
+  const extended = {
+    ...stamp(3, ['user', 'assistant', 'tool']),
+    contextLength: 3,
+    contextDigest: 'extended',
+    prefixDigest: (length: number) => (length === 2 ? 'original' : 'extended'),
+  };
+  expect(cache.takeReview('turn', extended)).toEqual(result);
+});
+
+it('expires only phase-derived ops after new same-turn evidence is appended', async () => {
+  const cache = createProviderTurnCache();
+  const advice: ClassifierResult = {
+    advice: {
+      candidateId: 'local',
+      activity: 'ops',
+      confidence: 1,
+      latencyMs: 1,
+    },
+    diagnostics: {
+      outcome: 'selected',
+      latencyMs: 1,
+      activity: 'code',
+      activityOutcome: 'selected',
+      phase: 'verify',
+      phaseOutcome: 'selected',
+      phaseConfidence: 1,
+    },
+  };
+  cache.startReview(
+    'turn',
+    { ...stamp(2), contextDigest: 'before' },
+    async () => advice,
+  );
+  await Promise.resolve();
+  const next = cache.takeReview('turn', {
+    ...stamp(3),
+    contextLength: 2,
+    contextDigest: 'after',
+    prefixDigest: () => 'before',
+  });
+  expect(next?.advice).toMatchObject({
+    candidateId: 'local',
+    activity: 'code',
+  });
+  expect(next?.diagnostics.phaseOutcome).toBe('uncertain');
+  expect(next?.diagnostics.phase).toBeUndefined();
 });

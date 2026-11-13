@@ -142,7 +142,7 @@ It never receives system prompts, tool definitions, thinking blocks, tool argume
 Selected text can still contain private data. Filtering is not redaction.
 
 A candidate ID represents the tier, canonical representative model, and effort.
-An optional activity answer is validated independently and resolves the actual matrix cell;
+An optional activity answer describes the durable goal. An independent phase answer may select ops for bounded verification or execution. The resulting activity resolves the actual matrix cell;
 it cannot extend the matrix or change the cell's generation fallback list.
 The adapter rejects unknown IDs, invalid confidence, malformed distributions, and oversized responses.
 It accepts only a current candidate. The [classifier guide](classifier-advisor.md) documents configuration and probability selection.
@@ -184,7 +184,7 @@ The bounded cache stores the actual successful route and its immutable selected-
 
 Reuse requires matching session, user turn, profile, policy, configuration, branch ancestry, model, and tool-result identities.
 When the caller omits `sessionId`, the key uses Pi's native session ID.
-Changed capabilities or configuration invalidate reuse. New user-role steering messages change turn identity and abort prior background review. Native-provenance notifications preserve the goal and continuation; see [notification recognition](classifier-advisor.md#goals-steering-and-notifications). Valid tool-result continuations may schedule a periodic nonblocking classifier review; only the immediately following request may consume it. Branch/policy/plan/matrix identity changes and expiry drop the result. The original provider `sessionId` passes through unchanged.
+Changed capabilities or configuration invalidate reuse. New user-role steering messages change turn identity and abort prior background review. A bounded runtime-only goal anchor survives a new user turn only on a valid, confident continuation answer, fenced by native owner, branch ancestry, preceding user-message identity, config and request epoch. Native-provenance notifications preserve the goal and continuation; see [notification recognition](classifier-advisor.md#goals-steering-and-notifications). Valid tool-result continuations may schedule a periodic nonblocking classifier review; only the immediately following request may consume it. Branch/policy/plan/matrix identity changes, changed message prefixes and expiry drop the result. Phase advice additionally requires an exact context snapshot; appended evidence retains only otherwise valid tier/goal advice. The original provider `sessionId` passes through unchanged.
 Context truncation, the last resort after the window check, removes complete old user turns and preserves system instructions and the active tool chain.
 Its text estimate does not guarantee a fit for images or oversized active turns.
 

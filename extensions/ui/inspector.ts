@@ -235,12 +235,15 @@ export const formatRouterUIUsage = (
         )
         .join('')
     : 'unknown';
-  const activityCounts = ROUTER_ACTIVITIES.flatMap((activity) => {
-    const count = retained.filter(
-      (entry) => entry.actual?.activity === activity,
-    ).length;
-    return count ? [`${activity} ${count}`] : [];
-  });
+  const activityCounts = (goalPhase: boolean) =>
+    ROUTER_ACTIVITIES.flatMap((activity) => {
+      const count = retained.filter(
+        (entry) =>
+          entry.actual?.activity === activity &&
+          Boolean(entry.advice?.phaseOutcome) === goalPhase,
+      ).length;
+      return count ? [`${activity} ${count}`] : [];
+    }).join(' · ') || 'unknown';
   const latencies = samples
     .flatMap((entry) =>
       entry.latencyMs === undefined ? [] : [entry.latencyMs],
@@ -260,7 +263,8 @@ export const formatRouterUIUsage = (
     `Generation attempts: ${generationAttempts.length ? generationAttempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${generationAttempts.length}/${retained.length}`,
     `Cache-read share, last observed request: ${cacheReadShare === undefined ? 'unknown' : percent(cacheReadShare)} · measured, not forecast ${cacheReadShare === undefined ? '' : textBar(cacheReadShare)}`,
     `Catalog cost / request: ${spark} · ${costSamples.length} known samples · not a savings prediction`,
-    `Observed activity labels: ${activityCounts.join(' · ') || 'unknown'} · no inferred phase`,
+    `Legacy activity labels: ${activityCounts(false)}`,
+    `Effective activities (goal/phase): ${activityCounts(true)}`,
     '',
     `Unique advice requests: ${samples.length}`,
     `HTTP attempts: ${attempts.length ? attempts.reduce((sum, count) => sum + count, 0) : 'unknown'} · coverage ${attempts.length}/${samples.length}`,

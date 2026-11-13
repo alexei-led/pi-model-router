@@ -30,7 +30,7 @@ or fail over to a second classifier.
 Use `typesafe/jev-1.14.0` to request that exact version.
 [TypeSafe's model documentation](https://docs.typesafe.ai/models) currently
 points `jev-latest` at 1.13 and `jev-preview` at 1.14.
-Jev 1.14 uses the same System One choice-question contract.
+Jev 1.14 uses the same System One choice-question contract. TypeSafe reports multilingual and Box improvements for 1.14. Same-price pilot parity does not establish better router decisions.
 
 The reference configuration selects Jev 1.14 as an example but leaves the advisor
 disabled. The router itself has no default classifier. A configured reference
@@ -283,11 +283,11 @@ These are router defaults, not guaranteed model-specific optima.
 | `advisor.enabled`                     | `false`      | Enable only with explicit `true`; omitted advisor means no classifier calls          |
 | `advisor.model`                       | None         | Required exact Pi classifier reference when configuring an advisor                   |
 | `profiles.<name>.advisor.models`      | None         | Exact references approved for this profile; does not register or select models       |
-| `profiles.<name>.advisor.confidenceThreshold` | Inherit | Profile-only top-choice/activity threshold, 0–1; does not select or enable a classifier |
+| `profiles.<name>.advisor.confidenceThreshold` | Inherit | Profile-only top-choice, goal, phase and continuity threshold, 0–1; does not select or enable a classifier |
 | `profiles.<name>.advisor.probabilityThreshold` | Inherit | Profile-only cumulative tier threshold, greater than 0 and at most 1 |
 | `advisor.timeoutMs`                   | `10000`      | Total deadline, including retries; positive and at most 2147483647 ms                |
 | `advisor.reviewEveryRequests`         | `4`          | Background review interval, 0–1000 requests; 0 disables reviews, not initial advice  |
-| `advisor.confidenceThreshold`         | `0.65`       | Top-choice and activity confidence threshold, 0–1                                    |
+| `advisor.confidenceThreshold`         | `0.65`       | Top-choice, goal, phase and continuity confidence threshold, 0–1                                    |
 | `advisor.probabilityThreshold`        | `0.8`        | Cumulative tier-probability threshold, greater than 0 and at most 1                  |
 | `advisor.maxStateTokens`              | `3000`       | Selected text budget, 1–24000 estimated tokens; typed request metadata adds overhead |
 | `advisor.maxRetries`                  | `1`          | Pi retries, 0–4, inside the same deadline                                            |
@@ -305,7 +305,7 @@ Credentials, endpoints and API keys are not valid advisor fields.
 
 Profile thresholds inherit the global values when omitted. Add overrides beside
 the existing `profiles.<name>.advisor.models` approval list, without replacing it.
-Lowering confidence accepts more top-tier and activity answers directly. Lowering
+Lowering confidence accepts more top-tier, goal, phase and continuity answers directly. Lowering
 the cumulative threshold can select a lower tier when confidence is insufficient.
 These are risk-policy choices, not measured model-quality guarantees. Other
 profiles retain their own thresholds. Project files cannot override them.
@@ -314,30 +314,51 @@ profiles retain their own thresholds. Project files cannot override them.
 
 The default deadline is 10 seconds and covers local context preparation plus classification. Caller cancellation aborts the operation and does not start generation. Pi retries according to `advisor.maxRetries` (default 1 retry), within the same total router deadline.
 
-An initial user request makes one approved `modelRegistry.classify()` operation and awaits it. On valid tool continuations, the router can make a separate background review every `advisor.reviewEveryRequests` requests (default 4; 0 disables). It never waits for that review before generation. A completed review is eligible only on the immediately following request; otherwise it expires. Session/branch/turn/config/policy/matrix changes invalidate it. Failed, uncertain or stale reviews keep the eligible incumbent instead of resetting a running task to the baseline. Initial new-user advice is not held by the previous task's cache economics; fresh in-loop proposals use the [switch policy](user-guide.md#read-costs-and-cache-data). Every completed review's allowlisted diagnostics can enter retained history, including reviews that never apply; unknown or late/unreported costs remain unknown, not free.
+An initial user request makes one approved `modelRegistry.classify()` operation and awaits it. On valid tool continuations, the router can make a separate background review every `advisor.reviewEveryRequests` requests (default 4; 0 disables). It never waits for that review before generation. A completed review is eligible only on the immediately following request; otherwise it expires. Session/branch/turn/config/policy/matrix changes or a changed message prefix invalidate it. Appended evidence expires phase advice even when tier/goal advice remains valid; stale verify/execute cannot switch newer work to ops. Failed, uncertain or stale reviews keep the eligible incumbent instead of resetting a running task to the baseline. Initial new-user advice is not held by the previous task's cache economics; fresh in-loop proposals use the [switch policy](user-guide.md#read-costs-and-cache-data). Every completed review's allowlisted diagnostics can enter retained history, including reviews that never apply; unknown or late/unreported costs remain unknown, not free.
 
 Both initial choices and reviews use one approved `modelRegistry.classify()` operation. Normally it
 asks the existing typed `route` choice among eligible tier representatives and
 `uncertain`. Candidates show the prevalidated default-owned preferences or custom transforms after the [routing mode](user-guide.md#choose-a-routing-mode) is applied. [Built-in presets](activity-routing.md) supply specialization cells for recognized profiles without enabling or approving advice. With activity routing on and meaningful eligible specialization
-plans, it also asks a separate typed `activity` choice. These are independent
-answers in the same operation, not a multiplied joint distribution or a second
-advisor call. Pi may implement the operation using several bounded HTTP requests.
+plans, it also asks independent typed `activity` and `phase` choices. The existing
+`activity` wire field now describes the durable task goal, not the immediate
+phase. When there is no confirmed current-turn anchor, the same operation also
+asks whether the request independently establishes a new task or continues prior
+work. Only positive new-task evidence can seed an anchor; no anchor is not evidence
+of a new task.
+These answers are not multiplied into a joint distribution. Pi may implement the
+operation using several bounded HTTP requests.
+
+The goal is the requested final deliverable: an implementation, required fix,
+configuration or test artifact is code, including when diagnosis is needed first.
+Debug means a cause/diagnosis report without a required implemented fix. Ops means
+specified operations as the final deliverable, not CLI use or authoring config.
 
 Tier selection keeps the existing rule: accept the top candidate at or above
 `confidenceThreshold`; otherwise choose the lowest tier whose cumulative
 probability reaches `probabilityThreshold`, counting abstention mass at the local
-baseline tier. Activity needs a valid choice/distribution and confidence at or
-above `confidenceThreshold`; it never uses the cumulative tier rule.
+baseline tier. Goal, phase and continuity need a valid choice/distribution and confidence at or
+above `confidenceThreshold`; they never use the cumulative tier rule.
 
-A valid activity resolves the chosen tier's current prevalidated cell, or its
-generic plan if there is no eligible specialization. Missing, malformed,
-low-confidence or `uncertain` activity keeps valid tier advice but uses that tier's
+An accepted goal resolves the chosen tier's current prevalidated cell, or its
+generic plan if there is no eligible specialization. A valid, confident `verify`
+or `execute` phase can instead select the `ops` cell: verify is only specified
+checks and status reporting, and execute is only specified operations such as a
+commit or deploy. Work still requiring edits or diagnosis is not execution-only.
+`produce`, `reason`, `report`, uncertain, missing, malformed or low-confidence
+phase retains the goal activity. Any native notification after the current request suppresses this phase-derived
+change because its association cannot be established. These are classifier
+judgments, not guarantees of savings or semantic accuracy. Diagnostics show the
+goal and phase separately from the effective route activity. Historical
+activity-only records keep their original label; Usage does not pool those
+labels with goal/phase effective-activity counts.
+
+Missing, malformed, low-confidence or `uncertain` goal activity keeps valid tier advice but uses that tier's
 generic plan; if it is unavailable, use the deterministic eligible baseline.
 Invalid tier advice or a whole classifier error goes directly to baseline, never
 to another advisor. Representative IDs cannot themselves authorize a physical
 target. Generation revalidates each attempt in the selected cell's immutable plan.
 
-One tier with distinct activity plans asks only `activity`. One effective plan
+One tier with distinct activity plans asks `activity` and `phase`, without `route`. One effective plan
 bypasses advice. Off/no meaningful overrides preserve the old route-only request
 and selection behavior. An effort override that erases activity differences also
 removes the activity question.
@@ -346,9 +367,25 @@ A profile pin and soft-budget policy bypass advice. One effective plan bypasses 
 
 ## Goals, steering and notifications
 
-A human request or steering message starts a new routing task. Pi also converts
+A human request or steering message starts a new routing turn. Pi also converts
 extension messages to user-role messages, but a progress notification must not
 replace the task goal or break a valid tool continuation.
+
+After accepted goal advice and positive semantic new-task evidence, the router
+keeps a bounded, runtime-only goal anchor. A short approval is never its own anchor.
+On the next user turn it uses that anchor only when the classifier positively
+identifies a continuation. A new-task answer replaces it with the current request;
+a missing, invalid or uncertain relation discards it and uses the local baseline.
+Missing native session identity or branch ancestry disables anchor reuse. Session,
+branch, preceding user-message identity, configuration and request epoch fence the
+anchor; reviews and notifications cannot update it. Reload, native tree navigation or provider disposal
+clears it. Text is not persisted in router state.
+
+A classifier that does not return a valid phase keeps the goal route. Missing or
+uncertain continuity without a prior anchor keeps otherwise valid advice but does
+not seed an anchor. With a prior anchor, ambiguous continuity uses the baseline
+rather than guessing whether the old goal applies. The current request is never
+sent as its own activeGoal candidate.
 
 The router uses native branch metadata, never message wording:
 
@@ -384,7 +421,7 @@ cancellation and advice freshness checks keep their existing precedence.
 
 ## Privacy
 
-A classifier call sends the current user goal plus bounded recent assistant text and permitted text tool results, including the current tool loop, and configured previous dialogue. `advisor.context.currentLoopMessages` bounds current-loop messages (default 8). When loop messages exist, half the text budget is reserved for the goal so recent progress can remain visible. `toolResults` defaults to `last-error`: only the latest result when it failed. `last` sends one latest result, `none` excludes results, and opt-in `recent` sends bounded results from the current-loop window. Successful current-loop results do not revive a previous task's old error. History and tool token limits share the total text budget. The extension excludes system prompts, tool definitions, thinking, tool arguments, image/binary blocks, and raw router configuration. Text filtering is **not redaction**; selected conversation text can contain private information.
+A classifier call sends the current user request, a bounded runtime goal anchor when available, and bounded recent assistant text and permitted text tool results, including the current tool loop, and configured previous dialogue. `advisor.context.currentLoopMessages` bounds current-loop messages (default 8). When loop messages exist, half the text budget is reserved for the goal so recent progress can remain visible. `toolResults` defaults to `last-error`: only the latest result when it failed. `last` sends one latest result, `none` excludes results, and opt-in `recent` sends bounded results from the current-loop window. Successful current-loop results do not revive a previous task's old error. History, tool text and the anchor share the total text budget; the anchor is at most 256 estimated tokens and one quarter of the configured state budget. The extension excludes system prompts, tool definitions, thinking, tool arguments, image/binary blocks, and raw router configuration. Text filtering is **not redaction**; selected conversation text can contain private information.
 
 Classifier models that accept images are supported by Pi, but the router does not attach transcript images to classification requests. Use explicit user/profile configuration to control whether the router sends text to an external classifier.
 

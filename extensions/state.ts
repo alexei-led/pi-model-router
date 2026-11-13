@@ -33,6 +33,7 @@ import {
   isRoutingReasonCode,
   MODE_LEVERS,
   MODE_SOURCES,
+  ROUTER_PHASES,
   SWITCH_COST_REASONS,
 } from './types';
 
@@ -273,6 +274,24 @@ const snapshotClassification = (
     value.activityOutcome === 'invalid-response'
   )
     result.activityOutcome = value.activityOutcome;
+  const phase = ROUTER_PHASES.find((entry) => entry === value.phase);
+  if (phase || value.phase === 'uncertain') result.phase = phase ?? 'uncertain';
+  if (
+    isFiniteNumber(value.phaseConfidence) &&
+    value.phaseConfidence >= 0 &&
+    value.phaseConfidence <= 1
+  )
+    result.phaseConfidence = value.phaseConfidence;
+  if (
+    value.phaseOutcome === 'selected' ||
+    value.phaseOutcome === 'uncertain' ||
+    value.phaseOutcome === 'invalid-response'
+  )
+    result.phaseOutcome = value.phaseOutcome;
+  const phaseIssue = CLASSIFIER_RESPONSE_ISSUES.find(
+    (entry) => entry === value.phaseResponseIssue,
+  );
+  if (phaseIssue) result.phaseResponseIssue = phaseIssue;
   const activityIssue = CLASSIFIER_RESPONSE_ISSUES.find(
     (entry) => entry === value.activityResponseIssue,
   );

@@ -19,6 +19,14 @@ export const ROUTER_ACTIVITIES = [
   'docs',
 ] as const;
 export type RouterActivity = (typeof ROUTER_ACTIVITIES)[number];
+export const ROUTER_PHASES = [
+  'produce',
+  'reason',
+  'verify',
+  'execute',
+  'report',
+] as const;
+export type RouterPhase = (typeof ROUTER_PHASES)[number];
 export type ActivityRouting = 'on' | 'off';
 export type RouterPin = RouterTier | 'auto';
 export type RouterPinByProfile = Partial<Record<string, RouterTier>>;
@@ -68,8 +76,14 @@ export interface ClassifierTextExcerpt {
 }
 export interface ClassifierContextState {
   currentRequest: ClassifierTextExcerpt;
-  recentDialogue: (ClassifierTextExcerpt & { role: 'user' | 'assistant' })[];
-  recentToolEvidence: (ClassifierTextExcerpt & { isError: boolean })[];
+  recentDialogue: (ClassifierTextExcerpt & {
+    role: 'user' | 'assistant';
+    scope: 'current' | 'previous' | 'notification';
+  })[];
+  recentToolEvidence: (ClassifierTextExcerpt & {
+    isError: boolean;
+    scope: 'current' | 'previous';
+  })[];
 }
 export interface ClassifierContextMetrics {
   currentRequestTokens: number;
@@ -224,6 +238,9 @@ export interface ClassifierDependencies {
 }
 
 export interface ClassifierRequest {
+  /** Runtime-only bounded active goal; never persisted. */
+  activeGoal?: ClassifierTextExcerpt | undefined;
+  askContinuity?: boolean | undefined;
   context: Context;
   /** Native-provenance notifications: progress text, not new task anchors. Runtime only. */
   notificationIndices?: readonly number[] | undefined;
@@ -271,6 +288,10 @@ export const CLASSIFIER_OUTCOMES = [
 ] as const;
 export type ClassifierOutcome = (typeof CLASSIFIER_OUTCOMES)[number];
 export interface ClassifierDiagnostics {
+  phase?: RouterPhase | 'uncertain' | undefined;
+  phaseConfidence?: number | undefined;
+  phaseOutcome?: 'selected' | 'uncertain' | 'invalid-response' | undefined;
+  phaseResponseIssue?: ClassifierResponseIssue | undefined;
   activity?: RouterActivity | 'uncertain' | undefined;
   activityConfidence?: number | undefined;
   activityOutcome?: 'selected' | 'uncertain' | 'invalid-response' | undefined;
@@ -304,6 +325,8 @@ export interface ClassifierDiagnostics {
   responseIssue?: ClassifierResponseIssue | undefined;
 }
 export interface ClassifierResult {
+  /** Runtime-only validated relation; never persisted as text. */
+  goalRelation?: 'continuation' | 'new-task' | undefined;
   advice?: ClassifierAdvice | undefined;
   diagnostics: ClassifierDiagnostics;
 }
@@ -654,6 +677,9 @@ export interface RouterUIRouteTransaction {
   changes: readonly RouterUIRouteCellChange[];
 }
 export interface RouterUIAdviceObservation {
+  goal?: RouterActivity | 'uncertain' | undefined;
+  phase?: RouterPhase | 'uncertain' | undefined;
+  phaseOutcome?: ClassifierDiagnostics['phaseOutcome'];
   profile?: string | undefined;
   source?: AdviceSource | undefined;
   advisor: RouterUIAdvisorId;
