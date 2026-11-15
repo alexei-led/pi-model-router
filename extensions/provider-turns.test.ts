@@ -285,6 +285,43 @@ it('accepts a background review when the request context extends the original pr
   expect(cache.takeReview('turn', extended)).toEqual(result);
 });
 
+it('discards ops floor advice when its phase is invalidated by newer evidence', async () => {
+  const cache = createProviderTurnCache();
+  cache.startReview(
+    'turn',
+    { ...stamp(2), contextDigest: 'before' },
+    async () => ({
+      advice: {
+        candidateId: 'local',
+        activity: 'debug',
+        confidence: 1,
+        latencyMs: 1,
+      },
+      diagnostics: {
+        outcome: 'selected',
+        latencyMs: 1,
+        activity: 'ops',
+        activityOutcome: 'selected',
+        phase: 'reason',
+        phaseOutcome: 'selected',
+      },
+    }),
+  );
+  await Promise.resolve();
+  const result = cache.takeReview('turn', {
+    ...stamp(3),
+    contextLength: 2,
+    contextDigest: 'after',
+    prefixDigest: () => 'before',
+  });
+  expect(result?.advice).toBeUndefined();
+  expect(result?.diagnostics).toMatchObject({
+    outcome: 'uncertain',
+    activity: 'ops',
+    phaseOutcome: 'uncertain',
+  });
+});
+
 it('expires only phase-derived ops after new same-turn evidence is appended', async () => {
   const cache = createProviderTurnCache();
   const advice: ClassifierResult = {

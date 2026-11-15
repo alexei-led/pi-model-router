@@ -16,6 +16,21 @@ import {
 import { isRouterTier } from './domain';
 import type { ModelDefinition, RouterConfig, RouterProfile } from './types';
 
+it('keeps null activity reset ownership separate from inherited cells and ignores injected runtime provenance', () => {
+  const profile = normalizeConfig({
+    profiles: {
+      p: {
+        activityPreset: 'off',
+        medium: { model: 'work/custom', thinking: 'high' },
+        activities: { debug: { medium: null } },
+        activityResets: { code: ['medium'] },
+      },
+    },
+  }).config.profiles.p;
+  expect(profile?.activities?.debug).toBeUndefined();
+  expect(profile?.activityResets).toEqual({ debug: ['medium'] });
+});
+
 describe('status line configuration', () => {
   it.each([undefined, {}, { statusLine: 'compact' }])(
     'defaults to compact for %j',

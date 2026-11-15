@@ -14,15 +14,17 @@ With the new example ladder, the generic preferences are:
 | ------ | -------------- | -------------- | -------------- |
 | micro  | Luna / off     | Luna / off     | Luna / off     |
 | low    | Luna / medium  | Luna / high    | Terra / medium |
-| medium | Luna / high    | Terra / medium | Sol / medium   |
-| high   | Terra / medium | Sol / high     | Sol / xhigh    |
+| medium | Terra / medium | Terra / medium | Sol / medium   |
+| high   | Sol / high     | Sol / high     | Sol / xhigh    |
 
 Luna is `gpt-6-luna`, Terra is `gpt-6.1-terra`, and Sol is `gpt-6.1-sol`.
 The exact configured provider ID is preserved. Availability under one provider
 does not establish availability under another.
 
-Built-in activities use the same low row. At medium/balanced and high/cost,
-code/debug use Terra/xhigh; other activities use Terra/medium.
+Built-in activities use the same low row. Medium/balanced and medium/cost
+use Terra/high for code, Sol/medium for debug/plan/review, and Terra/medium for
+explore/docs/ops. High/cost uses Sol/high for code/debug/plan/review and
+Terra/medium for source-grounded explore/docs or bounded ops.
 Medium/quality uses Sol/high for code/debug/plan/review, otherwise Sol/medium.
 High/balanced uses Sol/xhigh for debug/plan/review, otherwise Sol/high.
 High/quality is Sol/xhigh. Existing micro activity pairs stay unchanged.
@@ -61,8 +63,13 @@ the configured pair. This selection adds no implicit generation fallback or retr
 | `quality`  | Raise effort one step. If no higher supported effort exists, try the next tier's route. Do not use a high-source tier lever over budget. |
 
 Anthropic presets and arbitrary/custom/mixed providers retain this behavior;
-the router never inserts Terra into them. Quality does not intentionally lower
-an eligible balanced route's effort on the same model.
+the router never inserts Terra into them. For exact `claude-haiku-5-5`, automatic
+quality keeps high rather than promoting it to xhigh; only medium ops may promote
+high to xhigh. Explicit higher efforts, pins and effort overrides remain valid.
+This preference does not apply to other models or provider effort enums.
+Quality does not intentionally lower an eligible balanced route's effort on the same model.
+Declared next-tier routes, not prices, determine quality model upgrades; prices
+only establish cheaper cost-mode alternatives.
 
 The soft budget filters logical tiers and skips advisors, not physical models
 or prices. A normalized medium Sol cell can remain eligible over budget even
@@ -75,8 +82,8 @@ Missing or zero prices do not prove that another model is cheaper.
 For example, with the built-in OpenAI preset, `medium + debug` prefers:
 
 ```text
-cost      → gpt-6-luna / high
-balanced  → gpt-6.1-terra / xhigh
+cost      → gpt-6.1-sol / medium
+balanced  → gpt-6.1-sol / medium
 quality   → gpt-6.1-sol / high
 ```
 
@@ -157,7 +164,7 @@ Open `/router routes` and choose **Edit cell**.
 - **Mapped configured effort:** that cell's effort after capability mapping and any tier-wide override.
 - **Current preferred:** the mode-adjusted text route, with its source and model/effort lever.
 - **Queued preferred:** the route after queued mode or cell changes activate.
-- **Actual:** the model and effort that generated, shown in Now and the route strip.
+- **Actual:** the physical target and effort delegated to Pi, shown in Now and the route strip. This is not proof of the provider's transmitted or served settings.
 
 The Routes list also shows preferred pairs alongside configured activity cells.
 A pin, effort override, disabled activity routing or declared fallback has an explicit preview label.

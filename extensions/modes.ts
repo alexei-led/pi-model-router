@@ -1,11 +1,12 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { DEFAULT_MODES, DEFAULT_SWITCH_POLICY } from './config';
-import { THINKING_LEVELS } from './domain';
+import { parseCanonicalModelRef, THINKING_LEVELS } from './domain';
 import type {
   ModeLever,
   ModeSource,
   ResolvedMode,
   RoutePair,
+  RouterActivity,
   RouterConfig,
   RouterMode,
   RouterModeBypass,
@@ -98,6 +99,7 @@ const shift = (tier: RouterTier, step: 1 | -1): RouterTier | undefined =>
 export const transformRoute = (input: {
   mode: RouterMode;
   tier: RouterTier;
+  activity?: RouterActivity | undefined;
   routeAt: (tier: RouterTier) => RoutePair | undefined;
   project: (pair: RoutePair, level: ThinkingLevel) => ThinkingLevel | undefined;
   inputPrice: (model: string) => number | undefined;
@@ -143,6 +145,14 @@ export const transformRoute = (input: {
       ? { sourceTier: tier, thinking: effort, lever: 'effort' }
       : keep;
   }
+  // Only Haiku 5.5 has this automatic preference; explicit higher efforts remain valid.
+  if (
+    own.model.includes('/') &&
+    parseCanonicalModelRef(own.model).modelId === 'claude-haiku-5-5' &&
+    own.thinking === 'high' &&
+    !(tier === 'medium' && input.activity === 'ops')
+  )
+    return keep;
   const effort = stepped(1);
   if (effort && level(effort) > level(own.thinking))
     return { sourceTier: tier, thinking: effort, lever: 'effort' };

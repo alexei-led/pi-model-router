@@ -476,6 +476,64 @@ describe('goal and phase advice', () => {
   );
 });
 
+describe('durable ops phase floors', () => {
+  it.each([
+    ['reason', 'debug'],
+    ['produce', 'code'],
+    ['verify', 'ops'],
+    ['execute', 'ops'],
+    ['report', undefined],
+    ['uncertain', undefined],
+    [undefined, undefined],
+  ])(
+    'maps accepted ops + %s to %s without rewriting the goal',
+    async (phase, effective) => {
+      const current = registry();
+      current.classify = vi.fn<ClassifierRegistry['classify']>(async () => ({
+        ...classifierResult(),
+        answers: {
+          ...classifierResult().answers,
+          activity: {
+            type: 'choice',
+            choice: 'ops',
+            confidence: 0.9,
+            probabilities: { ops: 1 },
+          },
+          ...(phase
+            ? {
+                phase: {
+                  type: 'choice' as const,
+                  choice: phase,
+                  confidence: 0.9,
+                  probabilities: { [phase]: 1 },
+                },
+              }
+            : {}),
+        },
+      }));
+      const result = await runClassifierDetailed(
+        config,
+        request({
+          activityCandidates: [
+            {
+              activity: 'ops',
+              candidate: createCandidate({
+                tier: 'high',
+                model: 'generation/ops',
+                thinking: 'low',
+              }),
+            },
+          ],
+        }),
+        current,
+      );
+      expect(result.advice?.activity).toBe(effective);
+      expect(result.diagnostics.activity).toBe('ops');
+      if (!effective) expect(result.advice).toBeUndefined();
+    },
+  );
+});
+
 describe('conservative phase gating', () => {
   const activityCandidates = [
     {

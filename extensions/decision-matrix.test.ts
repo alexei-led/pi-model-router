@@ -7,6 +7,7 @@ import { prepareRouterRequest } from './provider-request';
 import { createProviderTurnCache } from './provider-turns';
 import { buildRouteMatrix } from './routing';
 import { message, model, required } from './test/fixtures';
+import { runtimeCosts } from './test/runtime-catalog';
 import type {
   RawRouterConfig,
   RouterMode,
@@ -16,25 +17,25 @@ import type {
 } from './types';
 import { ROUTER_ACTIVITIES, ROUTER_MODES, ROUTER_TIERS } from './types';
 
-/** Pi 1.3.0 catalog prices and effort maps for the routed models. */
+/** Current runtime tariffs with the supported SDK's public model shape. */
 const unsupported = { off: null, minimal: null } as const;
 const extended = { xhigh: 'xhigh', max: 'max' } as const;
 const catalog: Model<Api>[] = [
   model('claude-opus-5-5', {
     provider: 'anthropic',
-    cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+    cost: required(runtimeCosts['claude-opus-5-5']),
     thinkingLevelMap: { ...unsupported, ...extended },
     contextWindow: 1_000_000,
   }),
   model('claude-sonnet-5-5', {
     provider: 'anthropic',
-    cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+    cost: required(runtimeCosts['claude-sonnet-5-5']),
     thinkingLevelMap: { ...unsupported, ...extended },
     contextWindow: 1_000_000,
   }),
   model('claude-haiku-5-5', {
     provider: 'anthropic',
-    cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+    cost: required(runtimeCosts['claude-haiku-5-5']),
     thinkingLevelMap: { ...unsupported, ...extended },
     contextWindow: 1_000_000,
   }),
@@ -45,19 +46,19 @@ const catalog: Model<Api>[] = [
   }),
   model('gpt-6.1-terra', {
     provider: 'openai-codex',
-    cost: { input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25 },
+    cost: required(runtimeCosts['gpt-6.1-terra']),
     thinkingLevelMap: { minimal: null, ...extended },
     contextWindow: 500_000,
   }),
   model('gpt-6.1-sol', {
     provider: 'openai-codex',
-    cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+    cost: required(runtimeCosts['gpt-6.1-sol']),
     thinkingLevelMap: { off: null, ...extended },
     contextWindow: 500_000,
   }),
   model('gpt-6-luna', {
     provider: 'openai-codex',
-    cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+    cost: required(runtimeCosts['gpt-6-luna']),
     thinkingLevelMap: extended,
     contextWindow: 272_000,
   }),
@@ -168,6 +169,16 @@ const registry = (outcome: Outcome, activity: string) =>
         timestamp: 1,
         stopReason: 'stop',
         answers: {
+          ...(activity === 'ops'
+            ? {
+                phase: {
+                  type: 'choice',
+                  choice: 'execute',
+                  confidence: 1,
+                  probabilities: { execute: 1 },
+                },
+              }
+            : {}),
           ...(route
             ? {
                 route: {
@@ -513,11 +524,11 @@ describe('golden routing decision matrix', () => {
       }),
     );
     expect(differing).toEqual({
-      'reference/personal': { cells: 245, cost: 137, quality: 139 },
+      'reference/personal': { cells: 245, cost: 137, quality: 136 },
       'reference/work': { cells: 245, cost: 147, quality: 147 },
-      'reference/openai': { cells: 245, cost: 139, quality: 124 },
-      'user/claude': { cells: 245, cost: 138, quality: 139 },
-      'user/openai': { cells: 245, cost: 139, quality: 124 },
+      'reference/openai': { cells: 245, cost: 38, quality: 124 },
+      'user/claude': { cells: 245, cost: 138, quality: 136 },
+      'user/openai': { cells: 245, cost: 128, quality: 124 },
     });
   });
 });

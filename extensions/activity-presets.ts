@@ -29,13 +29,13 @@ export const ACTIVITY_PRESETS = {
     code: [
       [LUNA, 'low'],
       [LUNA, 'high'],
-      [TERRA, 'xhigh'],
+      [TERRA, 'high'],
       [SOL, 'high'],
     ],
     debug: [
       [LUNA, 'medium'],
       [LUNA, 'high'],
-      [TERRA, 'xhigh'],
+      [SOL, 'medium'],
       [SOL, 'xhigh'],
     ],
     explore: [
@@ -47,13 +47,13 @@ export const ACTIVITY_PRESETS = {
     plan: [
       [LUNA, 'medium'],
       [LUNA, 'high'],
-      [TERRA, 'medium'],
+      [SOL, 'medium'],
       [SOL, 'xhigh'],
     ],
     review: [
       [LUNA, 'medium'],
       [LUNA, 'high'],
-      [TERRA, 'medium'],
+      [SOL, 'medium'],
       [SOL, 'xhigh'],
     ],
     ops: [
@@ -135,11 +135,15 @@ export const openaiModePreference = (
   if (tier === 'micro' || mode === 'balanced') return undefined;
   if (mode === 'cost') {
     if (tier === 'low') return [LUNA, 'medium'];
-    if (tier === 'medium') return [LUNA, 'high'];
-    return [
-      TERRA,
-      activity === 'code' || activity === 'debug' ? 'xhigh' : 'medium',
-    ];
+    const reasoning =
+      activity && ['debug', 'plan', 'review'].includes(activity);
+    if (tier === 'medium')
+      return reasoning
+        ? [SOL, 'medium']
+        : [TERRA, activity === 'code' ? 'high' : 'medium'];
+    return activity && ['explore', 'docs', 'ops'].includes(activity)
+      ? [TERRA, 'medium']
+      : [SOL, 'high'];
   }
   if (tier === 'low') return [TERRA, 'medium'];
   if (tier === 'high') return [SOL, 'xhigh'];

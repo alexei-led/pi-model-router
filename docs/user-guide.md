@@ -44,16 +44,16 @@ The first profile above does not enable one.
 
 ## Understand the result
 
-| Part of the strip             | Meaning                                                                                                                              |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `▂ ▂▄ ▂▄▆ ▂▄▆█`               | The tier that ran: `micro`, `low`, `medium`, `high`. The same bars name a tier on every surface.                                    |
-| Model name and effort         | The actual generation target, such as `Opus 5.5 · high`, not the classifier's choice. `ui.statusLine: "detailed"` shows `provider/model`. |
-| Activity                      | A noun after the effort when an activity cell ran. A base route shows none. [Read activity labels](activity-routing.md#understand-the-display). |
+| Part of the strip             | Meaning                                                                                                                                                              |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `▂ ▂▄ ▂▄▆ ▂▄▆█`               | The tier that ran: `micro`, `low`, `medium`, `high`. The same bars name a tier on every surface.                                                                     |
+| Model name and effort         | The actual generation target, such as `Opus 5.5 · high`, not the classifier's choice. `ui.statusLine: "detailed"` shows `provider/model`.                            |
+| Activity                      | A noun after the effort when an activity cell ran. A base route shows none. [Read activity labels](activity-routing.md#understand-the-display).                      |
 | `↑ ↓ = … ! ⏵` and a few words | Why: `↑` stronger, `↓` cheaper, `=` stays, `…` waits, `!` fault, `⏵` pin. Examples: `↑ clearly stronger`, `= fits`, `… cheaper, waiting`, `! timed out`, `⏵ pinned`. |
-| `= reused`                    | A tool turn reused the route. No new classifier request.                                                                              |
-| `! fallback`                  | Another configured generation target ran, possibly in the same tier.                                                                  |
-| Second line                   | Profile, mode with its source, and the classifier time when its advice was accepted.                                                  |
-| `⏵ next turn: …`              | Applied controls waiting for a user turn. The generation does not change until then.                                                  |
+| `= reused`                    | A tool turn reused the route. No new classifier request.                                                                                                             |
+| `! fallback`                  | Another configured generation target ran, possibly in the same tier.                                                                                                 |
+| Second line                   | Profile, mode with its source, and the classifier time when its advice was accepted.                                                                                 |
+| `⏵ next turn: …`              | Applied controls waiting for a user turn. The generation does not change until then.                                                                                 |
 
 The strip drops detail on a narrow screen in this order: the activity, then the
 reason. The tier bars and the model always stay. The footer status is shared
@@ -92,13 +92,13 @@ generation failure uses the error color. Colors always have text labels.
 Open **`/router`** for five tabs: **Now · Routes · Classifier · Usage · Settings**.
 Use `/router routes`, `/router classifier`, `/router usage` or `/router settings` to open a tab directly.
 
-| Tab            | What it shows and controls                                                                                                                                                                                                                                            |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Now**        | Actual physical model, activity, tier and effort. Up to four recent retained model/effort transitions, with local reasons. Held proposals and queued controls stay separate from actual generation. **Why this route?** expands budget and route details.             |
+| Tab            | What it shows and controls                                                                                                                                                                                                                                                                                                             |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Now**        | Actual physical model, activity, tier and effort. Up to four recent retained model/effort transitions, with local reasons. Held proposals and queued controls stay separate from actual generation. **Why this route?** expands budget and route details.                                                                              |
 | **Routes**     | Compact activity × tier grid: `B` built-in, `I` inherited, `O` override, `—` missing, `*` draft, `+` queued. **Details** expands activity overrides and their fallbacks; generic routes stay visible; **Edit cell** opens activity/tier, searchable model and supported-effort selectors. Configured routes are not actual generation. |
-| **Classifier** | Readiness, selected model, enablement and last operation. Model, deadline and review interval are session controls; approval and credentials stay in user config. |
-| **Usage**      | Retained generation count, model switches versus effort-only changes, known-cost coverage and route mix. **Details** exposes advisor, HTTP, cache and other diagnostics. A prominent logging-off message explains empty history.                                      |
-| **Settings**   | Pin and session mode first. **Advanced** exposes baseline, soft budget, tier-wide effort and switch-cost policy. Route editing and classifier controls live in their own tabs. |
+| **Classifier** | Readiness, selected model, enablement and last operation. Model, deadline and review interval are session controls; approval and credentials stay in user config.                                                                                                                                                                      |
+| **Usage**      | Retained generation count, model switches versus effort-only changes, known-cost coverage and route mix. **Details** exposes advisor, HTTP, cache and other diagnostics. A prominent logging-off message explains empty history.                                                                                                       |
+| **Settings**   | Pin and session mode first. **Advanced** exposes baseline, soft budget, tier-wide effort and switch-cost policy. Route editing and classifier controls live in their own tabs.                                                                                                                                                         |
 
 The switch trail uses adjacent known generation targets in retained active-branch history.
 It does not count advisor-only reviews as generation, join transitions across unknown targets,
@@ -154,7 +154,6 @@ Last-operation diagnostics remain visible while history collection is off and
 refresh when classification completes, without waiting for generation to finish.
 The operation model, source and profile are labeled separately from the current
 selection. These are observations, not proof of a new HTTP call on every tool step.
-
 
 ### Usage and logging
 
@@ -227,6 +226,18 @@ Usage is **not lifetime accounting**. `/router log on` starts collection;
 turning it off preserves existing history, and clearing it clears this view.
 Classifier calls are deduplicated by local request ID. Attempts and reused decisions are counted separately. Missing costs are unknown, not zero. Do not add these
 observations to overlapping host totals.
+
+Cost diagnostics identify Pi usage estimates and their coverage. Pi's effective
+registry/SDK/custom tariffs can differ from public list prices, invoices or
+subscription quotas. Unreported attempts make totals incomplete; zero or missing
+tariffs are unknown, not evidence of free generation.
+
+Settings have separate evidence levels: configured/requested, selected after
+mode/capability mapping, and delegated to Pi. Retained diagnostics can also show
+the SDK message's thinking level; Pi can stamp it locally, so it is not a
+backend-reported served effort. The router does not observe the transmitted or
+served effort and labels them unknown. Routing observations are not business
+task completions; task acceptance remains external.
 
 The session gauge uses **recorded catalog cost**, not an invoice or precise
 remaining allowance. Missing reports can leave it partial. The fill stops at
@@ -316,23 +327,23 @@ Use `/router thinking auto` to clear the override.
 
 ## Command reference
 
-| Command                                           | Action                                                               |
-| ------------------------------------------------- | -------------------------------------------------------------------- |
-| `/router`                                         | Open Now, or return text outside TUI.                                |
-| `/router routes`                                  | Open the configured route grid and per-cell editor.                  |
-| `/router classifier`                              | Open classifier readiness, selection and last-operation diagnostics. |
-| `/router usage`                                   | Inspect retained decisions and catalog costs.                        |
-| `/router settings`                                | Inspect and edit session controls in TUI.                            |
-| `/router status`                                  | Show status. In the TUI it is a transcript entry, not sent to the model. |
-| `/router profile <name>`                          | Select a profile and enable the router.                              |
-| `/router off`                                     | Restore the previous non-router model.                               |
-| `/router pin <tier\|auto>`                        | Pin a tier or return to automatic selection.                         |
-| `/router thinking <level\|auto>`                  | Override effort for the profile or clear the override.               |
-| `/router mode [cost\|balanced\|quality\|default]` | Show the routing mode, set a session override, or clear it.          |
+| Command                                           | Action                                                                                       |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `/router`                                         | Open Now, or return text outside TUI.                                                        |
+| `/router routes`                                  | Open the configured route grid and per-cell editor.                                          |
+| `/router classifier`                              | Open classifier readiness, selection and last-operation diagnostics.                         |
+| `/router usage`                                   | Inspect retained decisions and catalog costs.                                                |
+| `/router settings`                                | Inspect and edit session controls in TUI.                                                    |
+| `/router status`                                  | Show status. In the TUI it is a transcript entry, not sent to the model.                     |
+| `/router profile <name>`                          | Select a profile and enable the router.                                                      |
+| `/router off`                                     | Restore the previous non-router model.                                                       |
+| `/router pin <tier\|auto>`                        | Pin a tier or return to automatic selection.                                                 |
+| `/router thinking <level\|auto>`                  | Override effort for the profile or clear the override.                                       |
+| `/router mode [cost\|balanced\|quality\|default]` | Show the routing mode, set a session override, or clear it.                                  |
 | `/router log [on\|off\|clear]`                    | Show recent decisions (a transcript entry in the TUI), control collection, or clear history. |
-| `/router widget`                                  | Toggle the status widget.                                            |
-| `/router reload`                                  | Reload router configuration, not Pi provider extensions.             |
-| `/router help`                                    | Show command help.                                                   |
+| `/router widget`                                  | Toggle the status widget.                                                                    |
+| `/router reload`                                  | Reload router configuration, not Pi provider extensions.                                     |
+| `/router help`                                    | Show command help.                                                                           |
 
 Per-tier effort can be set in the profile configuration or as a session override in the inspector.
 The old bare profile shorthand returns a migration hint without switching. Use
@@ -368,8 +379,8 @@ The [complete example](../model-router.example.json) shows aliases, tier/activit
 | `switchPolicy.horizonRequests`        | Cost-comparison horizon, 1–20 requests (default 5).                                                                                                                                                                            |
 | `switchPolicy.costSensitivity`        | 0 is opportunistic (accepts a larger estimated premium); 1 only accepts switches no more expensive than staying. Default 0.5.                                                                                                  |
 | `switchPolicy.escalationHoldTurns`    | User turns after the failing turn that keep a [repeated-failure escalation](#repeated-tool-failures), 0–20 (default 2). 0 limits it to the failing turn. `cost` and `quality` replace it unless `modes.<mode>.policy` sets it. |
-| `profiles.<name>.switchPolicy` | User-only partial policy override. See [policy precedence](routing-modes.md#tune-switching-policy). |
-| `profiles.<name>.notificationTypes` | User-only exact native custom-message types treated as progress, not new goals. See [notification recognition](classifier-advisor.md#goals-steering-and-notifications). |
+| `profiles.<name>.switchPolicy`        | User-only partial policy override. See [policy precedence](routing-modes.md#tune-switching-policy).                                                                                                                            |
+| `profiles.<name>.notificationTypes`   | User-only exact native custom-message types treated as progress, not new goals. See [notification recognition](classifier-advisor.md#goals-steering-and-notifications).                                                        |
 | `profiles.<name>.mode`                | Routing mode for the profile: `cost`, `balanced` or `quality`. See [routing modes](#choose-a-routing-mode).                                                                                                                    |
 | `modes.<mode>.policy`                 | Switch-policy values for one mode, which replace the built-in mode values.                                                                                                                                                     |
 | `switchPolicy.strongAdviceConfidence` | Minimum relevant classifier confidence that can override estimated switch cost. Default 0.9. Tier and activity confidence are independent.                                                                                     |

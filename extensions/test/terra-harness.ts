@@ -49,6 +49,16 @@ export const terraHarness = (
         timestamp: 1,
         stopReason: 'stop',
         answers: {
+          ...(activity === 'ops'
+            ? {
+                phase: {
+                  type: 'choice' as const,
+                  choice: 'execute',
+                  confidence: 1,
+                  probabilities: { execute: 1 },
+                },
+              }
+            : {}),
           ...(choice
             ? {
                 route: {

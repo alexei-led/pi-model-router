@@ -1144,7 +1144,10 @@ describe('built-in route tuning', () => {
         (c) => c.activity === 'debug' && c.tier === 'medium',
       ),
     );
-    expect(cell.current).toMatchObject({ state: 'builtin', thinking: 'xhigh' });
+    expect(cell.current).toMatchObject({
+      state: 'builtin',
+      thinking: 'medium',
+    });
     expect(
       await runtime.adapters.applyRoutes({
         profile: 'auto',
@@ -1171,6 +1174,9 @@ describe('built-in route tuning', () => {
     expect(
       state.currentConfig.profiles.auto?.activities?.plan?.medium?.thinking,
     ).toBe('medium');
+    expect(state.currentConfig.profiles.auto?.activityResets?.debug).toEqual([
+      'medium',
+    ]);
   });
 });
 
@@ -1319,8 +1325,8 @@ describe('mode-adjusted route previews', () => {
     return f;
   };
   it.each([
-    ['cost', 'scope/gpt-6-luna', 'high'],
-    ['balanced', 'scope/gpt-6.1-terra', 'xhigh'],
+    ['cost', 'scope/gpt-6.1-sol', 'medium'],
+    ['balanced', 'scope/gpt-6.1-sol', 'medium'],
     ['quality', 'scope/gpt-6.1-sol', 'high'],
   ] as const)(
     'previews %s without changing configured or actual routes',
@@ -1334,8 +1340,8 @@ describe('mode-adjusted route previews', () => {
         ),
       );
       expect(cell.current).toMatchObject({
-        model: 'scope/gpt-6.1-terra',
-        thinking: 'xhigh',
+        model: 'scope/gpt-6.1-sol',
+        thinking: 'medium',
       });
       expect(cell.preferred).toMatchObject({
         status: 'eligible',
@@ -1359,8 +1365,8 @@ describe('mode-adjusted route previews', () => {
           (cell) => cell.activity === 'debug' && cell.tier === 'medium',
         ),
     );
-    expect(cell.preferred?.route?.model).toBe('scope/gpt-6.1-terra');
-    expect(cell.pendingPreferred?.route?.model).toBe('scope/gpt-6-luna');
+    expect(cell.preferred?.route?.model).toBe('scope/gpt-6.1-sol');
+    expect(cell.pendingPreferred?.route?.model).toBe('scope/gpt-6.1-sol');
   });
   it('shows pin and effort bypasses instead of pretending a mode changed the route', () => {
     const { state, runtime } = configured();

@@ -948,7 +948,7 @@ const normalizeProfileActivities = (
   normalizedModels: Record<string, ModelDefinition>,
 ): Pick<
   RouterProfile,
-  'activities' | 'activityPreset' | 'activityPresetFamily'
+  'activities' | 'activityResets' | 'activityPreset' | 'activityPresetFamily'
 > => {
   const activityPreset =
     profileRecord.activityPreset === undefined ||
@@ -977,8 +977,21 @@ const normalizeProfileActivities = (
     preset?.family === 'openai',
   );
 
+  const rawActivities = profileRecord.activities;
+  const activityResets = Object.fromEntries(
+    ROUTER_ACTIVITIES.flatMap((activity) => {
+      const cell = isObjectRecord(rawActivities)
+        ? rawActivities[activity]
+        : undefined;
+      const tiers = isObjectRecord(cell)
+        ? ROUTER_TIERS.filter((tier) => cell[tier] === null)
+        : [];
+      return tiers.length ? [[activity, tiers]] : [];
+    }),
+  );
   return {
     activityPreset,
+    ...(Object.keys(activityResets).length ? { activityResets } : {}),
     ...(preset ? { activityPresetFamily: preset.family } : {}),
     ...(activities ? { activities } : {}),
   };

@@ -611,12 +611,36 @@ const chooseAdvisorRoute = async (
         activeConfig.profiles[input.profileName]?.advisor,
       ]) &&
     (reviewResult !== undefined || performance.now() < routingDeadline);
-  const activity = authorized ? result.advice?.activity : undefined;
+  const requestedActivity = authorized ? result.advice?.activity : undefined;
+  const opsFloor =
+    result.diagnostics.activity === 'ops' &&
+    (requestedActivity === 'debug' || requestedActivity === 'code');
+  const specific = candidate
+    ? current.plans.find(
+        (entry) =>
+          entry.tier === candidate.tier && entry.cell === requestedActivity,
+      )
+    : undefined;
+  // Without a declared floor, model suitability is unknown. Never replace an
+  // eligible ops specialization with inherited generic solely because of phase.
+  // An explicit null/use-tier reset, like an explicit cell, remains authoritative.
+  const retainedOps =
+    opsFloor &&
+    !specific &&
+    candidate &&
+    !input.profile.activityResets?.[requestedActivity]?.includes(
+      candidate.tier,
+    ) &&
+    !input.profile.activities?.[requestedActivity]?.[candidate.tier]
+      ? current.plans.find(
+          (entry) => entry.tier === candidate.tier && entry.cell === 'ops',
+        )
+      : undefined;
+  const activity = retainedOps ? 'ops' : requestedActivity;
   const plan =
     authorized && candidate
-      ? (current.plans.find(
-          (entry) => entry.tier === candidate.tier && entry.cell === activity,
-        ) ??
+      ? (retainedOps ??
+        specific ??
         current.plans.find(
           (entry) => entry.tier === candidate.tier && !entry.cell,
         ))

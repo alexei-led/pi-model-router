@@ -62,6 +62,16 @@ const scenario = async (openai = false, activity: RouterActivity = 'ops') => {
         timestamp: 1,
         stopReason: 'stop' as const,
         answers: {
+          ...(activity === 'ops'
+            ? {
+                phase: {
+                  type: 'choice' as const,
+                  choice: 'execute',
+                  confidence: 1,
+                  probabilities: { execute: 1 },
+                },
+              }
+            : {}),
           ...(choice
             ? {
                 route: {
@@ -231,22 +241,17 @@ const scenario = async (openai = false, activity: RouterActivity = 'ops') => {
 };
 
 describe('cost-mode failure recovery', () => {
-  it.each([
-    'code',
-    'debug',
-    'review',
-    'plan',
-    'explore',
-    'ops',
-    'docs',
-  ] as const)(
-    'recovers Terra cost/high %s to its immutable balanced Sol cell without renewing indefinitely',
+  it.each(['debug', 'review', 'plan', 'explore', 'ops', 'docs'] as const)(
+    'recovers discounted cost/high %s to its immutable balanced Sol cell without renewing indefinitely',
     async (activity) => {
       const f = await scenario(true, activity);
       expect(f.current().decision).toMatchObject({
-        targetModelId: 'gpt-6.1-terra',
-        thinking:
-          activity === 'code' || activity === 'debug' ? 'xhigh' : 'medium',
+        targetModelId: ['debug', 'plan', 'review'].includes(activity)
+          ? 'gpt-6.1-sol'
+          : 'gpt-6.1-terra',
+        thinking: ['debug', 'plan', 'review'].includes(activity)
+          ? 'high'
+          : 'medium',
         tier: 'high',
       });
       const recovered = await f.next('bash', true);
@@ -265,7 +270,11 @@ describe('cost-mode failure recovery', () => {
         true,
       );
       const expired = await f.user('expired hold');
-      expect(expired.decision.targetModelId).toBe('gpt-6.1-terra');
+      expect(expired.decision.targetModelId).toBe(
+        ['debug', 'plan', 'review'].includes(activity)
+          ? 'gpt-6.1-sol'
+          : 'gpt-6.1-terra',
+      );
       expect(expired.decision.costRecovery).not.toBe(true);
     },
   );
@@ -277,6 +286,16 @@ describe('cost-mode failure recovery', () => {
       expect((await f.next('bash', true)).decision.costRecovery).not.toBe(true);
     },
   );
+
+  it('does not arm recovery when cost high code already equals balanced high', async () => {
+    const f = await scenario(true, 'code');
+    expect(f.current().decision).toMatchObject({
+      targetModelId: 'gpt-6.1-sol',
+      thinking: 'high',
+      modeLever: 'none',
+    });
+    expect((await f.next('bash', true)).decision.costRecovery).not.toBe(true);
+  });
 
   it('restores the balanced high cell and keeps native tool continuations on that immutable plan', async () => {
     const f = await scenario();

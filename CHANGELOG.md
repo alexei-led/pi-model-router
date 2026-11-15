@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.21.0] - 2026-11-15
+
+Align default-owned OpenAI routes with reasoning and implementation roles, and keep adaptive ops work off unvalidated generic downgrades.
+
+### Changes
+
+- Prefer Terra/high for medium code, Sol/medium for medium debug/plan/review, and Terra/medium for ordinary workers in balanced and cost modes. Cost high reasoning/code and matching generic ladders prefer Sol/high; bounded explore/docs/ops may retain Terra/medium. Quality remains model-first. Existing micro cells and user-owned generic/custom routes are unchanged.
+- Keep durable ops goals while accepted reasoning/production phases use same-tier debug/code preferences. Weak/report phases retain eligible continuations or use the fresh-request baseline. Explicit cells and use-tier resets remain authoritative; unknown inherited generic suitability cannot silently weaken an ops specialization.
+- Prefer exact Haiku 5.5/high for automatic quality instead of blanket xhigh promotion; medium bounded ops keeps its xhigh exception. Pins and manual effort choices remain valid.
+- Record delegated effort separately from SDK-message effort, and label Pi usage estimates and missing cost coverage. Neither SDK settings nor catalog estimates establish transmitted/served settings, bills, quotas or task acceptance.
+- Refresh hermetic current-runtime tariff fixtures and generated route tables without changing SDK requirements, advisor budget exclusions, fallbacks or native session fences.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. No schema migration is required. Existing custom generic ladders keep their mode transform; use the example Luna/off, Luna/high, Terra/medium, Sol/high ladder to opt generic OpenAI cells into model-aware defaults.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.20.1...v0.21.0)
+
 ## [0.20.1] - 2026-11-13
 
 Keep a task's durable goal distinct from its current work phase when activity routing is enabled.

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  activityForPhase,
   buildChoicePayload,
   parseActivity,
   parseAdvice,
@@ -313,18 +314,18 @@ export const runClassifierDetailed = async (
         metrics.selectionBasis = selected.basis;
         metrics.routeProbability = selected.routeProbability;
       }
+      const effectiveActivity = activityForPhase(
+        activity?.activity,
+        hasLaterNotification ? undefined : phase?.phase,
+      );
+      // An ops goal alone does not establish bounded execution. Initial uncertainty
+      // uses baseline; a continuation review retains its validated incumbent.
+      if (activity?.activity === 'ops' && !effectiveActivity)
+        return result('uncertain');
       return result(
         'selected',
         {
-          ...(activity?.activity
-            ? {
-                activity:
-                  !hasLaterNotification &&
-                  (phase?.phase === 'verify' || phase?.phase === 'execute')
-                    ? 'ops'
-                    : activity.activity,
-              }
-            : {}),
+          ...(effectiveActivity ? { activity: effectiveActivity } : {}),
           candidateId: selected.candidate.id,
           confidence: parsed.confidence,
           latencyMs: Math.max(0, now() - start),

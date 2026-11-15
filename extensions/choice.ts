@@ -264,6 +264,19 @@ interface ParsedChoice {
   probabilities: Readonly<Record<string, number>>;
 }
 
+/** Semantic preference only: no local tier inference and no durable-goal mutation. */
+export const activityForPhase = (
+  goal: RouterActivity | undefined,
+  phase: RouterPhase | undefined,
+): RouterActivity | undefined => {
+  if (!goal) return undefined;
+  if (phase === 'verify' || phase === 'execute') return 'ops';
+  if (goal !== 'ops') return goal;
+  if (phase === 'reason') return 'debug';
+  if (phase === 'produce') return 'code';
+  return undefined;
+};
+
 export const selectedAdviceConfidence = (
   diagnostics: ClassifierDiagnostics,
   changes: { tier: boolean; activity: boolean },
@@ -280,9 +293,11 @@ export const selectedAdviceConfidence = (
       ? diagnostics.activityConfidence
       : undefined;
   const phaseChangesActivity =
-    diagnostics.activity !== 'ops' &&
     diagnostics.phaseOutcome === 'selected' &&
-    (diagnostics.phase === 'verify' || diagnostics.phase === 'execute');
+    isRouterActivity(diagnostics.activity) &&
+    diagnostics.phase !== 'uncertain' &&
+    activityForPhase(diagnostics.activity, diagnostics.phase) !==
+      diagnostics.activity;
   const activity =
     phaseChangesActivity && goalConfidence !== undefined
       ? Math.min(goalConfidence, diagnostics.phaseConfidence ?? 0)

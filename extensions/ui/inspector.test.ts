@@ -468,6 +468,9 @@ describe('ui/inspector.ts', () => {
     expect(text).toContain('Route reuses: 1');
     expect(text).toContain('coverage 1/3');
     expect(text).toContain('Classifier cost: unknown · coverage 0/1');
+    expect(text).toContain('Cost source: Pi usage estimates');
+    expect(text).toContain('transmitted/served unknown');
+    expect(text).toContain('Task acceptance: external / not observed');
     expect(text).not.toContain('not free');
     expect(text).toContain('Cache-read share, last observed request: 70%');
     expect(text).toContain('Catalog cost / request:');

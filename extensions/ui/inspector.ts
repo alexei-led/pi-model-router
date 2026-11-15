@@ -275,6 +275,10 @@ export const formatRouterUIUsage = (
     `Advice without local IDs: ${retained.filter((entry) => entry.advice && !entry.advice.requestId).length} excluded`,
     '',
     `Classifier cost: ${advisorCosts.length ? usdFine(advisorCosts.reduce((sum, cost) => sum + cost, 0)) : 'unknown'} · coverage ${advisorCosts.length}/${samples.length}`,
+    'Cost source: Pi usage estimates (registry/SDK/custom tariffs); not bills or quota usage.',
+    `Cost-source coverage: ${retained.filter((entry) => entry.costSource === 'pi-usage-estimate').length}/${retained.length} generation observations`,
+    `Effort: delegated ${retained.at(-1)?.delegatedThinking ?? 'unknown'} · SDK message ${retained.at(-1)?.messageThinking ?? 'unreported'} · transmitted/served unknown`,
+    'Task acceptance: external / not observed; routing observations are not completed tasks.',
     'Advice excluded from generation budget.',
     'Host totals overlap. Do not add; no savings estimate.',
   ];
