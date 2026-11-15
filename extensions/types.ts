@@ -445,6 +445,8 @@ export interface RoutingDecision {
   adviceSource?: AdviceSource | undefined;
   /** Validated semantic answer, independent of the local cell used for availability. */
   activity?: RouterActivity | undefined;
+  /** Accepted ops engineering preference, runtime-only; never restored from snapshots or diagnostics. */
+  activityPreference?: 'debug' | 'code' | undefined;
   /** Local cell provenance, not an inferred activity. Omitted means generic. */
   routeCell?: RouterActivity | undefined;
   profile: string;

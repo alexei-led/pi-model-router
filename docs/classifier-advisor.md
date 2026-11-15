@@ -350,6 +350,10 @@ same-tier code preference for accepted `produce`, without changing the goal.
 Explicit cells and null/use-tier resets remain authoritative. With no declared
 floor and unknown model suitability, keep an eligible same-tier ops specialization
 rather than blindly replacing it with inherited generic; price is not capability evidence.
+The accepted engineering preference remains runtime-only and separate from the
+physical plan. Valid continuations reuse it when repeated failures raise the
+tier, resolving the new tier's floor and reset ownership again. Refused advice
+may update diagnostics but cannot replace this accepted preference.
 Ops with `report`, uncertain, missing, malformed or low-confidence phase retains
 an eligible incumbent on continuations; fresh uncertainty uses the conservative
 baseline. It cannot introduce a new ops discount or cold hop.

@@ -426,6 +426,7 @@ const reviewStamp = (
   identity: JSON.stringify([
     policy,
     selected.plan.id,
+    selected.decision.activityPreference,
     matrix.plans.map((plan) => plan.id),
     input.goalScope?.current
       ? createHash('sha256')
@@ -484,6 +485,33 @@ const scheduleBackgroundReview = (
       });
       return result;
     },
+  );
+};
+
+/** Resolve accepted intent without weakening an undeclared ops floor to generic. */
+const planForActivity = (
+  profile: RouterProfile,
+  matrix: RouteMatrix,
+  tier: RouterTier,
+  activity: RoutePlan['cell'],
+  protectOps = false,
+): RoutePlan | undefined => {
+  const specific = matrix.plans.find(
+    (entry) => entry.tier === tier && entry.cell === activity,
+  );
+  if (specific) return specific;
+  const retainedOps =
+    protectOps &&
+    activity &&
+    !profile.activityResets?.[activity]?.includes(tier) &&
+    !profile.activities?.[activity]?.[tier]
+      ? matrix.plans.find(
+          (entry) => entry.tier === tier && entry.cell === 'ops',
+        )
+      : undefined;
+  return (
+    retainedOps ??
+    matrix.plans.find((entry) => entry.tier === tier && !entry.cell)
   );
 };
 
@@ -615,36 +643,17 @@ const chooseAdvisorRoute = async (
   const opsFloor =
     result.diagnostics.activity === 'ops' &&
     (requestedActivity === 'debug' || requestedActivity === 'code');
-  const specific = candidate
-    ? current.plans.find(
-        (entry) =>
-          entry.tier === candidate.tier && entry.cell === requestedActivity,
-      )
-    : undefined;
-  // Without a declared floor, model suitability is unknown. Never replace an
-  // eligible ops specialization with inherited generic solely because of phase.
-  // An explicit null/use-tier reset, like an explicit cell, remains authoritative.
-  const retainedOps =
-    opsFloor &&
-    !specific &&
-    candidate &&
-    !input.profile.activityResets?.[requestedActivity]?.includes(
-      candidate.tier,
-    ) &&
-    !input.profile.activities?.[requestedActivity]?.[candidate.tier]
-      ? current.plans.find(
-          (entry) => entry.tier === candidate.tier && entry.cell === 'ops',
-        )
-      : undefined;
-  const activity = retainedOps ? 'ops' : requestedActivity;
   const plan =
     authorized && candidate
-      ? (retainedOps ??
-        specific ??
-        current.plans.find(
-          (entry) => entry.tier === candidate.tier && !entry.cell,
-        ))
+      ? planForActivity(
+          input.profile,
+          current,
+          candidate.tier,
+          requestedActivity,
+          opsFloor,
+        )
       : undefined;
+  const activity = opsFloor && plan?.cell === 'ops' ? 'ops' : requestedActivity;
   // Advice resolves a current cell; representative IDs never become physical targets by themselves.
   // An unchanged cell keeps its ID across modes, so the mode is compared too.
   const validated =
@@ -693,6 +702,7 @@ const chooseAdvisorRoute = async (
       decision: {
         ...decisionForPlan(input, plan, 'classifier'),
         activity,
+        activityPreference: opsFloor ? requestedActivity : undefined,
         isClassifier: true,
         advisor: 'classifier',
       },
@@ -938,21 +948,35 @@ const applyEscalation = (
       (tier) =>
         tierRank(tier) >= tierRank(floor) && !(budget && tier === 'high'),
     )
-    .flatMap((tier) => [
-      matrix.plans.find(
-        (entry) => entry.tier === tier && entry.cell === selected.plan.cell,
+    .map((tier) =>
+      planForActivity(
+        input.profile,
+        matrix,
+        tier,
+        selected.decision.activityPreference ?? selected.plan.cell,
+        selected.decision.activityPreference !== undefined,
       ),
-      matrix.plans.find((entry) => entry.tier === tier && !entry.cell),
-    ])
+    )
     .find((entry) => entry !== undefined);
   if (!plan) return selected;
-  const { activity, advisor, adviceSource, bypassReason, classification } =
-    selected.decision;
+  const {
+    activityPreference,
+    advisor,
+    adviceSource,
+    bypassReason,
+    classification,
+  } = selected.decision;
+  const activity = activityPreference
+    ? plan.cell === 'ops'
+      ? 'ops'
+      : activityPreference
+    : selected.decision.activity;
   return {
     plan,
     decision: {
       ...decisionForPlan(input, plan, 'escalation'),
       activity,
+      activityPreference,
       advisor,
       adviceSource,
       bypassReason,
@@ -1057,13 +1081,13 @@ export const prepareRouterRequest = async (
         input.getCurrentMode().mode,
       );
       const prior = continuationRoute;
-      const plan =
-        recoveredMatrix.plans.find(
-          (entry) => entry.tier === 'high' && entry.cell === prior.plan.cell,
-        ) ??
-        recoveredMatrix.plans.find(
-          (entry) => entry.tier === 'high' && !entry.cell,
-        );
+      const plan = planForActivity(
+        input.profile,
+        recoveredMatrix,
+        'high',
+        prior.decision.activityPreference ?? prior.plan.cell,
+        prior.decision.activityPreference !== undefined,
+      );
       if (plan?.mode?.recovery) {
         input.cache.setEscalation({
           ...recovery.state,
@@ -1080,7 +1104,12 @@ export const prepareRouterRequest = async (
           plan,
           decision: {
             ...decisionForPlan(input, plan, 'cost-recovery'),
-            activity: prior.decision.activity,
+            activity: prior.decision.activityPreference
+              ? plan.cell === 'ops'
+                ? 'ops'
+                : prior.decision.activityPreference
+              : prior.decision.activity,
+            activityPreference: prior.decision.activityPreference,
             advisor: 'bypassed',
             bypassReason: 'tool-continuation',
           },

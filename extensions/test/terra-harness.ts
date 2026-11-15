@@ -14,6 +14,7 @@ import type {
   RawRouterConfig,
   RouterActivity,
   RouterMode,
+  RouterPhase,
   RouterTier,
 } from '../types';
 import { createRouterUIRuntime } from '../ui/runtime';
@@ -28,6 +29,7 @@ export const terraHarness = (
   let tier: RouterTier = 'medium';
   let activity: RouterActivity | 'generic' = 'generic';
   let classifyFailure = false;
+  let phase: RouterPhase = 'execute';
   const classify = vi.fn(
     async (
       target: { api: string; provider: string; id: string },
@@ -53,9 +55,9 @@ export const terraHarness = (
             ? {
                 phase: {
                   type: 'choice' as const,
-                  choice: 'execute',
+                  choice: phase,
                   confidence: 1,
-                  probabilities: { execute: 1 },
+                  probabilities: { [phase]: 1 },
                 },
               }
             : {}),
@@ -130,6 +132,7 @@ export const terraHarness = (
     Object.assign(state, { debugHistory: [] }),
     () => undefined,
   );
+  const recordDebugDecision = vi.fn();
   const register = vi.fn<ExtensionAPI['registerProvider']>();
   registerRouterProvider(
     { registerProvider: register } as unknown as ExtensionAPI,
@@ -137,7 +140,7 @@ export const terraHarness = (
     {
       beginRequest: ui.beginRequest,
       persistState: vi.fn(),
-      recordDebugDecision: vi.fn(),
+      recordDebugDecision,
       updateStatus: vi.fn(),
       syncPiThinkingLevel: vi.fn(),
     },
@@ -149,10 +152,12 @@ export const terraHarness = (
     selectedTier: RouterTier = 'medium',
     selectedActivity: RouterActivity | 'generic' = 'generic',
     context?: Context,
+    selectedPhase: RouterPhase = 'execute',
   ) => {
     state.modeOverride = mode;
     tier = selectedTier;
     activity = selectedActivity;
+    phase = selectedPhase;
     const stream = generate(
       model('p', { provider: 'router' }),
       normalizeContext(
@@ -179,6 +184,7 @@ export const terraHarness = (
     ui,
     delegate,
     classify,
+    recordDebugDecision,
     failClassifier: () => {
       classifyFailure = true;
     },

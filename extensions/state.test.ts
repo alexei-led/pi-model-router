@@ -54,7 +54,12 @@ describe('state.ts', () => {
       transmittedThinking: 'secret',
       backendAttestation: 'secret',
     } as const;
-    const snapshot = snapshotDecision({ ...decision, generation });
+    const snapshot = snapshotDecision({
+      ...decision,
+      generation,
+      activityPreference: 'debug',
+    });
+    expect(snapshot).not.toHaveProperty('activityPreference');
     expect(snapshot.generation).toMatchObject({
       delegatedThinking: 'high',
       messageThinking: 'medium',
