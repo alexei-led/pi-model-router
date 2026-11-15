@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { normalizeConfig } from './config';
 import { buildRouteMatrix, selectBaselinePlan } from './routing';
 import { events, failure, message, model, required } from './test/fixtures';
+import { runtimeCosts } from './test/runtime-catalog';
 import { terraHarness } from './test/terra-harness';
 import type { RouterActivity, RouterMode, RouterTier } from './types';
 import { formatDecision, updateRouterUIStrip } from './ui';
@@ -32,12 +33,7 @@ const find = (provider: string, id: string) =>
         provider,
         contextWindow: 500_000,
         thinkingLevelMap: { xhigh: 'xhigh' },
-        cost: {
-          input: id === 'gpt-6-luna' ? 0.1 : id === 'gpt-6.1-terra' ? 1 : 2,
-          output: 5,
-          cacheRead: 0.05,
-          cacheWrite: 1.25,
-        },
+        cost: required(runtimeCosts[id]),
       })
     : undefined;
 
@@ -169,7 +165,7 @@ it('invalidates a same-turn Terra tool plan after a mode change instead of reusi
   const first = await f.run('balanced', 'medium', 'code', { messages: [user] });
   expect(f.state.lastDecision).toMatchObject({
     targetModelId: 'gpt-6.1-terra',
-    thinking: 'xhigh',
+    thinking: 'high',
   });
   const result = await f.run('quality', 'medium', 'code', {
     messages: [
@@ -209,16 +205,21 @@ it('keeps router Now, strip and recorded effort physical when the host message s
   });
   const result = await f.run('balanced', 'medium', 'code');
   expect(result).toHaveProperty('thinkingLevel', 'medium');
-  expect(f.delegate.mock.calls[0]?.[2]?.reasoning).toBe('xhigh');
+  expect(f.delegate.mock.calls[0]?.[2]?.reasoning).toBe('high');
   const decision = required(f.state.lastDecision);
-  expect(decision.thinking).toBe('xhigh');
-  expect(formatDecision(decision)).toContain('[xhigh]');
+  expect(decision.thinking).toBe('high');
+  expect(decision.generation).toMatchObject({
+    delegatedThinking: 'high',
+    messageThinking: 'medium',
+    costSource: 'pi-usage-estimate',
+  });
+  expect(formatDecision(decision)).toContain('[high]');
   const snapshot = f.ui.adapters.getSnapshot();
   expect(snapshot.actual).toMatchObject({
     model: 'gpt-6.1-terra',
-    thinking: 'xhigh',
+    thinking: 'high',
   });
-  expect(formatRoute(snapshot.actual)).toContain('effort xhigh');
+  expect(formatRoute(snapshot.actual)).toContain('effort high');
   const ctx = {
     mode: 'tui',
     ui: {
@@ -235,7 +236,7 @@ it('keeps router Now, strip and recorded effort physical when the host message s
       content({} as TUI, ctx.ui.theme)
         .render(120)
         .join(' '),
-    ).toContain('GPT 6.1 Terra · xhigh');
+    ).toContain('GPT 6.1 Terra · high');
 });
 
 const advisedConfig = (profile: object = ladder('scope')) => ({
@@ -340,8 +341,8 @@ it('does not rewrite old generic declarations or explicit activity overrides', (
   expect(profile.activities?.code?.medium?.builtinModes).toBeUndefined();
   expect(profile.activities?.docs?.medium).toBeUndefined();
   expect(profile.activities?.debug?.medium).toMatchObject({
-    model: 'scope/gpt-6.1-terra',
-    thinking: 'xhigh',
+    model: 'scope/gpt-6.1-sol',
+    thinking: 'medium',
   });
 });
 
@@ -412,12 +413,12 @@ it.each([
   },
 );
 
-it('uses a valid cost preference for images when the balanced primary only supports text', async () => {
+it('uses a valid quality preference for images when the balanced primary only supports text', async () => {
   const raw = {
     activityRouting: 'off',
     profiles: {
       p: {
-        medium: { model: 'custom/gpt-6.1-terra', thinking: 'medium' },
+        low: { model: 'custom/gpt-6-luna', thinking: 'high' },
       },
     },
   };
@@ -425,7 +426,7 @@ it('uses a valid cost preference for images when the balanced primary only suppo
   const registry = (provider: string, id: string) => {
     const target = find(provider, id);
     if (!target || id === 'gpt-6.1-sol') return undefined;
-    return id === 'gpt-6.1-terra'
+    return id === 'gpt-6-luna'
       ? { ...target, input: ['text'] as ['text'] }
       : target;
   };
@@ -437,15 +438,15 @@ it('uses a valid cost preference for images when the balanced primary only suppo
     undefined,
     false,
     undefined,
-    { mode: 'cost', budgetExceeded: false },
+    { mode: 'quality', budgetExceeded: false },
   );
   expect(selectBaselinePlan('p', profile, matrix).plan.attempts[0]).toEqual({
-    tier: 'medium',
-    model: 'custom/gpt-6-luna',
-    thinking: 'high',
+    tier: 'low',
+    model: 'custom/gpt-6.1-terra',
+    thinking: 'medium',
   });
   const f = terraHarness(raw, registry);
-  const result = await f.run('cost', 'medium', 'generic', {
+  const result = await f.run('quality', 'low', 'generic', {
     messages: [
       {
         role: 'user',
@@ -463,10 +464,10 @@ it('uses a valid cost preference for images when the balanced primary only suppo
   });
   expect(result.stopReason).toBe('stop');
   expect(f.state.lastDecision).toMatchObject({
-    tier: 'medium',
+    tier: 'low',
     targetProvider: 'custom',
-    targetModelId: 'gpt-6-luna',
-    thinking: 'high',
+    targetModelId: 'gpt-6.1-terra',
+    thinking: 'medium',
   });
   expect(f.delegate).toHaveBeenCalledOnce();
   expect(f.classify).not.toHaveBeenCalled();
@@ -501,7 +502,7 @@ it.each(['missing', 'price', 'context', 'image'] as const)(
       { mode: 'cost', budgetExceeded: false },
     );
     const high = required(
-      matrix.plans.find((p) => !p.cell && p.tier === 'high'),
+      matrix.plans.find((p) => p.cell === 'ops' && p.tier === 'high'),
     );
     expect(high.attempts[0]).toMatchObject({
       model: 'scope/gpt-6.1-sol',

@@ -12,31 +12,31 @@ See [routing modes](routing-modes.md) for controls, precedence and recovery.
 | --- | --- | --- | --- | --- |
 | code | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
 | code | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| code | medium | gpt-6-luna / high | gpt-6.1-terra / xhigh | gpt-6.1-sol / high |
-| code | high | gpt-6.1-terra / xhigh | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| code | medium | gpt-6.1-terra / high | gpt-6.1-terra / high | gpt-6.1-sol / high |
+| code | high | gpt-6.1-sol / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
 | debug | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
 | debug | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| debug | medium | gpt-6-luna / high | gpt-6.1-terra / xhigh | gpt-6.1-sol / high |
-| debug | high | gpt-6.1-terra / xhigh | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
+| debug | medium | gpt-6.1-sol / medium | gpt-6.1-sol / medium | gpt-6.1-sol / high |
+| debug | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
 | explore | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
 | explore | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| explore | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
+| explore | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
 | explore | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
 | plan | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
 | plan | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| plan | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / high |
-| plan | high | gpt-6.1-terra / medium | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
+| plan | medium | gpt-6.1-sol / medium | gpt-6.1-sol / medium | gpt-6.1-sol / high |
+| plan | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
 | review | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
 | review | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| review | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / high |
-| review | high | gpt-6.1-terra / medium | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
+| review | medium | gpt-6.1-sol / medium | gpt-6.1-sol / medium | gpt-6.1-sol / high |
+| review | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
 | ops | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
 | ops | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| ops | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
+| ops | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
 | ops | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
 | docs | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
 | docs | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| docs | medium | gpt-6-luna / high | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
+| docs | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
 | docs | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
 
 ## anthropic
@@ -52,7 +52,7 @@ See [routing modes](routing-modes.md) for controls, precedence and recovery.
 | debug | medium | claude-sonnet-5-5 / high | claude-opus-5-5 / medium | claude-opus-5-5 / high |
 | debug | high | claude-opus-5-5 / high | claude-opus-5-5 / xhigh | claude-opus-5-5 / max |
 | explore | micro | claude-haiku-5-5 / medium | claude-haiku-5-5 / medium | claude-haiku-5-5 / medium |
-| explore | low | claude-haiku-5-5 / medium | claude-haiku-5-5 / high | claude-haiku-5-5 / xhigh |
+| explore | low | claude-haiku-5-5 / medium | claude-haiku-5-5 / high | claude-haiku-5-5 / high |
 | explore | medium | claude-haiku-5-5 / high | claude-sonnet-5-5 / medium | claude-sonnet-5-5 / high |
 | explore | high | claude-sonnet-5-5 / medium | claude-opus-5-5 / medium | claude-opus-5-5 / high |
 | plan | micro | claude-haiku-5-5 / high | claude-haiku-5-5 / high | claude-haiku-5-5 / high |
@@ -64,10 +64,10 @@ See [routing modes](routing-modes.md) for controls, precedence and recovery.
 | review | medium | claude-sonnet-5-5 / high | claude-opus-5-5 / medium | claude-opus-5-5 / high |
 | review | high | claude-opus-5-5 / high | claude-opus-5-5 / xhigh | claude-opus-5-5 / max |
 | ops | micro | claude-haiku-5-5 / medium | claude-haiku-5-5 / medium | claude-haiku-5-5 / medium |
-| ops | low | claude-haiku-5-5 / medium | claude-haiku-5-5 / high | claude-haiku-5-5 / xhigh |
+| ops | low | claude-haiku-5-5 / medium | claude-haiku-5-5 / high | claude-haiku-5-5 / high |
 | ops | medium | claude-haiku-5-5 / medium | claude-haiku-5-5 / high | claude-haiku-5-5 / xhigh |
 | ops | high | claude-haiku-5-5 / high | claude-opus-5-5 / high | claude-opus-5-5 / xhigh |
 | docs | micro | claude-haiku-5-5 / medium | claude-haiku-5-5 / medium | claude-haiku-5-5 / medium |
-| docs | low | claude-haiku-5-5 / medium | claude-haiku-5-5 / high | claude-haiku-5-5 / xhigh |
+| docs | low | claude-haiku-5-5 / medium | claude-haiku-5-5 / high | claude-haiku-5-5 / high |
 | docs | medium | claude-haiku-5-5 / high | claude-sonnet-5-5 / medium | claude-sonnet-5-5 / high |
 | docs | high | claude-sonnet-5-5 / medium | claude-opus-5-5 / medium | claude-opus-5-5 / high |

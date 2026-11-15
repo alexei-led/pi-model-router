@@ -157,6 +157,9 @@ const historyOf = (decision: RoutingDecision): RouterUIHistoryEntry => {
     reuse: decision.reuse,
     generationCostUsd: decision.generation?.reportedCostUsd,
     generationAttempts: decision.generation?.attempts,
+    delegatedThinking: decision.generation?.delegatedThinking,
+    messageThinking: decision.generation?.messageThinking,
+    costSource: decision.generation?.costSource,
     inputTokens: decision.generation?.inputTokens,
     outputTokens: decision.generation?.outputTokens,
     cacheReadTokens: decision.generation?.cacheReadTokens,
@@ -500,12 +503,18 @@ export const createRouterUIRuntime = (
     if (!configured) return undefined;
     const catalog = chatModelCatalog();
     const activities = { ...configured.activities };
+    const activityResets = { ...configured.activityResets };
     for (const [key, value] of overrides) {
       const [activityName, tierName] = key.split('/');
       const activity = ROUTER_ACTIVITIES.find((item) => item === activityName);
       const tier = ROUTER_TIERS.find((item) => item === tierName);
       if (!activity || !tier) return undefined;
       const tiers = { ...activities[activity] };
+      const resets = new Set(activityResets[activity]);
+      if (value) resets.delete(tier);
+      else resets.add(tier);
+      if (resets.size) activityResets[activity] = [...resets];
+      else delete activityResets[activity];
       if (value) {
         const target = catalog.entries.find(
           (model) => model.model === value.model,
@@ -554,6 +563,9 @@ export const createRouterUIRuntime = (
       }
     }
     const nextProfile: RouterProfile = { ...configured };
+    if (Object.keys(activityResets).length)
+      nextProfile.activityResets = activityResets;
+    else delete nextProfile.activityResets;
     if (Object.keys(activities).length) nextProfile.activities = activities;
     else delete nextProfile.activities;
     return nextProfile;

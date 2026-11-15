@@ -278,25 +278,25 @@ See [inspector controls](user-guide.md#native-inspector).
 
 These are router defaults, not guaranteed model-specific optima.
 
-| User configuration field              | Default      | Meaning                                                                              |
-| ------------------------------------- | ------------ | ------------------------------------------------------------------------------------ |
-| `advisor.enabled`                     | `false`      | Enable only with explicit `true`; omitted advisor means no classifier calls          |
-| `advisor.model`                       | None         | Required exact Pi classifier reference when configuring an advisor                   |
-| `profiles.<name>.advisor.models`      | None         | Exact references approved for this profile; does not register or select models       |
-| `profiles.<name>.advisor.confidenceThreshold` | Inherit | Profile-only top-choice, goal, phase and continuity threshold, 0–1; does not select or enable a classifier |
-| `profiles.<name>.advisor.probabilityThreshold` | Inherit | Profile-only cumulative tier threshold, greater than 0 and at most 1 |
-| `advisor.timeoutMs`                   | `10000`      | Total deadline, including retries; positive and at most 2147483647 ms                |
-| `advisor.reviewEveryRequests`         | `4`          | Background review interval, 0–1000 requests; 0 disables reviews, not initial advice  |
-| `advisor.confidenceThreshold`         | `0.65`       | Top-choice, goal, phase and continuity confidence threshold, 0–1                                    |
-| `advisor.probabilityThreshold`        | `0.8`        | Cumulative tier-probability threshold, greater than 0 and at most 1                  |
-| `advisor.maxStateTokens`              | `3000`       | Selected text budget, 1–24000 estimated tokens; typed request metadata adds overhead |
-| `advisor.maxRetries`                  | `1`          | Pi retries, 0–4, inside the same deadline                                            |
-| `advisor.temperature`                 | Unset        | Optional positive finite value forwarded to Pi's classifier API                      |
-| `advisor.context.currentLoopMessages` | `8`          | Current-loop message window, 0–40 messages                                           |
-| `advisor.context.previousTurns`       | `2`          | Earlier dialogue turns, 0–20                                                         |
-| `advisor.context.maxHistoryTokens`    | `500`        | History text sub-budget, 0–24000 tokens, within the total                            |
-| `advisor.context.toolResults`         | `last-error` | `none`, `last`, `last-error` or opt-in `recent`                                      |
-| `advisor.context.maxToolTokens`       | `250`        | Tool-result text sub-budget, 0–24000 tokens, within the total                        |
+| User configuration field                       | Default      | Meaning                                                                                                    |
+| ---------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
+| `advisor.enabled`                              | `false`      | Enable only with explicit `true`; omitted advisor means no classifier calls                                |
+| `advisor.model`                                | None         | Required exact Pi classifier reference when configuring an advisor                                         |
+| `profiles.<name>.advisor.models`               | None         | Exact references approved for this profile; does not register or select models                             |
+| `profiles.<name>.advisor.confidenceThreshold`  | Inherit      | Profile-only top-choice, goal, phase and continuity threshold, 0–1; does not select or enable a classifier |
+| `profiles.<name>.advisor.probabilityThreshold` | Inherit      | Profile-only cumulative tier threshold, greater than 0 and at most 1                                       |
+| `advisor.timeoutMs`                            | `10000`      | Total deadline, including retries; positive and at most 2147483647 ms                                      |
+| `advisor.reviewEveryRequests`                  | `4`          | Background review interval, 0–1000 requests; 0 disables reviews, not initial advice                        |
+| `advisor.confidenceThreshold`                  | `0.65`       | Top-choice, goal, phase and continuity confidence threshold, 0–1                                           |
+| `advisor.probabilityThreshold`                 | `0.8`        | Cumulative tier-probability threshold, greater than 0 and at most 1                                        |
+| `advisor.maxStateTokens`                       | `3000`       | Selected text budget, 1–24000 estimated tokens; typed request metadata adds overhead                       |
+| `advisor.maxRetries`                           | `1`          | Pi retries, 0–4, inside the same deadline                                                                  |
+| `advisor.temperature`                          | Unset        | Optional positive finite value forwarded to Pi's classifier API                                            |
+| `advisor.context.currentLoopMessages`          | `8`          | Current-loop message window, 0–40 messages                                                                 |
+| `advisor.context.previousTurns`                | `2`          | Earlier dialogue turns, 0–20                                                                               |
+| `advisor.context.maxHistoryTokens`             | `500`        | History text sub-budget, 0–24000 tokens, within the total                                                  |
+| `advisor.context.toolResults`                  | `last-error` | `none`, `last`, `last-error` or opt-in `recent`                                                            |
+| `advisor.context.maxToolTokens`                | `250`        | Tool-result text sub-budget, 0–24000 tokens, within the total                                              |
 
 `debug` controls retained local history, not whether classification runs.
 The [complete reference configuration](../model-router.example.json) leaves
@@ -344,9 +344,21 @@ generic plan if there is no eligible specialization. A valid, confident `verify`
 or `execute` phase can instead select the `ops` cell: verify is only specified
 checks and status reporting, and execute is only specified operations such as a
 commit or deploy. Work still requiring edits or diagnosis is not execution-only.
-`produce`, `reason`, `report`, uncertain, missing, malformed or low-confidence
-phase retains the goal activity. Any native notification after the current request suppresses this phase-derived
-change because its association cannot be established. These are classifier
+For non-ops goals, other phases retain the goal activity. A durable ops goal
+instead uses the same-tier debug preference for accepted `reason` and the
+same-tier code preference for accepted `produce`, without changing the goal.
+Explicit cells and null/use-tier resets remain authoritative. With no declared
+floor and unknown model suitability, keep an eligible same-tier ops specialization
+rather than blindly replacing it with inherited generic; price is not capability evidence.
+The accepted engineering preference remains runtime-only and separate from the
+physical plan. Valid continuations reuse it when repeated failures raise the
+tier, resolving the new tier's floor and reset ownership again. Refused advice
+may update diagnostics but cannot replace this accepted preference.
+Ops with `report`, uncertain, missing, malformed or low-confidence phase retains
+an eligible incumbent on continuations; fresh uncertainty uses the conservative
+baseline. It cannot introduce a new ops discount or cold hop.
+Any native notification after the current request suppresses phase-derived
+changes because its association cannot be established. These are classifier
 judgments, not guarantees of savings or semantic accuracy. Diagnostics show the
 goal and phase separately from the effective route activity. Historical
 activity-only records keep their original label; Usage does not pool those
@@ -381,7 +393,7 @@ branch, preceding user-message identity, configuration and request epoch fence t
 anchor; reviews and notifications cannot update it. Reload, native tree navigation or provider disposal
 clears it. Text is not persisted in router state.
 
-A classifier that does not return a valid phase keeps the goal route. Missing or
+A classifier that does not return a valid phase keeps a non-ops goal route; ops follows the conservative rule above. Missing or
 uncertain continuity without a prior anchor keeps otherwise valid advice but does
 not seed an anchor. With a prior anchor, ambiguous continuity uses the baseline
 rather than guessing whether the old goal applies. The current request is never

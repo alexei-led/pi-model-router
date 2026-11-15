@@ -350,6 +350,15 @@ const snapshotGeneration = (
   if (result.attempts === 0) return undefined;
   if (isFiniteNumber(value.reportedCostUsd) && value.reportedCostUsd >= 0)
     result.reportedCostUsd = value.reportedCostUsd;
+  if (isThinkingLevel(value.delegatedThinking))
+    result.delegatedThinking = value.delegatedThinking;
+  if (isThinkingLevel(value.messageThinking))
+    result.messageThinking = value.messageThinking;
+  if (
+    result.reportedCostUsd !== undefined &&
+    value.costSource === 'pi-usage-estimate'
+  )
+    result.costSource = value.costSource;
   const shadow = value.shadow;
   if (
     isObjectRecord(shadow) &&

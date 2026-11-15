@@ -115,92 +115,92 @@
     "mode": "cost",
     "tier": "medium",
     "activity": "generic",
-    "model": "gpt-6-luna",
-    "effort": "high"
+    "model": "gpt-6.1-terra",
+    "effort": "medium"
   },
   {
     "mode": "cost",
     "tier": "medium",
     "activity": "code",
-    "model": "gpt-6-luna",
+    "model": "gpt-6.1-terra",
     "effort": "high"
   },
   {
     "mode": "cost",
     "tier": "medium",
     "activity": "debug",
-    "model": "gpt-6-luna",
-    "effort": "high"
+    "model": "gpt-6.1-sol",
+    "effort": "medium"
   },
   {
     "mode": "cost",
     "tier": "medium",
     "activity": "review",
-    "model": "gpt-6-luna",
-    "effort": "high"
+    "model": "gpt-6.1-sol",
+    "effort": "medium"
   },
   {
     "mode": "cost",
     "tier": "medium",
     "activity": "plan",
-    "model": "gpt-6-luna",
-    "effort": "high"
+    "model": "gpt-6.1-sol",
+    "effort": "medium"
   },
   {
     "mode": "cost",
     "tier": "medium",
     "activity": "explore",
-    "model": "gpt-6-luna",
-    "effort": "high"
+    "model": "gpt-6.1-terra",
+    "effort": "medium"
   },
   {
     "mode": "cost",
     "tier": "medium",
     "activity": "ops",
-    "model": "gpt-6-luna",
-    "effort": "high"
+    "model": "gpt-6.1-terra",
+    "effort": "medium"
   },
   {
     "mode": "cost",
     "tier": "medium",
     "activity": "docs",
-    "model": "gpt-6-luna",
-    "effort": "high"
+    "model": "gpt-6.1-terra",
+    "effort": "medium"
   },
   {
     "mode": "cost",
     "tier": "high",
     "activity": "generic",
-    "model": "gpt-6.1-terra",
-    "effort": "medium"
+    "model": "gpt-6.1-sol",
+    "effort": "high"
   },
   {
     "mode": "cost",
     "tier": "high",
     "activity": "code",
-    "model": "gpt-6.1-terra",
-    "effort": "xhigh"
+    "model": "gpt-6.1-sol",
+    "effort": "high"
   },
   {
     "mode": "cost",
     "tier": "high",
     "activity": "debug",
-    "model": "gpt-6.1-terra",
-    "effort": "xhigh"
+    "model": "gpt-6.1-sol",
+    "effort": "high"
   },
   {
     "mode": "cost",
     "tier": "high",
     "activity": "review",
-    "model": "gpt-6.1-terra",
-    "effort": "medium"
+    "model": "gpt-6.1-sol",
+    "effort": "high"
   },
   {
     "mode": "cost",
     "tier": "high",
     "activity": "plan",
-    "model": "gpt-6.1-terra",
-    "effort": "medium"
+    "model": "gpt-6.1-sol",
+    "effort": "high"
   },
   {
     "mode": "cost",
@@ -347,27 +347,27 @@
     "tier": "medium",
     "activity": "code",
     "model": "gpt-6.1-terra",
-    "effort": "xhigh"
+    "effort": "high"
   },
   {
     "mode": "balanced",
     "tier": "medium",
     "activity": "debug",
-    "model": "gpt-6.1-terra",
-    "effort": "xhigh"
+    "model": "gpt-6.1-sol",
+    "effort": "medium"
   },
   {
     "mode": "balanced",
     "tier": "medium",
     "activity": "review",
-    "model": "gpt-6.1-terra",
+    "model": "gpt-6.1-sol",
     "effort": "medium"
   },
   {
     "mode": "balanced",
     "tier": "medium",
     "activity": "plan",
-    "model": "gpt-6.1-terra",
+    "model": "gpt-6.1-sol",
     "effort": "medium"
   },
   {

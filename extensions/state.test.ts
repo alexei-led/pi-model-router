@@ -38,6 +38,48 @@ describe('state.ts', () => {
     return dir;
   };
 
+  it('retains only supported effort and estimate provenance diagnostics', () => {
+    const generation = {
+      transition: 'initial',
+      contextTruncated: false,
+      attempts: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reportedCostUsd: 0.01,
+      costSource: 'pi-usage-estimate',
+      delegatedThinking: 'high',
+      messageThinking: 'medium',
+      transmittedThinking: 'secret',
+      backendAttestation: 'secret',
+    } as const;
+    const snapshot = snapshotDecision({
+      ...decision,
+      generation,
+      activityPreference: 'debug',
+    });
+    expect(snapshot).not.toHaveProperty('activityPreference');
+    expect(snapshot.generation).toMatchObject({
+      delegatedThinking: 'high',
+      messageThinking: 'medium',
+      costSource: 'pi-usage-estimate',
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('secret');
+    const invalid = snapshotDecision({
+      ...decision,
+      generation: {
+        ...generation,
+        costSource: 'bill',
+        delegatedThinking: 'secret',
+        messageThinking: 'secret',
+      },
+    } as unknown as RoutingDecision);
+    expect(invalid.generation?.costSource).toBeUndefined();
+    expect(invalid.generation?.delegatedThinking).toBeUndefined();
+    expect(invalid.generation?.messageThinking).toBeUndefined();
+  });
+
   it('validates, saves and loads the last profile', () => {
     const agentDir = createTempDir();
     expect(

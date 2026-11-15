@@ -142,7 +142,7 @@ It never receives system prompts, tool definitions, thinking blocks, tool argume
 Selected text can still contain private data. Filtering is not redaction.
 
 A candidate ID represents the tier, canonical representative model, and effort.
-An optional activity answer describes the durable goal. An independent phase answer may select ops for bounded verification or execution. The resulting activity resolves the actual matrix cell;
+An optional activity answer describes the durable goal. An independent phase answer may select ops for bounded verification or execution, or a same-tier debug/code preference for an ops goal that requires reasoning/production. The resulting activity resolves the actual matrix cell;
 it cannot extend the matrix or change the cell's generation fallback list.
 The adapter rejects unknown IDs, invalid confidence, malformed distributions, and oversized responses.
 It accepts only a current candidate. The [classifier guide](classifier-advisor.md) documents configuration and probability selection.
@@ -274,7 +274,7 @@ Queued controls activate at an owned user boundary: `before_agent_start` handles
 | `provider-turns.ts`      | Keep bounded continuation/advice caches and retain selected plans and reference-count shared classifier flights for one session-owned provider registration. |
 | `provider-generation.ts` | Revalidate physical targets, run configured generation fallbacks before visible content, account for attempts, and forward events.                           |
 | `provider-runtime.ts`    | Wait for the model registry and bridge request preparation/generation to Pi streams, persistence, and status updates.                                        |
-| `context.ts`             | Resolve native notification provenance, select bounded classifier text and extract generation input.                                                                                                 |
+| `context.ts`             | Resolve native notification provenance, select bounded classifier text and extract generation input.                                                         |
 | `classifier.ts`          | Build typed bounded requests, call Pi's classifier registry, enforce deadlines, and validate advice.                                                         |
 | `choice.ts`              | Define the provider-neutral rubric, candidate identity, and strict response validation.                                                                      |
 | `economics.ts`           | Produce observed generation metrics and diagnostic hypothetical comparisons.                                                                                 |

@@ -49,7 +49,7 @@ For example, `openai-codex-work` never becomes `openai-codex-personal`.
 The router does not inspect credentials or attest which account a backend uses.
 
 **Upgrade notice:** recognized existing profiles receive defaults on reload.
-Defaults can introduce models not previously named in the profile, including Terra for old OpenAI profiles and Haiku 5.5 for a legacy Haiku 4.5 profile. OpenAI medium activity cells now use Terra/xhigh for code/debug and Terra/medium otherwise; low activity cells use Luna/high. Mode-aware preferences can choose Terra or Sol before raising effort; see [mode ownership and precedence](routing-modes.md#openai-default-preferences).
+Defaults can introduce models not previously named in the profile, including Terra for old OpenAI profiles and Haiku 5.5 for a legacy Haiku 4.5 profile. OpenAI medium activity cells use Terra/high for code, Sol/medium for debug/plan/review, and Terra/medium for explore/docs/ops; low activity cells use Luna/high. Mode-aware preferences can choose Terra or Sol before raising effort; see [mode ownership and precedence](routing-modes.md#openai-default-preferences).
 They can increase spending, even if the old profile used only a cheap model.
 Files are not rewritten. Use the opt-out below to retain tier-only behavior.
 
@@ -57,7 +57,7 @@ Files are not rewritten. Use the opt-out below to retain tier-only behavior.
 
 | Display                              | Meaning                                                                         |
 | ------------------------------------ | ------------------------------------------------------------------------------- |
-| `debug`, `code`, or another activity | The effective activity selected for this route.                            |
+| `debug`, `code`, or another activity | The effective activity selected for this route.                                 |
 | `base`                               | No activity-specific cell selected. This replaces the old `generic` label.      |
 | An availability-cell label           | A local eligibility fallback used an activity cell, not an inferred task label. |
 | `last`                               | The displayed generation finished. It is not a running request.                 |

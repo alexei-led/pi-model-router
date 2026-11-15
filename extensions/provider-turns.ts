@@ -358,7 +358,7 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
       ) {
         const { advice, diagnostics } = review.result;
         return {
-          ...(advice
+          ...(advice && diagnostics.activity !== 'ops'
             ? {
                 advice: {
                   ...advice,
@@ -372,6 +372,9 @@ export const createProviderTurnCache = (): ProviderTurnCache => {
             : {}),
           diagnostics: {
             ...diagnostics,
+            ...(diagnostics.activity === 'ops'
+              ? { outcome: 'uncertain' as const }
+              : {}),
             phase: undefined,
             phaseConfidence: undefined,
             phaseOutcome: 'uncertain',

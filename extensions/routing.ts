@@ -413,6 +413,7 @@ const applyModeToCell = (
   budgetExceeded: boolean,
   contextTokens: number,
   recoverCostHigh = false,
+  activity?: RoutePlan['cell'],
 ): ModeCell => {
   const configAt = (tier: RouterTier) => cellProfile[tier] ?? generic[tier];
   const resolved = { ...generic, ...cellProfile };
@@ -479,6 +480,7 @@ const applyModeToCell = (
     const result = transformRoute({
       mode: recovery ? 'balanced' : mode,
       tier,
+      activity,
       routeAt: (target) => {
         const pair = primaries.find((entry) => entry.tier === target);
         return pair && (target === tier || fits(pair)) ? pair : undefined;
@@ -555,6 +557,7 @@ export const buildRouteMatrix = (
             mode.budgetExceeded,
             contextTokens,
             mode.recoverCostHigh,
+            cell.cell,
           )
         : { profile: cell.profile, thinkingOverrides, provenance: {} };
     return {

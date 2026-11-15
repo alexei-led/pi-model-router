@@ -11,8 +11,8 @@ import type {
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { resolveContextWindow } from './config';
 import { extractTextFromContent } from './context';
-import { parseCanonicalModelRef } from './domain';
-import { observeGeneration } from './economics';
+import { isThinkingLevel, parseCanonicalModelRef } from './domain';
+import { observeGeneration, repriceTokens } from './economics';
 import type { PreparedRouterRequest } from './provider-request';
 import type { ProviderTurnCache } from './provider-turns';
 import { currentPlanPairs } from './routing';
@@ -146,9 +146,14 @@ const truncateContext = (
 const estimateCost = (
   state: AttemptState,
   usage: AssistantMessage['usage'],
+  target: Model<Api>,
 ) => {
   const cost = usage.cost.total;
-  if (Number.isFinite(cost) && cost >= 0) {
+  if (
+    Number.isFinite(cost) &&
+    cost >= 0 &&
+    (cost > 0 || repriceTokens(target, usage) !== undefined)
+  ) {
     state.reportedCostUsd =
       state.reportedCostUsd === undefined
         ? undefined
@@ -193,7 +198,7 @@ const processAttemptEvent = (
     state.usageReceived = true;
     const usage =
       event.type === 'done' ? event.message.usage : event.error.usage;
-    const cost = estimateCost(state, usage);
+    const cost = estimateCost(state, usage, targetModel);
     if (cost !== undefined) input.onCost(cost);
     updateDecisionForTarget(
       decision,
@@ -220,8 +225,18 @@ const processAttemptEvent = (
       attempts,
       reportedCostUsd: state.reportedCostUsd,
     });
-    if (event.type === 'error' && decision.generation)
-      decision.generation.shadow = undefined;
+    if (decision.generation) {
+      decision.generation.delegatedThinking = attempt.thinking;
+      const reported =
+        event.type === 'done'
+          ? event.message.thinkingLevel
+          : event.error.thinkingLevel;
+      if (isThinkingLevel(reported))
+        decision.generation.messageThinking = reported;
+      if (decision.generation.reportedCostUsd !== undefined)
+        decision.generation.costSource = 'pi-usage-estimate';
+      if (event.type === 'error') decision.generation.shadow = undefined;
+    }
   }
 
   if (input.options?.signal?.aborted) {
@@ -492,6 +507,7 @@ export const runGenerationAttempts = async (
           if (decision.generation) {
             decision.generation.attempts = attempts;
             decision.generation.reportedCostUsd = undefined;
+            decision.generation.costSource = undefined;
             decision.generation.shadow = undefined;
           }
         }

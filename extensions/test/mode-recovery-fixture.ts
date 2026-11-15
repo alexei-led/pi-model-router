@@ -116,6 +116,12 @@ export default (pi: ExtensionAPI) => {
             timestamp: Date.now(),
             stopReason: 'stop',
             answers: {
+              phase: {
+                type: 'choice',
+                choice: 'execute',
+                confidence: 1,
+                probabilities: { execute: 1 },
+              },
               ...(choice
                 ? {
                     route: {

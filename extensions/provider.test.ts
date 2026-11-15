@@ -200,6 +200,41 @@ describe('router provider', () => {
     });
   });
 
+  it('does not report complete cost coverage after an unpriced zero-cost failed attempt', async () => {
+    const s = setup();
+    s.delegate.mockReturnValueOnce(
+      events({
+        type: 'error',
+        reason: 'error',
+        error: message({
+          stopReason: 'error',
+          usage: {
+            input: 1,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 1,
+            cost: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              total: 0,
+            },
+          },
+        }),
+      }),
+    );
+    await consume(s.stream());
+    expect(s.delegate).toHaveBeenCalledTimes(2);
+    expect(s.state.accumulatedCost).toBe(0.01);
+    expect(s.state.lastDecision?.generation).toMatchObject({
+      attempts: 2,
+      reportedCostUsd: undefined,
+    });
+    expect(s.state.lastDecision?.generation?.costSource).toBeUndefined();
+  });
+
   it('accounts for all failed terminal attempts even when the chain fails', async () => {
     const s = setup();
     s.delegate.mockImplementation(() => failure());

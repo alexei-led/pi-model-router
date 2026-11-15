@@ -34,13 +34,13 @@ const openaiExpected = {
   code: [
     ['gpt-6-luna', 'low'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-terra', 'xhigh'],
+    ['gpt-6.1-terra', 'high'],
     ['gpt-6.1-sol', 'high'],
   ],
   debug: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-terra', 'xhigh'],
+    ['gpt-6.1-sol', 'medium'],
     ['gpt-6.1-sol', 'xhigh'],
   ],
   explore: [
@@ -52,13 +52,13 @@ const openaiExpected = {
   plan: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-terra', 'medium'],
+    ['gpt-6.1-sol', 'medium'],
     ['gpt-6.1-sol', 'xhigh'],
   ],
   review: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-terra', 'medium'],
+    ['gpt-6.1-sol', 'medium'],
     ['gpt-6.1-sol', 'xhigh'],
   ],
   ops: [
@@ -323,7 +323,10 @@ describe('preset migration boundaries', () => {
     expect(route.contextWindow).toBeUndefined();
     expect(route.maxTokens).toBeUndefined();
     expect(route.fallbacks).toEqual(['work/fallback']);
-    expect(profile.activities?.debug?.medium?.thinkingLevels).toBeUndefined();
+    expect(profile.activities?.code?.medium?.thinkingLevels).toBeUndefined();
+    expect(profile.activities?.debug?.medium?.thinkingLevels).toEqual([
+      'medium',
+    ]);
   });
   it('cannot redirect a built-in canonical target through a canonical-looking alias key', () => {
     const profile = profileOf(

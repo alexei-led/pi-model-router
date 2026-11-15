@@ -154,6 +154,10 @@ export interface ModeProvenance {
 }
 
 export interface RouterProfile {
+  /** Runtime-only explicit null/use-tier ownership; never accepted as a JSON field. */
+  activityResets?:
+    | Partial<Record<RouterActivity, readonly RouterTier[]>>
+    | undefined;
   /** User-owned exact native custom-message types treated as notifications. */
   notificationTypes?: readonly string[] | undefined;
   switchPolicy?: Partial<RouterSwitchPolicy> | undefined;
@@ -395,6 +399,11 @@ export interface CacheCostShadow {
 
 /** Last terminal attempt's counters; reported cost sums all observed attempts. */
 export interface GenerationDiagnostics {
+  /** The physical effort passed to Pi, not proof of a transmitted or served value. */
+  delegatedThinking?: ThinkingLevel | undefined;
+  /** SDK message field, which the host may stamp locally; not backend attestation. */
+  messageThinking?: ThinkingLevel | undefined;
+  costSource?: 'pi-usage-estimate' | undefined;
   transition: (typeof GENERATION_TRANSITIONS)[number];
   contextTruncated: boolean;
   attempts: number;
@@ -436,6 +445,8 @@ export interface RoutingDecision {
   adviceSource?: AdviceSource | undefined;
   /** Validated semantic answer, independent of the local cell used for availability. */
   activity?: RouterActivity | undefined;
+  /** Accepted ops engineering preference, runtime-only; never restored from snapshots or diagnostics. */
+  activityPreference?: 'debug' | 'code' | undefined;
   /** Local cell provenance, not an inferred activity. Omitted means generic. */
   routeCell?: RouterActivity | undefined;
   profile: string;
@@ -700,6 +711,9 @@ export interface RouterUIHistoryEntry {
   /** Cost for this observation only; reuses must not repeat an earlier cost. */
   generationCostUsd?: number | undefined;
   generationAttempts?: number | undefined;
+  delegatedThinking?: ThinkingLevel | undefined;
+  messageThinking?: ThinkingLevel | undefined;
+  costSource?: GenerationDiagnostics['costSource'];
   inputTokens?: number | undefined;
   outputTokens?: number | undefined;
   cacheReadTokens?: number | undefined;

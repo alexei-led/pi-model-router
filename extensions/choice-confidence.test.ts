@@ -57,6 +57,23 @@ describe('selected strong-advice confidence', () => {
       ),
     ).toBeUndefined();
   });
+  it.each(['reason', 'produce'] as const)(
+    'bounds the ops %s floor by phase confidence',
+    (phase) => {
+      expect(
+        selectedAdviceConfidence(
+          {
+            ...selected,
+            activity: 'ops',
+            phase,
+            phaseOutcome: 'selected',
+            phaseConfidence: 0.7,
+          },
+          { tier: false, activity: true },
+        ),
+      ).toBe(0.7);
+    },
+  );
   it('supports a selected activity-only answer but rejects its abstention', () => {
     const activityOnly: ClassifierDiagnostics = {
       outcome: 'selected',
