@@ -3120,3 +3120,37 @@ describe('routing mode on an unchanged tool route', () => {
     });
   });
 });
+
+it('includes mode-only capabilities in the logical provider model', () => {
+  const s = setup();
+  s.models.push(
+    model('mode-only', {
+      contextWindow: 100_000,
+      maxTokens: 50_000,
+      thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
+    }),
+  );
+  required(s.models[0]).reasoning = false;
+  s.state.currentConfig = normalizeConfig({
+    profiles: {
+      balanced: {
+        activityPreset: 'off',
+        medium: {
+          model: 'test/primary',
+          reasoning: false,
+          modeRoutes: {
+            quality: { model: 'test/mode-only', thinking: 'high' },
+          },
+        },
+      },
+    },
+  }).config;
+  registerRouterProvider(s.api, s.state, s.actions);
+  const definition = s.register.mock.calls.at(-1)?.[1].models?.[0];
+  expect(definition).toMatchObject({
+    contextWindow: 100_000,
+    maxTokens: 50_000,
+    reasoning: true,
+    thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
+  });
+});

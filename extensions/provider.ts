@@ -87,11 +87,21 @@ export const registerRouterProvider = (
 
     let maxContextWindow = 0;
     let maxOutputTokens = 0;
-    const cells = [
+    const declaredCells = [
       profile,
       ...(state.currentConfig.activityRouting !== 'off'
         ? Object.values(profile.activities ?? {})
         : []),
+    ];
+    const cells = [
+      ...declaredCells,
+      ...declaredCells.flatMap((cell) =>
+        ROUTER_TIERS.flatMap((tier) =>
+          Object.values(cell[tier]?.modeRoutes ?? {}).map((route) => ({
+            [tier]: route,
+          })),
+        ),
+      ),
     ];
     for (const cell of cells)
       for (const tier of ROUTER_TIERS) {

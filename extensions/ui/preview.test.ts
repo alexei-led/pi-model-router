@@ -236,3 +236,42 @@ it('normalizes per-mode targets separately and rejects malformed declarations', 
   expect(medium.modeRoutes?.quality).toBeUndefined();
   expect(warnings).toHaveLength(2);
 });
+
+it('inherits generic mode routes in sparse activity cells', () => {
+  const { config, warnings } = normalizeConfig({
+    profiles: {
+      work: {
+        activityPreset: 'off',
+        medium: {
+          model: 'preview/base',
+          thinking: 'high',
+          modeRoutes: { cost: { model: 'preview/flash', thinking: 'low' } },
+        },
+        activities: {
+          docs: {
+            medium: {
+              thinking: 'low',
+              modeRoutes: {
+                quality: { model: 'preview/docs', thinking: 'high' },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  expect(warnings).toEqual([]);
+  const preferred = routePreferences({
+    profile: config.profiles.work,
+    find,
+    mode: { mode: 'cost', source: 'profile' },
+    pin: 'auto',
+    thinkingOverrides: {},
+    activityRouting: true,
+    budgetExceeded: false,
+  })('docs', 'medium');
+  expect(preferred.route).toMatchObject({
+    model: 'preview/flash',
+    thinking: 'low',
+  });
+});

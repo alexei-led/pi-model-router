@@ -75,7 +75,8 @@ The soft budget filters logical tiers and skips advisors, not physical models
 or prices. A normalized medium Sol cell can remain eligible over budget even
 when high also names Sol. This is not a physical-model price ceiling.
 
-`micro` is unchanged by modes. A pin uses its generic configured tier and bypasses the mode.
+Automatic mode transforms leave `micro` unchanged; explicit `modeRoutes` may override it.
+A pin uses its generic configured tier and bypasses the mode.
 A tier-wide effort override also bypasses that tier's mode transform.
 Missing or zero prices do not prove that another model is cheaper.
 
@@ -96,7 +97,10 @@ The [decision matrix](decision-matrix.md) also covers pins, budgets, escalation 
 A tier or activity cell may set `modeRoutes.cost` and `modeRoutes.quality` to
 complete model/effort declarations. The cell itself remains the balanced route.
 Each target resolves its own model alias and optional `fallbacks`; it does not
-inherit capability metadata or fallbacks from the balanced model.
+inherit capability metadata or fallbacks from the balanced model. Sparse activity
+cells inherit generic mode targets. Project and activity overrides merge targets
+per mode and fields within a target; an explicit fallback list replaces that list.
+Set a mode target to `null` to remove the inherited target.
 
 ```json
 {

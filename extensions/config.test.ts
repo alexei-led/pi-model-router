@@ -1102,3 +1102,82 @@ describe('activity configuration', () => {
     );
   });
 });
+
+it.each(['generic', 'activity'] as const)(
+  'preserves sibling mode routes through a %s project override',
+  (scope) => {
+    const baseCell = {
+      model: 'work/base',
+      thinking: 'high',
+      modeRoutes: {
+        cost: { model: 'valar/cheap', thinking: 'low' },
+        quality: {
+          model: 'work/strong',
+          thinking: 'high',
+          fallbacks: ['work/backup'],
+        },
+      },
+    };
+    const overrideCell = {
+      modeRoutes: { quality: { thinking: 'xhigh', fallbacks: [] } },
+    };
+    const cellProfile = (cell: object) =>
+      scope === 'generic'
+        ? { medium: cell }
+        : { activities: { code: { medium: cell } } };
+    const { config, warnings } = normalizeConfig(
+      mergeConfig(
+        {
+          profiles: {
+            work: { activityPreset: 'off', ...cellProfile(baseCell) },
+          },
+        },
+        projectRouterConfig(
+          { profiles: { work: cellProfile(overrideCell) } },
+          [],
+        ),
+      ),
+    );
+    expect(warnings).toEqual([]);
+    const route =
+      scope === 'generic'
+        ? config.profiles.work?.medium
+        : config.profiles.work?.activities?.code?.medium;
+    expect(route?.modeRoutes?.cost).toMatchObject({
+      model: 'valar/cheap',
+      thinking: 'low',
+    });
+    expect(route?.modeRoutes?.quality).toMatchObject({
+      model: 'work/strong',
+      thinking: 'xhigh',
+      fallbacks: [],
+    });
+  },
+);
+
+it('removes one inherited mode target with null without removing the other mode', () => {
+  const { config, warnings } = normalizeConfig(
+    mergeConfig(
+      {
+        profiles: {
+          p: {
+            medium: {
+              model: 'work/base',
+              thinking: 'high',
+              modeRoutes: {
+                cost: { model: 'valar/flash', thinking: 'low' },
+                quality: { model: 'work/sol', thinking: 'high' },
+              },
+            },
+          },
+        },
+      },
+      { profiles: { p: { medium: { modeRoutes: { quality: null } } } } },
+    ),
+  );
+  expect(warnings).toEqual([]);
+  expect(config.profiles.p?.medium?.modeRoutes?.quality).toBeUndefined();
+  expect(config.profiles.p?.medium?.modeRoutes?.cost?.model).toBe(
+    'valar/flash',
+  );
+});

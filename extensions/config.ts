@@ -41,7 +41,7 @@ import type {
   RouterSwitchPolicy,
   RouterTier,
 } from './types';
-import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
+import { ROUTER_ACTIVITIES, ROUTER_MODES, ROUTER_TIERS } from './types';
 
 export const parseConfigFile = (path: string): ParsedConfigFile => {
   if (!existsSync(path)) {
@@ -83,6 +83,24 @@ export const resolveModelRef = (
   return { canonicalRef: ref };
 };
 
+const mergeRouteDeclaration = (base: unknown, override: unknown): unknown => {
+  const merged = mergeRawValue(base, override);
+  if (
+    !isObjectRecord(base) ||
+    !isObjectRecord(override) ||
+    !isObjectRecord(merged)
+  )
+    return merged;
+  const previous = base.modeRoutes;
+  const next = override.modeRoutes;
+  if (!isObjectRecord(previous) || !isObjectRecord(next)) return merged;
+  const modes = { ...previous, ...next };
+  for (const mode of ROUTER_MODES)
+    if (Object.hasOwn(next, mode))
+      modes[mode] = mergeRawValue(previous[mode], next[mode]);
+  return { ...merged, modeRoutes: modes };
+};
+
 const mergeActivities = (base: unknown, override: unknown): unknown => {
   if (override === undefined) return base;
   if (!isObjectRecord(base) || !isObjectRecord(override)) return override;
@@ -95,7 +113,7 @@ const mergeActivities = (base: unknown, override: unknown): unknown => {
         ? Object.fromEntries(
             ROUTER_TIERS.map((tier) => [
               tier,
-              mergeRawValue(previous[tier], next[tier]),
+              mergeRouteDeclaration(previous[tier], next[tier]),
             ]),
           )
         : mergeRawValue(previous, next);
@@ -149,10 +167,10 @@ export const mergeConfig = (
         profile.activityPreset,
       ),
       baselineTier: mergeRawValue(existing.baselineTier, profile.baselineTier),
-      high: mergeRawValue(existing.high, profile.high),
-      medium: mergeRawValue(existing.medium, profile.medium),
-      low: mergeRawValue(existing.low, profile.low),
-      micro: mergeRawValue(existing.micro, profile.micro),
+      high: mergeRouteDeclaration(existing.high, profile.high),
+      medium: mergeRouteDeclaration(existing.medium, profile.medium),
+      low: mergeRouteDeclaration(existing.low, profile.low),
+      micro: mergeRouteDeclaration(existing.micro, profile.micro),
       advisor: mergeRawValue(existing.advisor, profile.advisor),
     };
   }
@@ -460,6 +478,7 @@ const withUserModeRoutes = (
       );
       continue;
     }
+    if (target === null) continue;
     if (!isObjectRecord(target)) {
       warnings.push(
         `Profile "${name}" ${tier} ${mode} mode route must be an object. Ignored.`,
@@ -542,7 +561,6 @@ const withBuiltinModes = (
 
 const activityModeRoutes = (
   config: RoutedTierConfig,
-  override: Record<string, unknown>,
   isExplicit: boolean,
   openaiDefaults: boolean,
   merged: Record<string, unknown>,
@@ -554,8 +572,7 @@ const activityModeRoutes = (
 ): RoutedTierConfig => {
   if (isExplicit)
     return (
-      withUserModeRoutes(config, override, name, tier, warnings, models) ??
-      config
+      withUserModeRoutes(config, merged, name, tier, warnings, models) ?? config
     );
   return openaiDefaults
     ? withBuiltinModes(config, merged.fallbacks, tier, models, activity)
@@ -651,9 +668,9 @@ const normalizeActivities = (
       const modelRef = builtinTarget
         ? presetModelReference(builtinTarget, genericTier, models)
         : undefined;
+      const declaration = mergeRouteDeclaration(inherited, override);
       const merged: Record<string, unknown> = {
-        ...inherited,
-        ...override,
+        ...(isObjectRecord(declaration) ? declaration : {}),
         ...(modelRef ? { model: modelRef } : {}),
       };
       const config = normalizeTierConfig(
@@ -668,7 +685,6 @@ const normalizeActivities = (
         tiers[tier] = {
           ...activityModeRoutes(
             config,
-            override,
             isExplicit,
             openaiDefaults,
             merged,
