@@ -41,7 +41,7 @@ import type {
   RouterSwitchPolicy,
   RouterTier,
 } from './types';
-import { ROUTER_ACTIVITIES, ROUTER_TIERS } from './types';
+import { ROUTER_ACTIVITIES, ROUTER_MODES, ROUTER_TIERS } from './types';
 
 export const parseConfigFile = (path: string): ParsedConfigFile => {
   if (!existsSync(path)) {
@@ -83,6 +83,24 @@ export const resolveModelRef = (
   return { canonicalRef: ref };
 };
 
+const mergeRouteDeclaration = (base: unknown, override: unknown): unknown => {
+  const merged = mergeRawValue(base, override);
+  if (
+    !isObjectRecord(base) ||
+    !isObjectRecord(override) ||
+    !isObjectRecord(merged)
+  )
+    return merged;
+  const previous = base.modeRoutes;
+  const next = override.modeRoutes;
+  if (!isObjectRecord(previous) || !isObjectRecord(next)) return merged;
+  const modes = { ...previous, ...next };
+  for (const mode of ROUTER_MODES)
+    if (Object.hasOwn(next, mode))
+      modes[mode] = mergeRawValue(previous[mode], next[mode]);
+  return { ...merged, modeRoutes: modes };
+};
+
 const mergeActivities = (base: unknown, override: unknown): unknown => {
   if (override === undefined) return base;
   if (!isObjectRecord(base) || !isObjectRecord(override)) return override;
@@ -95,7 +113,7 @@ const mergeActivities = (base: unknown, override: unknown): unknown => {
         ? Object.fromEntries(
             ROUTER_TIERS.map((tier) => [
               tier,
-              mergeRawValue(previous[tier], next[tier]),
+              mergeRouteDeclaration(previous[tier], next[tier]),
             ]),
           )
         : mergeRawValue(previous, next);
@@ -149,10 +167,10 @@ export const mergeConfig = (
         profile.activityPreset,
       ),
       baselineTier: mergeRawValue(existing.baselineTier, profile.baselineTier),
-      high: mergeRawValue(existing.high, profile.high),
-      medium: mergeRawValue(existing.medium, profile.medium),
-      low: mergeRawValue(existing.low, profile.low),
-      micro: mergeRawValue(existing.micro, profile.micro),
+      high: mergeRouteDeclaration(existing.high, profile.high),
+      medium: mergeRouteDeclaration(existing.medium, profile.medium),
+      low: mergeRouteDeclaration(existing.low, profile.low),
+      micro: mergeRouteDeclaration(existing.micro, profile.micro),
       advisor: mergeRawValue(existing.advisor, profile.advisor),
     };
   }
@@ -436,6 +454,51 @@ export const normalizeTierConfig = (
   };
 };
 
+const withUserModeRoutes = (
+  config: RoutedTierConfig | undefined,
+  value: unknown,
+  name: string,
+  tier: RouterTier,
+  warnings: string[],
+  models: Record<string, ModelDefinition>,
+): RoutedTierConfig | undefined => {
+  if (!config || !isObjectRecord(value) || value.modeRoutes === undefined)
+    return config;
+  if (!isObjectRecord(value.modeRoutes)) {
+    warnings.push(
+      `Profile "${name}" ${tier} modeRoutes must be an object. Ignored.`,
+    );
+    return config;
+  }
+  const routes: NonNullable<RoutedTierConfig['modeRoutes']> = {};
+  for (const [mode, target] of Object.entries(value.modeRoutes)) {
+    if (mode !== 'cost' && mode !== 'quality') {
+      warnings.push(
+        `Profile "${name}" ${tier} has an invalid mode route. Ignored.`,
+      );
+      continue;
+    }
+    if (target === null) continue;
+    if (!isObjectRecord(target)) {
+      warnings.push(
+        `Profile "${name}" ${tier} ${mode} mode route must be an object. Ignored.`,
+      );
+      continue;
+    }
+    const route = normalizeTierConfig(
+      target,
+      `${name}/${mode}`,
+      tier,
+      warnings,
+      models,
+    );
+    if (route) routes[mode] = route;
+  }
+  return Object.keys(routes).length
+    ? { ...config, modeRoutes: routes }
+    : config;
+};
+
 // File-layer merging can leave undefined placeholders. They are absent, not preset opt-outs.
 const declaredFields = (
   record: Record<string, unknown>,
@@ -493,6 +556,26 @@ const withBuiltinModes = (
   }
   return Object.keys(builtinModes).length
     ? { ...config, builtinModes }
+    : config;
+};
+
+const activityModeRoutes = (
+  config: RoutedTierConfig,
+  isExplicit: boolean,
+  openaiDefaults: boolean,
+  merged: Record<string, unknown>,
+  name: string,
+  tier: RouterTier,
+  warnings: string[],
+  models: Record<string, ModelDefinition>,
+  activity: RouterActivity,
+): RoutedTierConfig => {
+  if (isExplicit)
+    return (
+      withUserModeRoutes(config, merged, name, tier, warnings, models) ?? config
+    );
+  return openaiDefaults
+    ? withBuiltinModes(config, merged.fallbacks, tier, models, activity)
     : config;
 };
 
@@ -585,9 +668,9 @@ const normalizeActivities = (
       const modelRef = builtinTarget
         ? presetModelReference(builtinTarget, genericTier, models)
         : undefined;
+      const declaration = mergeRouteDeclaration(inherited, override);
       const merged: Record<string, unknown> = {
-        ...inherited,
-        ...override,
+        ...(isObjectRecord(declaration) ? declaration : {}),
         ...(modelRef ? { model: modelRef } : {}),
       };
       const config = normalizeTierConfig(
@@ -600,9 +683,17 @@ const normalizeActivities = (
       );
       if (config)
         tiers[tier] = {
-          ...(!isExplicit && openaiDefaults
-            ? withBuiltinModes(config, merged.fallbacks, tier, models, activity)
-            : config),
+          ...activityModeRoutes(
+            config,
+            isExplicit,
+            openaiDefaults,
+            merged,
+            `${profileName}/${activity}`,
+            tier,
+            warnings,
+            models,
+            activity,
+          ),
           ...(!isExplicit ? { activitySource: 'builtin' as const } : {}),
         };
     }
@@ -1081,34 +1172,62 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       continue;
     }
     const profileRecord = isObjectRecord(profile) ? profile : {};
-    const high = normalizeTierConfig(
+    const high = withUserModeRoutes(
+      normalizeTierConfig(
+        profileRecord.high,
+        name,
+        'high',
+        warnings,
+        hasModels ? normalizedModels : undefined,
+      ),
       profileRecord.high,
       name,
       'high',
       warnings,
-      hasModels ? normalizedModels : undefined,
+      normalizedModels,
     );
-    const medium = normalizeTierConfig(
+    const medium = withUserModeRoutes(
+      normalizeTierConfig(
+        profileRecord.medium,
+        name,
+        'medium',
+        warnings,
+        hasModels ? normalizedModels : undefined,
+      ),
       profileRecord.medium,
       name,
       'medium',
       warnings,
-      hasModels ? normalizedModels : undefined,
+      normalizedModels,
     );
-    const low = normalizeTierConfig(
+    const low = withUserModeRoutes(
+      normalizeTierConfig(
+        profileRecord.low,
+        name,
+        'low',
+        warnings,
+        hasModels ? normalizedModels : undefined,
+      ),
       profileRecord.low,
       name,
       'low',
       warnings,
-      hasModels ? normalizedModels : undefined,
+      normalizedModels,
     );
 
-    const micro = normalizeTierConfig(
+    const micro = withUserModeRoutes(
+      normalizeTierConfig(
+        profileRecord.micro,
+        name,
+        'micro',
+        warnings,
+        hasModels ? normalizedModels : undefined,
+      ),
       profileRecord.micro,
       name,
       'micro',
       warnings,
-      hasModels ? normalizedModels : undefined,
+      normalizedModels,
     );
 
     const activitySettings = normalizeProfileActivities(

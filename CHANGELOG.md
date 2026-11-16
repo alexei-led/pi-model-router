@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.21.1] - 2026-11-16
+
+Choose explicit cost and quality model/effort targets for mixed-provider tier and activity routes.
+
+### Changes
+
+- Add `modeRoutes.cost` and `modeRoutes.quality`; the cell itself remains the balanced route. Explicit cost targets can favor another provider without requiring a cheaper catalog input price.
+- Merge partial mode targets across project and activity overrides, inherit generic targets in sparse activities, and allow `null` to remove an inherited target.
+- Include mode-only model capabilities in the logical router model. Preserve eligibility checks, pins, effort overrides and each selected target's fallback list.
+
+### Upgrade
+
+Update to 0.21.1 before adding `modeRoutes`, then restart Pi or run `/reload`. Older versions ignore these targets. Existing configurations retain their mode behavior.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.21.0...v0.21.1)
+
 ## [0.21.0] - 2026-11-15
 
 Align default-owned OpenAI routes with reasoning and implementation roles, and keep adaptive ops work off unvalidated generic downgrades.

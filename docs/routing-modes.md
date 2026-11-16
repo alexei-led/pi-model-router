@@ -75,7 +75,8 @@ The soft budget filters logical tiers and skips advisors, not physical models
 or prices. A normalized medium Sol cell can remain eligible over budget even
 when high also names Sol. This is not a physical-model price ceiling.
 
-`micro` is unchanged by modes. A pin uses its generic configured tier and bypasses the mode.
+Automatic mode transforms leave `micro` unchanged; explicit `modeRoutes` may override it.
+A pin uses its generic configured tier and bypasses the mode.
 A tier-wide effort override also bypasses that tier's mode transform.
 Missing or zero prices do not prove that another model is cheaper.
 
@@ -90,6 +91,33 @@ quality   → gpt-6.1-sol / high
 This example requires available targets, usable prices for cost and fitting context.
 Defaults and custom transforms follow the ownership rules above.
 The [decision matrix](decision-matrix.md) also covers pins, budgets, escalation and explicit overrides.
+
+### Explicit mode targets
+
+A tier or activity cell may set `modeRoutes.cost` and `modeRoutes.quality` to
+complete model/effort declarations. The cell itself remains the balanced route.
+Each target resolves its own model alias and optional `fallbacks`; it does not
+inherit capability metadata or fallbacks from the balanced model. Sparse activity
+cells inherit generic mode targets. Project and activity overrides merge targets
+per mode and fields within a target; an explicit fallback list replaces that list.
+Set a mode target to `null` to remove the inherited target.
+
+```json
+{
+  "model": "valar/moonshotai/Kimi-K3.1-Pro",
+  "thinking": "high",
+  "modeRoutes": {
+    "cost": { "model": "valar/deepseek-ai/DeepSeek-V4.1-Flash-1017", "thinking": "high" },
+    "quality": { "model": "openai-codex-work/gpt-6.1-sol", "thinking": "high" }
+  }
+}
+```
+
+Explicit targets are operator policy: cost targets do not require catalog price
+proof and can cost more. If a target is unavailable, incompatible, or exceeds
+context, the router uses its normal mode transform and then the configured pair.
+Pins and tier-wide effort overrides bypass the target. The soft budget filters
+logical tiers, not physical model cost. It is not a spending ceiling.
 
 ## Change this session
 

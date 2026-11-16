@@ -359,6 +359,7 @@ const freezeTierConfig = (
   const copy = structuredClone(config);
   // Only the selected declaration belongs in an immutable generation plan.
   delete copy.builtinModes;
+  delete copy.modeRoutes;
   if (copy.fallbacks) Object.freeze(copy.fallbacks);
   if (copy.thinkingLevels) Object.freeze(copy.thinkingLevels);
   if (copy.resolvedFallbacks) {
@@ -434,9 +435,12 @@ const applyModeToCell = (
     if (!cellProfile[tier] || thinkingOverrides?.[tier]) continue;
     const recovery =
       recoverCostHigh && mode === 'cost' && tier === 'high' && !budgetExceeded;
+    const userPreferred = recovery
+      ? undefined
+      : cellProfile[tier]?.modeRoutes?.[mode];
     const preferred = recovery
       ? undefined
-      : cellProfile[tier]?.builtinModes?.[mode];
+      : (userPreferred ?? cellProfile[tier]?.builtinModes?.[mode]);
     const preferredPair = preferred
       ? availableRoutePairs(
           { [tier]: preferred },
@@ -461,7 +465,7 @@ const applyModeToCell = (
       preferred &&
       preferredPair &&
       fits(preferredPair) &&
-      (mode !== 'cost' || cheaper)
+      (mode !== 'cost' || userPreferred || cheaper)
     ) {
       next[tier] = preferred;
       overrides[tier] = preferredPair.thinking;

@@ -62,7 +62,14 @@ it('activity-tuning examples change effort, reset a cell and independently disab
 it('routing-mode examples set profile/project precedence and a user-owned policy patch', () => {
   const base = required(jsonExamples('../docs/user-guide.md')[0]);
   const examples = jsonExamples('../docs/routing-modes.md');
-  const profile = normalizeConfig(mergeConfig(base, required(examples[0])));
+  const modeTargets = normalizeConfig({
+    profiles: { example: { medium: required(examples[0]) } },
+  });
+  expect(modeTargets.warnings).toEqual([]);
+  expect(
+    modeTargets.config.profiles.example?.medium?.modeRoutes?.cost?.model,
+  ).toBe('valar/deepseek-ai/DeepSeek-V4.1-Flash-1017');
+  const profile = normalizeConfig(mergeConfig(base, required(examples[1])));
   expect(profile.warnings).toEqual([]);
   expect(modeForProfile(profile.config, 'auto', undefined)).toEqual({
     mode: 'quality',
@@ -70,8 +77,8 @@ it('routing-mode examples set profile/project precedence and a user-owned policy
   });
   const project = normalizeConfig(
     mergeConfig(
-      mergeConfig(base, required(examples[0])),
-      projectRouterConfig(required(examples[1]), []),
+      mergeConfig(base, required(examples[1])),
+      projectRouterConfig(required(examples[2]), []),
     ),
   );
   expect(project.warnings).toEqual([]);
@@ -83,7 +90,7 @@ it('routing-mode examples set profile/project precedence and a user-owned policy
     mode: 'balanced',
     source: 'session',
   });
-  const policy = normalizeConfig(mergeConfig(base, required(examples[2])));
+  const policy = normalizeConfig(mergeConfig(base, required(examples[3])));
   expect(policy.warnings).toEqual([]);
   expect(effectivePolicy(policy.config, 'cost')).toMatchObject({
     costSensitivity: 0.7,
