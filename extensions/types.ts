@@ -48,6 +48,8 @@ export interface RoutedTierConfig {
   activitySource?: 'builtin' | undefined;
   /** Runtime-only default-owned alternatives; never read from user JSON. */
   builtinModes?: Partial<Record<RouterMode, RoutedTierConfig>> | undefined;
+  /** Validated user-owned per-mode preferences. */
+  modeRoutes?: Partial<Record<RouterMode, RoutedTierConfig>> | undefined;
   model: string;
   /** False for normalization defaults; omitted on legacy in-memory profiles. */
   thinkingExplicit?: boolean | undefined;

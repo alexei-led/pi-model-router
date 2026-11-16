@@ -436,6 +436,50 @@ export const normalizeTierConfig = (
   };
 };
 
+const withUserModeRoutes = (
+  config: RoutedTierConfig | undefined,
+  value: unknown,
+  name: string,
+  tier: RouterTier,
+  warnings: string[],
+  models: Record<string, ModelDefinition>,
+): RoutedTierConfig | undefined => {
+  if (!config || !isObjectRecord(value) || value.modeRoutes === undefined)
+    return config;
+  if (!isObjectRecord(value.modeRoutes)) {
+    warnings.push(
+      `Profile "${name}" ${tier} modeRoutes must be an object. Ignored.`,
+    );
+    return config;
+  }
+  const routes: NonNullable<RoutedTierConfig['modeRoutes']> = {};
+  for (const [mode, target] of Object.entries(value.modeRoutes)) {
+    if (mode !== 'cost' && mode !== 'quality') {
+      warnings.push(
+        `Profile "${name}" ${tier} has an invalid mode route. Ignored.`,
+      );
+      continue;
+    }
+    if (!isObjectRecord(target)) {
+      warnings.push(
+        `Profile "${name}" ${tier} ${mode} mode route must be an object. Ignored.`,
+      );
+      continue;
+    }
+    const route = normalizeTierConfig(
+      target,
+      `${name}/${mode}`,
+      tier,
+      warnings,
+      models,
+    );
+    if (route) routes[mode] = route;
+  }
+  return Object.keys(routes).length
+    ? { ...config, modeRoutes: routes }
+    : config;
+};
+
 // File-layer merging can leave undefined placeholders. They are absent, not preset opt-outs.
 const declaredFields = (
   record: Record<string, unknown>,
@@ -493,6 +537,28 @@ const withBuiltinModes = (
   }
   return Object.keys(builtinModes).length
     ? { ...config, builtinModes }
+    : config;
+};
+
+const activityModeRoutes = (
+  config: RoutedTierConfig,
+  override: Record<string, unknown>,
+  isExplicit: boolean,
+  openaiDefaults: boolean,
+  merged: Record<string, unknown>,
+  name: string,
+  tier: RouterTier,
+  warnings: string[],
+  models: Record<string, ModelDefinition>,
+  activity: RouterActivity,
+): RoutedTierConfig => {
+  if (isExplicit)
+    return (
+      withUserModeRoutes(config, override, name, tier, warnings, models) ??
+      config
+    );
+  return openaiDefaults
+    ? withBuiltinModes(config, merged.fallbacks, tier, models, activity)
     : config;
 };
 
@@ -600,9 +666,18 @@ const normalizeActivities = (
       );
       if (config)
         tiers[tier] = {
-          ...(!isExplicit && openaiDefaults
-            ? withBuiltinModes(config, merged.fallbacks, tier, models, activity)
-            : config),
+          ...activityModeRoutes(
+            config,
+            override,
+            isExplicit,
+            openaiDefaults,
+            merged,
+            `${profileName}/${activity}`,
+            tier,
+            warnings,
+            models,
+            activity,
+          ),
           ...(!isExplicit ? { activitySource: 'builtin' as const } : {}),
         };
     }
@@ -1081,34 +1156,62 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
       continue;
     }
     const profileRecord = isObjectRecord(profile) ? profile : {};
-    const high = normalizeTierConfig(
+    const high = withUserModeRoutes(
+      normalizeTierConfig(
+        profileRecord.high,
+        name,
+        'high',
+        warnings,
+        hasModels ? normalizedModels : undefined,
+      ),
       profileRecord.high,
       name,
       'high',
       warnings,
-      hasModels ? normalizedModels : undefined,
+      normalizedModels,
     );
-    const medium = normalizeTierConfig(
+    const medium = withUserModeRoutes(
+      normalizeTierConfig(
+        profileRecord.medium,
+        name,
+        'medium',
+        warnings,
+        hasModels ? normalizedModels : undefined,
+      ),
       profileRecord.medium,
       name,
       'medium',
       warnings,
-      hasModels ? normalizedModels : undefined,
+      normalizedModels,
     );
-    const low = normalizeTierConfig(
+    const low = withUserModeRoutes(
+      normalizeTierConfig(
+        profileRecord.low,
+        name,
+        'low',
+        warnings,
+        hasModels ? normalizedModels : undefined,
+      ),
       profileRecord.low,
       name,
       'low',
       warnings,
-      hasModels ? normalizedModels : undefined,
+      normalizedModels,
     );
 
-    const micro = normalizeTierConfig(
+    const micro = withUserModeRoutes(
+      normalizeTierConfig(
+        profileRecord.micro,
+        name,
+        'micro',
+        warnings,
+        hasModels ? normalizedModels : undefined,
+      ),
       profileRecord.micro,
       name,
       'micro',
       warnings,
-      hasModels ? normalizedModels : undefined,
+      normalizedModels,
     );
 
     const activitySettings = normalizeProfileActivities(

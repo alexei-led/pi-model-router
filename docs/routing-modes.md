@@ -91,6 +91,30 @@ This example requires available targets, usable prices for cost and fitting cont
 Defaults and custom transforms follow the ownership rules above.
 The [decision matrix](decision-matrix.md) also covers pins, budgets, escalation and explicit overrides.
 
+### Explicit mode targets
+
+A tier or activity cell may set `modeRoutes.cost` and `modeRoutes.quality` to
+complete model/effort declarations. The cell itself remains the balanced route.
+Each target resolves its own model alias and optional `fallbacks`; it does not
+inherit capability metadata or fallbacks from the balanced model.
+
+```json
+{
+  "model": "valar/moonshotai/Kimi-K3.1-Pro",
+  "thinking": "high",
+  "modeRoutes": {
+    "cost": { "model": "valar/deepseek-ai/DeepSeek-V4.1-Flash-1017", "thinking": "high" },
+    "quality": { "model": "openai-codex-work/gpt-6.1-sol", "thinking": "high" }
+  }
+}
+```
+
+Explicit targets are operator policy: cost targets do not require catalog price
+proof and can cost more. If a target is unavailable, incompatible, or exceeds
+context, the router uses its normal mode transform and then the configured pair.
+Pins and tier-wide effort overrides bypass the target. The soft budget filters
+logical tiers, not physical model cost. It is not a spending ceiling.
+
 ## Change this session
 
 Use the command for the **next request**, including a subsequent tool-loop request:

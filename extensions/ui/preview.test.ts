@@ -142,3 +142,97 @@ it('distinguishes unknown registry, missing routes and an explicit fallback', ()
     route: { model: 'preview/primary' },
   });
 });
+
+it('uses explicit per-mode activity targets while preserving pins and unavailable fallbacks', () => {
+  const { config, warnings } = normalizeConfig({
+    profiles: {
+      work: {
+        activityPreset: 'off',
+        medium: { model: 'preview/base', thinking: 'high' },
+        activities: {
+          code: {
+            medium: {
+              model: 'preview/kimi',
+              thinking: 'high',
+              modeRoutes: {
+                cost: { model: 'preview/flash', thinking: 'low' },
+                quality: { model: 'preview/sol', thinking: 'xhigh' },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  expect(warnings).toEqual([]);
+  const base = {
+    profile: required(config.profiles.work),
+    find,
+    pin: 'auto' as const,
+    thinkingOverrides: {},
+    activityRouting: true,
+    budgetExceeded: false,
+  };
+  const preferred = (mode: 'cost' | 'balanced' | 'quality') =>
+    routePreferences({ ...base, mode: { mode, source: 'profile' } })(
+      'code',
+      'medium',
+    );
+  expect(preferred('cost').route).toMatchObject({
+    model: 'preview/flash',
+    thinking: 'low',
+  });
+  expect(preferred('balanced').route).toMatchObject({
+    model: 'preview/kimi',
+    thinking: 'high',
+  });
+  expect(preferred('quality').route).toMatchObject({
+    model: 'preview/sol',
+    thinking: 'xhigh',
+  });
+  expect(
+    routePreferences({
+      ...base,
+      pin: 'medium',
+      mode: { mode: 'quality', source: 'profile' },
+    })('code', 'medium').route?.model,
+  ).toBe('preview/base');
+  expect(
+    routePreferences({
+      ...base,
+      find: (p, id) => (id === 'sol' ? undefined : find(p, id)),
+      mode: { mode: 'quality', source: 'profile' },
+    })('code', 'medium').route?.model,
+  ).toBe('preview/kimi');
+});
+
+it('normalizes per-mode targets separately and rejects malformed declarations', () => {
+  const { config, warnings } = normalizeConfig({
+    models: {
+      primary: { model: 'work/primary', contextWindow: 1234 },
+      alternative: { model: 'valar/alternative', contextWindow: 5678 },
+    },
+    profiles: {
+      work: {
+        medium: {
+          model: 'primary',
+          thinking: 'high',
+          fallbacks: ['work/fallback'],
+          modeRoutes: {
+            cost: { model: 'alternative', thinking: 'medium' },
+            quality: { model: 'not-a-reference', thinking: 'high' },
+            balanced: { model: 'work/other' },
+          },
+        },
+      },
+    },
+  });
+  const medium = required(config.profiles.work?.medium);
+  expect(medium.modeRoutes?.cost).toMatchObject({
+    model: 'valar/alternative',
+    resolvedContextWindow: 5678,
+  });
+  expect(medium.modeRoutes?.cost?.fallbacks).toBeUndefined();
+  expect(medium.modeRoutes?.quality).toBeUndefined();
+  expect(warnings).toHaveLength(2);
+});
