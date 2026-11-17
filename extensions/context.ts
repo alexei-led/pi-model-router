@@ -54,9 +54,10 @@ const isNotification = (
     'intent' in details.router
   )
     return details.router.intent === 'notification';
-  // This exact completion type resumes the parent's existing task; unknown custom types remain steering.
+  // Exact completion types resume the parent's task; unknown custom types remain steering.
   return (
     entry.customType === 'subagent-notify' ||
+    entry.customType === 'subagent-incremental-child-notify' ||
     notificationTypes.includes(entry.customType)
   );
 };

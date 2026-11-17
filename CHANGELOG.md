@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.21.2] - 2026-11-17
+
+Preserve the current routing task when an incremental subagent completion arrives.
+
+### Fixed
+
+- Treat `subagent-incremental-child-notify` as a progress notification, including when it wakes an idle parent. Explicit steering still starts a new task; notification text remains available to generation.
+- Explain why a classifier's top tier can differ from the selected cumulative-probability tier.
+
+### Changes
+
+- Update development tooling to Vitest/coverage 5.1.0 and Knip 6.45.1, allowing patch updates with `~` version ranges. Refresh the locked Vite dependency to 8.3.8. These updates do not resolve the development-only Picomatch advisory; no patched stable version is available.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. No configuration migration is required. Reload router configuration separately with `/router reload` if it changed in a running session.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.21.1...v0.21.2)
+
 ## [0.21.1] - 2026-11-16
 
 Choose explicit cost and quality model/effort targets for mixed-provider tier and activity routes.

@@ -517,6 +517,24 @@ describe('native notification provenance', () => {
     ],
     ['known completion', undefined, 'subagent-notify', [0]],
     [
+      'incremental child completion',
+      undefined,
+      'subagent-incremental-child-notify',
+      [0],
+    ],
+    [
+      'incremental explicit steering',
+      { router: { intent: 'steering' } },
+      'subagent-incremental-child-notify',
+      [],
+    ],
+    [
+      'incremental invalid intent',
+      { router: { intent: 'invalid' } },
+      'subagent-incremental-child-notify',
+      [],
+    ],
+    [
       'explicit steering',
       { router: { intent: 'steering' } },
       'subagent-notify',
