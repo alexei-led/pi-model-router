@@ -339,6 +339,14 @@ probability reaches `probabilityThreshold`, counting abstention mass at the loca
 baseline tier. Goal, phase and continuity need a valid choice/distribution and confidence at or
 above `confidenceThreshold`; they never use the cumulative tier rule.
 
+A top choice of micro does not guarantee a micro route. For example, confidence
+`0.55` misses the default `0.65` gate. A distribution of micro `0.64`, low `0.10`,
+medium `0.25` and high `0.01` reaches the default `0.8` cumulative threshold only
+at medium. This does not mean the cheaper models were unavailable. Inspect both
+`choice` and `selectedTier` before changing routes or thresholds. Lowering
+`confidenceThreshold` also changes goal, phase and continuity acceptance, not only
+tier selection.
+
 An accepted goal resolves the chosen tier's current prevalidated cell, or its
 generic plan if there is no eligible specialization. A valid, confident `verify`
 or `execute` phase can instead select the `ops` cell: verify is only specified
@@ -403,9 +411,12 @@ The router uses native branch metadata, never message wording:
 
 - An extension can mark a custom message with
   `details: { router: { intent: "notification" } }`.
-- The exact `subagent-notify` completion type is a notification by default.
-  This recognizes a result notice only; it does not enable inherited/shared
-  subagent provider runtimes.
+- The exact `subagent-notify` and `subagent-incremental-child-notify` completion
+  types are notifications by default, including when they wake an idle parent.
+  They retain the accepted task route rather than starting a new initial
+  classification. Valid tool continuations still use the configured review
+  cadence. This recognizes result notices only; it does not enable
+  inherited/shared subagent provider runtimes.
 - `details: { router: { intent: "steering" } }` starts a new routing task,
   including on a completion-type message.
 - User-level `profiles.<name>.notificationTypes` adds exact native custom types.

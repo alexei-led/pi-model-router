@@ -1156,6 +1156,18 @@ describe('Pi classifier provider integration', () => {
     ],
     ['completion notification', 'subagent-notify', undefined, 1],
     [
+      'incremental child notification',
+      'subagent-incremental-child-notify',
+      undefined,
+      1,
+    ],
+    [
+      'incremental child steering',
+      'subagent-incremental-child-notify',
+      { router: { intent: 'steering' } },
+      2,
+    ],
+    [
       'explicit steering',
       'subagent-notify',
       { router: { intent: 'steering' } },
@@ -1251,6 +1263,48 @@ describe('Pi classifier provider integration', () => {
         expect(payload).toContain('worker finished a check');
         expect(payload).not.toContain('PRIVATE_METADATA');
       }
+    },
+  );
+
+  it.each(['subagent-notify', 'subagent-incremental-child-notify'])(
+    'reuses the accepted route when %s wakes an idle parent',
+    async (customType) => {
+      const s = setup();
+      configureChoice(s, 'low');
+      const manager = SessionManager.inMemory();
+      s.state.lastExtensionContext = {
+        ...required(s.state.lastExtensionContext),
+        sessionManager: manager,
+      };
+      const goal = {
+        role: 'user' as const,
+        content: 'repeat the approved report checks',
+        timestamp: 1,
+      };
+      manager.appendMessage(goal);
+      const first = await consume(s.stream({ messages: [goal] }));
+      const target = s.state.lastDecision?.targetLabel;
+      manager.appendMessage(first.result);
+      manager.appendCustomMessageEntry(customType, 'report completed', false);
+      const native = required(manager.getBranch().at(-1));
+      const context = {
+        messages: [
+          goal,
+          first.result,
+          {
+            role: 'user' as const,
+            content: 'report completed',
+            timestamp: Date.parse(native.timestamp),
+          },
+        ],
+      };
+      expect((await consume(s.stream(context))).result.stopReason).toBe('stop');
+      expect(s.registry.classify).toHaveBeenCalledTimes(1);
+      expect(s.state.lastDecision?.targetLabel).toBe(target);
+      expect(s.state.lastDecision?.tier).toBe('low');
+      expect(s.delegate.mock.calls.at(-1)?.[1].messages).toEqual(
+        normalizeContext(context).messages,
+      );
     },
   );
 
