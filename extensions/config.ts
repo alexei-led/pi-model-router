@@ -1401,7 +1401,9 @@ export const loadRouterConfig = (cwd: string): ConfigLoadResult => {
 };
 
 export const profileNames = (config: RouterConfig): string[] => {
-  return Object.keys(config.profiles).sort();
+  return Object.keys(config.profiles).sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
 };
 
 export const resolveProfileName = (

@@ -36,18 +36,33 @@
         "noFloatingPromises": "error",
         "noMisusedPromises": "error",
         "useAwaitThenable": "error",
-        "useExhaustiveSwitchCases": "error"
+        "useExhaustiveSwitchCases": "error",
+        "noImpliedEval": "error",
+        "noMisusedSpread": "error",
+        "noUnsafePlusOperands": "error",
+        "noUselessAssignment": "error",
+        "useGlobalRegexInMatchAll": "error",
+        "useGlobalRegexInReplaceAll": "error"
       },
       "suspicious": {
         "noAsyncPromiseExecutor": "error",
         "noImportCycles": "error",
-        "noNestedPromises": "error"
+        "noNestedPromises": "error",
+        "useArraySortCompare": "error"
       },
       "style": {
         "useImportType": "error",
         "useNodejsImportProtocol": "error",
         "useTemplate": "error",
-        "useImportsFirst": "error"
+        "useImportsFirst": "error",
+        "noNonNullAssertion": "error",
+        "useErrorCause": "error"
+      },
+      "security": {
+        "noGlobalEval": "error"
+      },
+      "performance": {
+        "noAccumulatingSpread": "error"
       }
     }
   },

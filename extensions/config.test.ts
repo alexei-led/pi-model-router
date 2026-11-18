@@ -519,9 +519,21 @@ describe('config.ts', () => {
           zebra: {},
           apple: {},
           banana: {},
+          Zulu: {},
+          éclair: {},
+          '10': {},
+          '2': {},
         },
       };
-      expect(profileNames(config)).toEqual(['apple', 'banana', 'zebra']);
+      expect(profileNames(config)).toEqual([
+        '10',
+        '2',
+        'Zulu',
+        'apple',
+        'banana',
+        'zebra',
+        'éclair',
+      ]);
     });
   });
 
