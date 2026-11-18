@@ -4,7 +4,7 @@ import {
   getSupportedThinkingLevels,
   type Model,
 } from '@earendil-works/pi-ai';
-import { CONTEXT_FILL } from './constants';
+import { CONTEXT_FILL, DEFAULT_CONTEXT_WINDOW } from './constants';
 import { parseCanonicalModelRef, THINKING_LEVELS } from './domain';
 import { transformRoute } from './modes';
 import type {
@@ -402,6 +402,30 @@ const declaredLevelsFor = (
   return own?.reasoning === false ? [] : own?.thinkingLevels;
 };
 
+/** Use the selected target's metadata, never the original tier's window. */
+export const routeContextWindow = (
+  config: RoutedTierConfig | undefined,
+  model: string,
+  liveWindow: number | undefined,
+): number => {
+  if (liveWindow && Number.isFinite(liveWindow) && liveWindow > 0)
+    return liveWindow;
+  if (config?.model === model)
+    return (
+      config.resolvedContextWindow ??
+      config.contextWindow ??
+      DEFAULT_CONTEXT_WINDOW
+    );
+
+  // Duplicate aliases can declare different windows for the same target.
+  const declared = config?.resolvedFallbacks?.flatMap((fallback) =>
+    fallback.model === model && fallback.contextWindow !== undefined
+      ? [fallback.contextWindow]
+      : [],
+  );
+  return declared?.length ? Math.min(...declared) : DEFAULT_CONTEXT_WINDOW;
+};
+
 interface ModeCell {
   profile: RouterProfile;
   thinkingOverrides: RouterThinkingByTier | undefined;
@@ -432,10 +456,14 @@ const applyModeToCell = (
   const pairs = availableRoutePairs(resolved, findModel, imageAttached);
   const primaries = primaryRoutePairs(resolved, pairs);
   // Another tier's route is a lever only if its model holds the request.
-  const fits = (pair: RoutePair) => {
+  const fits = (pair: RoutePair, config: RoutedTierConfig | undefined) => {
     const { provider, modelId } = parseCanonicalModelRef(pair.model);
-    const window = findModel(provider, modelId)?.contextWindow;
-    return window === undefined || contextTokens <= window * CONTEXT_FILL;
+    const window = routeContextWindow(
+      config,
+      pair.model,
+      findModel(provider, modelId)?.contextWindow,
+    );
+    return contextTokens <= window * CONTEXT_FILL;
   };
   const next: RouterProfile = { ...cellProfile };
   const overrides: RouterThinkingByTier = { ...thinkingOverrides };
@@ -474,7 +502,7 @@ const applyModeToCell = (
     if (
       preferred &&
       preferredPair &&
-      fits(preferredPair) &&
+      fits(preferredPair, preferred) &&
       (mode !== 'cost' || userPreferred || cheaper)
     ) {
       next[tier] = preferred;
@@ -499,7 +527,9 @@ const applyModeToCell = (
       activity,
       routeAt: (target) => {
         const pair = primaries.find((entry) => entry.tier === target);
-        return pair && (target === tier || fits(pair)) ? pair : undefined;
+        return pair && (target === tier || fits(pair, configAt(target)))
+          ? pair
+          : undefined;
       },
       project: (pair, level) => {
         const config = configAt(pair.tier);
@@ -589,21 +619,33 @@ export const buildRouteMatrix = (
     };
   });
   const all = cells.flatMap(({ pairs }) => pairs);
-  const fitting = pinnedTier
-    ? all
-    : fitContextRoutes(
-        all,
-        (pair) => {
-          const { provider, modelId } = parseCanonicalModelRef(pair.model);
-          return findModel(provider, modelId)?.contextWindow;
-        },
-        contextTokens,
-      );
+  const windows = new Map(
+    pinnedTier
+      ? []
+      : cells.flatMap(({ profile: cellProfile, pairs }) =>
+          pairs.map((pair) => {
+            const { provider, modelId } = parseCanonicalModelRef(pair.model);
+            return [
+              pair,
+              routeContextWindow(
+                cellProfile[pair.tier],
+                pair.model,
+                findModel(provider, modelId)?.contextWindow,
+              ),
+            ] as const;
+          }),
+        ),
+  );
+  const fitting = new Set(
+    pinnedTier
+      ? all
+      : fitContextRoutes(all, (pair) => windows.get(pair), contextTokens),
+  );
   const plans: RoutePlan[] = cells.flatMap(
     ({ cell, profile: cellProfile, pairs, provenance }) =>
       primaryRoutePairs(
         cellProfile,
-        pairs.filter((pair) => fitting.includes(pair)),
+        pairs.filter((pair) => fitting.has(pair)),
       ).map((first) => {
         const config = freezeTierConfig(
           cellProfile[first.tier] as RoutedTierConfig,

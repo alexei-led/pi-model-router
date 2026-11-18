@@ -12,6 +12,8 @@ Let a profile use its routing table without automatic effort changes.
 
 - Revalidate the exact model and effort selected for each generation attempt. A capability change between planning and dispatch no longer substitutes a different effort. With table policy, each declared mode fallback maps the configured effort independently of the primary model.
 
+- Use the selected route or fallback's declared context window when its registered model does not report one. Mode selection and generation no longer use conflicting limits.
+
 ### Upgrade
 
 Update the extension and restart Pi or run `/reload`. Enable table policy on the profiles that need it. If a session already has an effort override, run `/router thinking auto` to use the table again.

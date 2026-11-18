@@ -876,6 +876,47 @@ describe('mode transform in the route matrix', () => {
     expect(revalidated(selected)).toEqual(route(selected));
   });
 
+  it('checks the selected mode row window when the live model omits it', () => {
+    const configured = required(
+      normalizeConfig({
+        models: { narrow: { model: 'test/haiku', contextWindow: 1_000 } },
+        profiles: {
+          table: {
+            effortPolicy: 'table',
+            medium: {
+              model: 'test/opus',
+              thinking: 'high',
+              modeRoutes: { quality: { model: 'narrow', thinking: 'high' } },
+            },
+          },
+        },
+      }).config.profiles.table,
+    );
+    const registry = (provider: string, id: string) => {
+      const target = find(provider, id);
+      if (!target || id !== 'haiku') return target;
+      const omittedWindow = { ...target };
+      Reflect.deleteProperty(omittedWindow, 'contextWindow');
+      return omittedWindow;
+    };
+    const select = (tokens: number) =>
+      plan(
+        buildRouteMatrix(
+          configured,
+          registry,
+          false,
+          tokens,
+          undefined,
+          true,
+          undefined,
+          { mode: 'quality', budgetExceeded: false },
+        ),
+        'medium',
+      );
+    expect(route(select(100))).toEqual(['test/haiku/high']);
+    expect(route(select(2_000))).toEqual(['test/opus/high']);
+  });
+
   it('uses the cheaper lower tier with its own fallbacks and keeps the classified tier', () => {
     const medium = plan(matrix('cost'), 'medium');
     expect(medium.tier).toBe('medium');

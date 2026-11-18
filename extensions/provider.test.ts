@@ -270,6 +270,39 @@ describe('router provider', () => {
     });
   });
 
+  it('truncates to a declared fallback window, not the original tier window', async () => {
+    const s = setup();
+    s.state.currentConfig = normalizeConfig({
+      models: { narrow: { model: 'test/fallback', contextWindow: 1024 } },
+      profiles: {
+        balanced: {
+          medium: { model: 'test/primary', fallbacks: ['narrow'] },
+        },
+      },
+    }).config;
+    Reflect.deleteProperty(required(s.models[1]), 'contextWindow');
+    s.delegate.mockReturnValueOnce(failure());
+    const { result } = await consume(
+      s.stream({
+        messages: [
+          { role: 'user', content: 'old'.repeat(2000), timestamp: 1 },
+          message(),
+          { role: 'user', content: 'next', timestamp: 2 },
+        ],
+      }),
+    );
+    expect(result.stopReason).toBe('stop');
+    expect(
+      s.delegate.mock.calls.map(([target, context]) => [
+        target.id,
+        context.messages.length,
+      ]),
+    ).toEqual([
+      ['primary', 3],
+      ['fallback', 1],
+    ]);
+  });
+
   it('suppresses shadow estimates after router-side context truncation', async () => {
     const s = setup();
     for (const target of s.models)

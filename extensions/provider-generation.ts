@@ -9,13 +9,12 @@ import type {
   SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { resolveContextWindow } from './config';
 import { extractTextFromContent } from './context';
 import { isThinkingLevel, parseCanonicalModelRef } from './domain';
 import { observeGeneration, repriceTokens } from './economics';
 import type { PreparedRouterRequest } from './provider-request';
 import type { ProviderTurnCache } from './provider-turns';
-import { currentPlanPairs } from './routing';
+import { currentPlanPairs, routeContextWindow } from './routing';
 import type { RouterRequestObservation } from './types';
 
 type GenerationRegistry = Pick<
@@ -394,7 +393,7 @@ export const runGenerationAttempts = async (
   input: GenerationInput,
 ): Promise<GenerationOutcome> => {
   const request = input.request;
-  const { decision, profile, toolContinuation, priorAssistant } = request;
+  const { decision, toolContinuation, priorAssistant } = request;
   let generationSucceeded = false;
   let generationAborted = false;
 
@@ -426,9 +425,11 @@ export const runGenerationAttempts = async (
 
       try {
         let effectiveContext = input.context;
-        const targetLimit =
-          targetModel.contextWindow ??
-          resolveContextWindow(decision.tier, profile, input.registry);
+        const targetLimit = routeContextWindow(
+          request.plan.config,
+          modelRef,
+          targetModel.contextWindow,
+        );
         if (
           input.model.contextWindow !== undefined &&
           targetLimit < input.model.contextWindow
