@@ -690,7 +690,7 @@ export const createRouterUIRuntime = (
         const pairs =
           activityRouting === 'on' && registry
             ? availableRoutePairs(
-                cell,
+                { ...cell, effortPolicy: configured?.effortPolicy },
                 (provider, id) => registry.find(provider, id),
                 false,
                 state.thinkingByProfile[profile],
@@ -791,6 +791,7 @@ export const createRouterUIRuntime = (
         (provider, id) => registry?.find(provider, id),
         false,
         declaredLevels ? [...declaredLevels] : undefined,
+        configured?.effortPolicy,
       );
     };
     const routeCells = ROUTER_ACTIVITIES.flatMap((activity) =>

@@ -4,7 +4,7 @@ import {
   getSupportedThinkingLevels,
   type Model,
 } from '@earendil-works/pi-ai';
-import { CONTEXT_FILL } from './constants';
+import { CONTEXT_FILL, DEFAULT_CONTEXT_WINDOW } from './constants';
 import { parseCanonicalModelRef, THINKING_LEVELS } from './domain';
 import { transformRoute } from './modes';
 import type {
@@ -50,27 +50,30 @@ export const resolveRoutePair = (
 };
 
 /**
- * Pi's clampThinkingLevel over the levels a route may use: the requested
- * effort, else the nearest higher one, else the nearest lower one.
+ * Legacy profiles use Pi's higher-first mapping; table profiles never round up.
  */
 export const clampEffort = (
   requested: ThinkingLevel,
   allowed: readonly ThinkingLevel[],
+  effortPolicy?: RouterProfile['effortPolicy'],
 ): ThinkingLevel | undefined => {
   if (allowed.includes(requested)) return requested;
   const index = THINKING_LEVELS.indexOf(requested);
-  return (
-    THINKING_LEVELS.slice(index + 1).find((level) => allowed.includes(level)) ??
+  const lower = () =>
     THINKING_LEVELS.slice(0, index)
       .reverse()
-      .find((level) => allowed.includes(level))
-  );
+      .find((level) => allowed.includes(level));
+  return effortPolicy === 'table'
+    ? lower()
+    : (THINKING_LEVELS.slice(index + 1).find((level) =>
+        allowed.includes(level),
+      ) ?? lower());
 };
 
 /**
  * Resolve the effort a route runs at against the live registry, or undefined
  * when the model cannot serve the input. An unsupported effort maps to its
- * nearest supported level, as pi does. A configured effort declaration only
+ * nearest supported level according to the profile policy. A declaration only
  * narrows the levels; it never grants one the live model does not expose.
  */
 export const routeThinking = (
@@ -78,6 +81,7 @@ export const routeThinking = (
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   imageAttached: boolean,
   declaredLevels?: ModelDefinition['thinkingLevels'],
+  effortPolicy?: RouterProfile['effortPolicy'],
 ): ThinkingLevel | undefined => {
   try {
     const { provider, modelId } = parseCanonicalModelRef(pair.model);
@@ -89,7 +93,7 @@ export const routeThinking = (
       (level) =>
         !declaredLevels || level === 'off' || declaredLevels.includes(level),
     );
-    return clampEffort(pair.thinking, allowed);
+    return clampEffort(pair.thinking, allowed, effortPolicy);
   } catch {
     return undefined;
   }
@@ -144,6 +148,7 @@ export const availableRoutePairs = (
             imageAttached,
             // Only declared levels narrow a route; undeclared means the registry's.
             ownConfig?.reasoning === false ? [] : ownConfig?.thinkingLevels,
+            profile.effortPolicy,
           );
           return thinking ? [{ tier, model: target, thinking }] : [];
         } catch {
@@ -174,7 +179,12 @@ export const preservesRouteCoverage = (
   ];
   const pairsFor = (image: boolean, overrides?: RouterThinkingByTier) =>
     cells.flatMap((cell) =>
-      availableRoutePairs(cell, findModel, image, overrides),
+      availableRoutePairs(
+        { ...cell, effortPolicy: profile.effortPolicy },
+        findModel,
+        image,
+        overrides,
+      ),
     );
   for (const imageAttached of [false, true]) {
     const configured = pairsFor(imageAttached);
@@ -203,7 +213,7 @@ export const effortAdjustments = (
       : []),
   ].flatMap((cell) => {
     const pairs = availableRoutePairs(
-      cell.profile,
+      { ...cell.profile, effortPolicy: profile.effortPolicy },
       findModel,
       false,
       Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
@@ -392,6 +402,30 @@ const declaredLevelsFor = (
   return own?.reasoning === false ? [] : own?.thinkingLevels;
 };
 
+/** Use the selected target's metadata, never the original tier's window. */
+export const routeContextWindow = (
+  config: RoutedTierConfig | undefined,
+  model: string,
+  liveWindow: number | undefined,
+): number => {
+  if (liveWindow && Number.isFinite(liveWindow) && liveWindow > 0)
+    return liveWindow;
+  if (config?.model === model)
+    return (
+      config.resolvedContextWindow ??
+      config.contextWindow ??
+      DEFAULT_CONTEXT_WINDOW
+    );
+
+  // Duplicate aliases can declare different windows for the same target.
+  const declared = config?.resolvedFallbacks?.flatMap((fallback) =>
+    fallback.model === model && fallback.contextWindow !== undefined
+      ? [fallback.contextWindow]
+      : [],
+  );
+  return declared?.length ? Math.min(...declared) : DEFAULT_CONTEXT_WINDOW;
+};
+
 interface ModeCell {
   profile: RouterProfile;
   thinkingOverrides: RouterThinkingByTier | undefined;
@@ -422,10 +456,14 @@ const applyModeToCell = (
   const pairs = availableRoutePairs(resolved, findModel, imageAttached);
   const primaries = primaryRoutePairs(resolved, pairs);
   // Another tier's route is a lever only if its model holds the request.
-  const fits = (pair: RoutePair) => {
+  const fits = (pair: RoutePair, config: RoutedTierConfig | undefined) => {
     const { provider, modelId } = parseCanonicalModelRef(pair.model);
-    const window = findModel(provider, modelId)?.contextWindow;
-    return window === undefined || contextTokens <= window * CONTEXT_FILL;
+    const window = routeContextWindow(
+      config,
+      pair.model,
+      findModel(provider, modelId)?.contextWindow,
+    );
+    return contextTokens <= window * CONTEXT_FILL;
   };
   const next: RouterProfile = { ...cellProfile };
   const overrides: RouterThinkingByTier = { ...thinkingOverrides };
@@ -443,7 +481,7 @@ const applyModeToCell = (
       : (userPreferred ?? cellProfile[tier]?.builtinModes?.[mode]);
     const preferredPair = preferred
       ? availableRoutePairs(
-          { [tier]: preferred },
+          { [tier]: preferred, effortPolicy: generic.effortPolicy },
           findModel,
           imageAttached,
         ).find((pair) => pair.model === preferred.model)
@@ -464,11 +502,12 @@ const applyModeToCell = (
     if (
       preferred &&
       preferredPair &&
-      fits(preferredPair) &&
+      fits(preferredPair, preferred) &&
       (mode !== 'cost' || userPreferred || cheaper)
     ) {
       next[tier] = preferred;
-      overrides[tier] = preferredPair.thinking;
+      if (generic.effortPolicy !== 'table')
+        overrides[tier] = preferredPair.thinking;
       provenance[tier] = Object.freeze({
         mode,
         lever:
@@ -481,13 +520,16 @@ const applyModeToCell = (
       });
       continue;
     }
+    if (generic.effortPolicy === 'table' && !recovery) continue;
     const result = transformRoute({
       mode: recovery ? 'balanced' : mode,
       tier,
       activity,
       routeAt: (target) => {
         const pair = primaries.find((entry) => entry.tier === target);
-        return pair && (target === tier || fits(pair)) ? pair : undefined;
+        return pair && (target === tier || fits(pair, configAt(target)))
+          ? pair
+          : undefined;
       },
       project: (pair, level) => {
         const config = configAt(pair.tier);
@@ -567,10 +609,9 @@ export const buildRouteMatrix = (
     return {
       cell: cell.cell,
       profile: moded.profile,
-      thinkingOverrides: moded.thinkingOverrides,
       provenance: moded.provenance,
       pairs: availableRoutePairs(
-        moded.profile,
+        { ...moded.profile, effortPolicy: profile.effortPolicy },
         findModel,
         imageAttached,
         moded.thinkingOverrides,
@@ -578,27 +619,33 @@ export const buildRouteMatrix = (
     };
   });
   const all = cells.flatMap(({ pairs }) => pairs);
-  const fitting = pinnedTier
-    ? all
-    : fitContextRoutes(
-        all,
-        (pair) => {
-          const { provider, modelId } = parseCanonicalModelRef(pair.model);
-          return findModel(provider, modelId)?.contextWindow;
-        },
-        contextTokens,
-      );
+  const windows = new Map(
+    pinnedTier
+      ? []
+      : cells.flatMap(({ profile: cellProfile, pairs }) =>
+          pairs.map((pair) => {
+            const { provider, modelId } = parseCanonicalModelRef(pair.model);
+            return [
+              pair,
+              routeContextWindow(
+                cellProfile[pair.tier],
+                pair.model,
+                findModel(provider, modelId)?.contextWindow,
+              ),
+            ] as const;
+          }),
+        ),
+  );
+  const fitting = new Set(
+    pinnedTier
+      ? all
+      : fitContextRoutes(all, (pair) => windows.get(pair), contextTokens),
+  );
   const plans: RoutePlan[] = cells.flatMap(
-    ({
-      cell,
-      profile: cellProfile,
-      pairs,
-      thinkingOverrides: cellOverrides,
-      provenance,
-    }) =>
+    ({ cell, profile: cellProfile, pairs, provenance }) =>
       primaryRoutePairs(
         cellProfile,
-        pairs.filter((pair) => fitting.includes(pair)),
+        pairs.filter((pair) => fitting.has(pair)),
       ).map((first) => {
         const config = freezeTierConfig(
           cellProfile[first.tier] as RoutedTierConfig,
@@ -622,9 +669,6 @@ export const buildRouteMatrix = (
           cell,
           config,
           attempts,
-          thinkingOverrides: cellOverrides
-            ? Object.freeze({ ...cellOverrides })
-            : undefined,
           ...(provenance[first.tier] ? { mode: provenance[first.tier] } : {}),
         });
       }),
@@ -686,11 +730,8 @@ export const currentPlanPairs = (
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   imageAttached: boolean,
 ): RoutePair[] =>
-  availableRoutePairs(
-    { [plan.tier]: plan.config },
-    findModel,
-    imageAttached,
-    plan.thinkingOverrides,
-  ).filter((pair) =>
-    plan.attempts.some((attempt) => attempt.model === pair.model),
+  // The frozen attempts already satisfied their declarations. Recheck only live
+  // capabilities; a duplicate canonical fallback can have distinct alias metadata.
+  plan.attempts.filter(
+    (pair) => routeThinking(pair, findModel, imageAttached) === pair.thinking,
   );

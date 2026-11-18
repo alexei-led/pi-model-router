@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.23.0] - 2026-11-18
+
+Let a profile use its routing table without automatic effort changes.
+
+### Changes
+
+- Set `"effortPolicy": "table"` in a user profile to use eligible mode rows or the base row, without legacy effort steps or cross-tier mode substitutions. Unsupported effort rounds down; a model with no supported level at or below the request is ineligible. Profiles without the setting retain their mode and effort mapping rules.
+
+### Fixed
+
+- Revalidate the exact model and effort selected for each generation attempt. A capability change between planning and dispatch no longer substitutes a different effort. With table policy, each declared mode fallback maps the configured effort independently of the primary model.
+
+- Use the selected route or fallback's declared context window when its registered model does not report one. Mode selection and generation no longer use conflicting limits.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. Enable table policy on the profiles that need it. If a session already has an effort override, run `/router thinking auto` to use the table again.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.22.2...v0.23.0)
+
 ## [0.22.2] - 2026-11-18
 
 Stop a model switch from setting a router effort override.

@@ -308,7 +308,7 @@ An ineligible pin produces an error. The router does not substitute another tier
 A pin to a tier whose context window is too small for the conversation keeps that tier; old turns are truncated.
 
 An effort override applies to every tier in the active profile.
-Each model runs the override at its nearest supported level. For example, `off` runs as `minimal` on a model without `off`. The confirmation names each tier that runs another level, such as `high runs at minimal`.
+Each model maps the override to a supported level. By default, `off` can map up to `minimal`. With [`effortPolicy: "table"`](routing-modes.md#use-the-table-without-automatic-mode-transforms), mapping only goes down, so a model that does not support `off` is ineligible at `off`. The confirmation names each tier that runs at another level.
 Pi's thinking selector, such as Shift+Tab, sets the same override.
 The thinking level that Pi applies when you switch models does not.
 An override that removes every eligible route produces an error without a partial configuration change.
@@ -365,7 +365,7 @@ CAUTION: Keep credentials out of Git. Selected conversation text can contain sec
 A profile needs at least one generic or activity tier. A partial profile is valid.
 Profile names must be nonempty, contain no whitespace and not be `__proto__`.
 Command names such as `usage` are valid profiles: use `/router profile usage`.
-The router filters unavailable models and unsupported input before selection. An unsupported effort runs at the nearest supported level.
+The router filters unavailable models and unsupported input before selection. An unsupported effort normally maps to the nearest higher supported level, then lower. Set [`effortPolicy: "table"`](routing-modes.md#use-the-table-without-automatic-mode-transforms) on a user profile to round down only and disable automatic mode transforms.
 `off` or `minimal` at `low`, `medium` or `high` disables that tier with a warning, unless the model is declared `reasoning: false`. `micro` can use `off`.
 `baselineTier` prefers a configured tier. Without it, the preference is `medium`, `high`, `low`, then `micro`.
 The [complete example](../model-router.example.json) shows aliases, tier/activity routes and classifier approval. Its advisor starts disabled; follow [classifier setup](classifier-advisor.md#configure-a-model) before enabling it.
