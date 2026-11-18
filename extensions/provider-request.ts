@@ -10,7 +10,7 @@ import { runClassifierDetailed } from './classifier';
 import { advisorForProfile } from './config';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
 import { currentGoalExcerpt, hasImageAttachment } from './context';
-import { parseCanonicalModelRef } from './domain';
+import { isRouterTier, parseCanonicalModelRef } from './domain';
 import { type EscalationState, updateEscalation } from './escalation';
 import { effectivePolicy } from './modes';
 import {
@@ -347,6 +347,7 @@ const reviewCandidates = (matrix: RouteMatrix) => {
 const runBackgroundReview = async (
   input: RequestRouteInput,
   matrix: RouteMatrix,
+  incumbentTier: RouterTier,
   signal: AbortSignal,
 ): Promise<ClassifierResult> => {
   const advisor = input.config.advisor;
@@ -377,8 +378,8 @@ const runBackgroundReview = async (
       ? { activityCandidates, askRoute: candidates.length > 1 }
       : {}),
     profile: input.profile.advisor,
-    baselineTier: selectBaselinePlan(input.profileName, input.profile, matrix)
-      .plan.tier,
+    // A review's abstention is evidence to stay, not to return to the new-task baseline.
+    baselineTier: incumbentTier,
     routingDeadline,
     signal,
   };
@@ -474,7 +475,12 @@ const scheduleBackgroundReview = (
     turn,
     reviewStamp(input, matrix, selected, policy, requestCount),
     async (signal) => {
-      const result = await runBackgroundReview(input, matrix, signal);
+      const result = await runBackgroundReview(
+        input,
+        matrix,
+        selected.plan.tier,
+        signal,
+      );
       input.onReview?.({
         ...record,
         reviewOnly: true,
@@ -514,6 +520,19 @@ const planForActivity = (
     matrix.plans.find((entry) => entry.tier === tier && !entry.cell)
   );
 };
+
+/** Probability coverage alone cannot promote above both the incumbent and the top choice. */
+const supportedAdviceTier = (
+  tier: RouterTier,
+  reference: RouterTier,
+  { choice, selectionBasis }: ClassifierResult['diagnostics'],
+): RouterTier =>
+  selectionBasis === 'probability' &&
+  isRouterTier(choice) &&
+  tierRank(tier) > tierRank(reference) &&
+  tierRank(tier) > tierRank(choice)
+    ? reference
+    : tier;
 
 const chooseAdvisorRoute = async (
   input: RequestRouteInput,
@@ -648,7 +667,11 @@ const chooseAdvisorRoute = async (
       ? planForActivity(
           input.profile,
           current,
-          candidate.tier,
+          supportedAdviceTier(
+            candidate.tier,
+            selected.plan.tier,
+            result.diagnostics,
+          ),
           requestedActivity,
           opsFloor,
         )

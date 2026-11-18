@@ -333,19 +333,24 @@ configuration or test artifact is code, including when diagnosis is needed first
 Debug means a cause/diagnosis report without a required implemented fix. Ops means
 specified operations as the final deliverable, not CLI use or authoring config.
 
-Tier selection keeps the existing rule: accept the top candidate at or above
-`confidenceThreshold`; otherwise choose the lowest tier whose cumulative
-probability reaches `probabilityThreshold`, counting abstention mass at the local
-baseline tier. Goal, phase and continuity need a valid choice/distribution and confidence at or
-above `confidenceThreshold`; they never use the cumulative tier rule.
+Tier advice accepts the top candidate at or above `confidenceThreshold`.
+Below it, the classifier proposes the lowest tier whose cumulative probability
+reaches `probabilityThreshold`. Abstention counts toward the eligible baseline
+on an initial request and toward the running tier during a tool-loop review;
+it does not help a review justify a downshift.
 
-A top choice of micro does not guarantee a micro route. For example, confidence
-`0.55` misses the default `0.65` gate. A distribution of micro `0.48`, low `0.10`,
-medium `0.41` and high `0.01` reaches the default `0.6` cumulative threshold only
-at medium. This does not mean the cheaper models were unavailable. Inspect both
-`choice` and `selectedTier` before changing routes or thresholds. Lowering
-`confidenceThreshold` also changes goal, phase and continuity acceptance, not only
-tier selection.
+The router keeps the reference tier if a cumulative proposal would move above
+both that tier and the classifier's top choice. For example, with a medium
+baseline, a low-confidence medium choice cannot jump to high just to reach the
+cumulative threshold. The reference is the baseline on an initial request and
+the incumbent on a review. An independently accepted activity can still choose
+a cell at the retained tier. The inspector's `choice` and `selectedTier` describe
+the classifier; compare them with the tier actually run. Valid in-loop changes
+still go through the switch-cost policy.
+
+Goal, phase and continuity require their own valid choice/distribution and
+confidence at or above `confidenceThreshold`; they never use the cumulative
+tier rule.
 
 An accepted goal resolves the chosen tier's current prevalidated cell, or its
 generic plan if there is no eligible specialization. A valid, confident `verify`
