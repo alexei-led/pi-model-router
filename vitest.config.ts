@@ -1,7 +1,11 @@
+import { availableParallelism } from 'node:os';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    include: ['extensions/**/*.test.ts'],
+    // Pi SDK/catalog imports are expensive per worker; keep parallel runs bounded.
+    maxWorkers: Math.min(2, availableParallelism()),
     coverage: {
       provider: 'v8',
       include: ['extensions/**/*.ts'],

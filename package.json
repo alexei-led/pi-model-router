@@ -61,7 +61,9 @@
     "lint:fix": "biome lint --write --error-on-warnings .",
     "format": "biome format --write .",
     "format:check": "biome format .",
-    "pack:dry": "npm pack --dry-run"
+    "pack:dry": "npm pack --dry-run",
+    "test:unit": "vitest run --pool=threads --exclude \"**/*host.test.ts\" --exclude \"**/session-isolation.test.ts\" --exclude \"**/user-boundary.test.ts\"",
+    "test:host": "vitest run --pool=threads host.test.ts session-isolation.test.ts user-boundary.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "^1.1.0",
