@@ -31,6 +31,13 @@ it('keeps null activity reset ownership separate from inherited cells and ignore
   expect(profile?.activityResets).toEqual({ debug: ['medium'] });
 });
 
+it('defaults advisor cumulative tier probability to 0.6', () => {
+  const result = normalizeConfig({
+    advisor: { enabled: true, model: 'typesafe/jev-1.14.0' },
+  });
+  expect(result.config.advisor?.probabilityThreshold).toBe(0.6);
+});
+
 describe('status line configuration', () => {
   it.each([undefined, {}, { statusLine: 'compact' }])(
     'defaults to compact for %j',

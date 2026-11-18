@@ -51,6 +51,8 @@ describe('activity matrix provider routing', () => {
     }).config;
     const answer = {
       tier: 'medium',
+      tierConfidence: 0.95,
+      tierProbabilities: undefined as Record<string, number> | undefined,
       activity: 'code',
       phase: undefined as string | undefined,
       relation: 'new-task' as string | undefined,
@@ -95,8 +97,16 @@ describe('activity matrix provider routing', () => {
                 route: {
                   type: 'choice' as const,
                   choice: routeId,
-                  confidence: 0.95,
-                  probabilities: { [routeId]: 1 },
+                  confidence: answer.tierConfidence,
+                  probabilities: answer.tierProbabilities
+                    ? Object.fromEntries(
+                        Object.keys(routeQuestion?.criteria ?? {}).map((id) => [
+                          id,
+                          answer.tierProbabilities?.[id.split('|')[0] ?? id] ??
+                            0,
+                        ]),
+                      )
+                    : { [routeId]: 1 },
                 },
               }
             : {}),
@@ -870,6 +880,25 @@ describe('activity matrix provider routing', () => {
     ).toBe(true);
   });
 
+  it('does not upgrade above the classifier top choice on uncertain initial advice', async () => {
+    const s = activitySetup();
+    s.answer.tierConfidence = 0.4;
+    s.answer.tierProbabilities = {
+      low: 0.1,
+      medium: 0.46,
+      high: 0.41,
+      uncertain: 0.03,
+    };
+
+    await consume(s.stream());
+
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      targetModelId: 'code',
+      classification: { choice: 'medium' },
+    });
+  });
+
   it('raises and lowers tier within one tool loop from fresh classifier reviews', async () => {
     const s = activitySetup();
     s.state.currentConfig.advisor = {
@@ -921,25 +950,62 @@ describe('activity matrix provider routing', () => {
       return response.result;
     };
     await advance();
-    s.answer.tier = 'high';
+    s.answer.tierConfidence = 0.4;
+    s.answer.tierProbabilities = {
+      low: 0.1,
+      medium: 0.46,
+      high: 0.41,
+      uncertain: 0.03,
+    };
     await advance();
     await s.waitForReviews(1);
+    await advance();
+    expect(s.state.lastDecision).toMatchObject({
+      tier: 'medium',
+      adviceSource: 'review',
+      classification: { choice: 'medium', selectedTier: 'high' },
+    });
+
+    s.answer.tier = 'high';
+    s.answer.tierConfidence = 0.95;
+    s.answer.tierProbabilities = undefined;
+    await advance();
+    await s.waitForReviews(2);
     const up = await advance();
     expect(up.model).toBe('primary');
     expect(s.state.lastDecision).toMatchObject({
       tier: 'high',
       targetModelId: 'primary',
     });
-    s.answer.tier = 'low';
+    s.answer.tier = 'medium';
+    s.answer.tierConfidence = 0.4;
+    s.answer.tierProbabilities = {
+      low: 0.08,
+      medium: 0.47,
+      high: 0.2,
+      uncertain: 0.25,
+    };
     await advance();
-    await s.waitForReviews(2);
+    await s.waitForReviews(3);
+    await advance();
+    expect(s.state.lastDecision?.tier).toBe('high');
+
+    s.answer.tier = 'low';
+    s.answer.tierProbabilities = {
+      low: 0.62,
+      medium: 0.08,
+      high: 0.25,
+      uncertain: 0.05,
+    };
+    await advance();
+    await s.waitForReviews(4);
     const down = await advance();
     expect(down.model).toBe('small');
     expect(s.state.lastDecision).toMatchObject({
       tier: 'low',
       targetModelId: 'small',
     });
-    expect(s.classify).toHaveBeenCalledTimes(3);
+    expect(s.classify).toHaveBeenCalledTimes(5);
   });
 
   it.each(['off', 'identical', 'ineligible', 'overridden-effort'] as const)(

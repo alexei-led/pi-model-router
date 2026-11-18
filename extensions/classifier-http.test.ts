@@ -98,9 +98,13 @@ afterEach(() => {
 
 describe('classifier route selection and text bounds', () => {
   it('uses the full distribution to select a conservative route below confidence threshold', async () => {
-    const result = await runClassifierDetailed(config, request(), {
-      fetch: transport(fixtures.lowConfidence),
-    });
+    const result = await runClassifierDetailed(
+      { ...config, probabilityThreshold: 0.8 },
+      request(),
+      {
+        fetch: transport(fixtures.lowConfidence),
+      },
+    );
     expect(result.advice?.candidateId).toBe(candidates[1]?.id);
     expect(result.diagnostics).toMatchObject({
       outcome: 'selected',
@@ -109,6 +113,17 @@ describe('classifier route selection and text bounds', () => {
       selectionBasis: 'probability',
       probability: 0.4,
       routeProbability: 1,
+    });
+  });
+  it('keeps the baseline for a low-confidence distribution under the default threshold', async () => {
+    const result = await runClassifierDetailed(config, request(), {
+      fetch: transport(fixtures.lowConfidence),
+    });
+    expect(result.advice?.candidateId).toBe(candidates[0]?.id);
+    expect(result.diagnostics).toMatchObject({
+      selectedTier: 'medium',
+      selectionBasis: 'probability',
+      routeProbability: 0.7,
     });
   });
   it('accepts the lowest eligible tier only when cumulative probability meets threshold', async () => {
