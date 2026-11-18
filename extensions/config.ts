@@ -710,7 +710,7 @@ export const DEFAULT_ADVISOR_CONFIG = {
   timeoutMs: DEFAULT_CLASSIFIER_TIMEOUT_MS,
   reviewEveryRequests: 4,
   confidenceThreshold: 0.65,
-  probabilityThreshold: 0.8,
+  probabilityThreshold: 0.6,
   maxStateTokens: 3000,
   maxRetries: 1,
 } as const;
