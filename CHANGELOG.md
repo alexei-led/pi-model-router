@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.22.1] - 2026-11-18
+
+Preserve routing priority when a running tool loop is reviewed or changes mode.
+
+### Fixed
+
+- Raise the repeated-failure escalation floor from the route that issued the failing tool call, even if a background review recommends a lower tier.
+- Keep the prior activity and tier when they remain eligible after a mode change, even if the new baseline uses the same model.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. No configuration migration is required.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.22.0...v0.22.1)
+
 ## [0.22.0] - 2026-11-18
 
 Use GPT-6.2 Sol for built-in OpenAI routes that previously selected GPT-6.1 Sol.
