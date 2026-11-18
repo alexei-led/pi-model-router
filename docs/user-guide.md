@@ -257,8 +257,8 @@ See [routing modes](routing-modes.md) for the complete preference table, control
 
 In one user turn, the same tool can fail twice with the same output, with a
 successful `edit` or `write` between the failures. Then the router routes at
-least one tier above the route that failed. This starts at the next request and
-lasts for `escalationHoldTurns` more user turns. It applies in every mode,
+least one tier above the route that failed, even if a background review
+recommends a lower tier. This starts at the next request and lasts for `escalationHoldTurns` more user turns. It applies in every mode,
 `balanced` included. Ordinary tier escalation does not apply at `high`, with a pin, or on a Google
 thought-signature continuation. The log shows reason `escalation` and
 `escalated from <tier>`.

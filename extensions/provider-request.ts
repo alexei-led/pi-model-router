@@ -868,7 +868,8 @@ const continueCompatibleRoute = (
   if (
     !assistant ||
     (!mustContinueGoogle && selected.decision.reasonCode !== 'baseline') ||
-    (selected.decision.targetProvider === assistant.provider &&
+    (mustContinueGoogle &&
+      selected.decision.targetProvider === assistant.provider &&
       selected.decision.targetModelId === assistant.model)
   )
     return selected;
@@ -927,10 +928,12 @@ const applyEscalation = (
   matrix: RouteMatrix,
   budget: boolean,
   policy: string,
+  incumbentTier: RouterTier | undefined,
 ): SelectedRoute => {
   const { state, floor } = updateEscalation(input.cache.escalation(), {
     messages: routingContext(input).messages,
-    incumbent: selected.plan.tier,
+    // Review may downshift, but the incumbent issued the failing tool call.
+    incumbent: incumbentTier ?? selected.plan.tier,
     holdTurns: effectivePolicy(input.config, input.mode.mode, input.profile)
       .escalationHoldTurns,
   });
@@ -1169,6 +1172,7 @@ export const prepareRouterRequest = async (
       currentMatrix,
       budget,
       basePolicy,
+      incumbent?.plan.tier,
     );
   if (toolContinuation && !mustContinueGoogle)
     scheduleBackgroundReview(
