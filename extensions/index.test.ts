@@ -1031,6 +1031,35 @@ describe('index.ts (orchestrator)', () => {
   });
 
   describe('thinking_level_select event', () => {
+    it.each([
+      ['a regular model', { provider: 'openai', id: 'gpt-4o' }],
+      ['another router profile', { provider: 'router', id: 'alternate' }],
+    ] as const)(
+      'ignores the thinking change Pi emits while switching to %s',
+      async (_label, next) => {
+        routerExtension(mockPi);
+        const ctx = buildMockCtx();
+        for (const handler of handlersFor('session_start'))
+          await handler({}, ctx);
+        // Pi applies the new model, emits its thinking change, then model_select.
+        Object.assign(ctx, { model: next });
+        for (const handler of handlersFor('thinking_level_select'))
+          handler({ level: 'high', previousLevel: 'medium' }, ctx);
+        for (const handler of handlersFor('model_select'))
+          await handler(
+            {
+              model: model(next.id, { provider: next.provider }),
+              previousModel: model('balanced', { provider: 'router' }),
+              source: 'set',
+            },
+            ctx,
+          );
+        expect(
+          mockPi.appendEntry.mock.calls.at(-1)?.[1].thinkingByProfile,
+        ).toEqual({});
+      },
+    );
+
     it.each([false, true])(
       'keeps per-tier effort after internal display sync (deferred=%s)',
       async (deferred) => {

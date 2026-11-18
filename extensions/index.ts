@@ -705,6 +705,13 @@ const routerExtension = (pi: ExtensionAPI) => {
       ignoreStartupThinkingEvent = false;
       return;
     }
+    // Pi applies a new model before it emits that switch's thinking change and
+    // model_select; only a change on the active router profile is a user choice.
+    if (
+      ctx.model?.provider !== 'router' ||
+      resolveProfileName(currentConfig, ctx.model.id) !== selectedProfile
+    )
+      return;
 
     // User changed pi's thinking level (e.g. via shift+tab).
     // Apply as an all-tier thinking override for the active router profile.
