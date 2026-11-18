@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.22.0] - 2026-11-18
+
+Use GPT-6.2 Sol for built-in OpenAI routes that previously selected GPT-6.1 Sol.
+
+### Changes
+
+- Update the OpenAI activity presets, mode preferences, and example ladder. GPT-6.1 Terra and GPT-6 Luna keep their lower-cost roles. Existing Sol 6 and 6.1 profiles remain recognized, and user-defined generic routes are not rewritten.
+- Refresh the development toolchain and pinned GitHub Actions. Pi and Node runtime minimums are unchanged. The development-only Picomatch advisory remains open.
+- Add focused `test:unit` and `test:host` commands, reduce repeated Pi startup in host tests, and cover cancellation and visible-output errors on fallback routes. The full test and coverage commands still run both suites.
+
+### Upgrade
+
+Confirm your Pi provider registers `gpt-6.2-sol` before adopting the new example ladder. Update the extension and restart Pi or run `/reload`. No configuration migration is required.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.21.2...v0.22.0)
+
 ## [0.21.2] - 2026-11-17
 
 Preserve the current routing task when an incremental subagent completion arrives.
