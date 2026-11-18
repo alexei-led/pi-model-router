@@ -20,7 +20,7 @@ const scenario = (
           activityPreset: 'off',
           advisor: { models: ['fixture/choice'] },
           medium: { model: 'work/glm-flash', thinking: 'high' },
-          high: { model: 'work/gpt-6.1-sol', thinking: 'high' },
+          high: { model: 'work/gpt-6.2-sol', thinking: 'high' },
           activities: {
             docs: {
               medium: { model: 'work/expensive', thinking: 'high' },
@@ -37,7 +37,7 @@ const scenario = (
                     high:
                       high === 'reset'
                         ? null
-                        : { model: 'work/gpt-6.1-sol', thinking: 'high' },
+                        : { model: 'work/gpt-6.2-sol', thinking: 'high' },
                   },
                 }),
           },
@@ -128,7 +128,7 @@ it.each(['reason', 'produce'] as const)(
       tier: 'high',
       routeCell: f.engineering,
       activity: f.engineering,
-      targetModelId: 'gpt-6.1-sol',
+      targetModelId: 'gpt-6.2-sol',
       thinking: 'high',
       reasonCode: 'escalation',
     });
@@ -136,7 +136,7 @@ it.each(['reason', 'produce'] as const)(
     expect(await f.advance('read', false)).toMatchObject({
       tier: 'high',
       routeCell: f.engineering,
-      targetModelId: 'gpt-6.1-sol',
+      targetModelId: 'gpt-6.2-sol',
       reuse: 'continuation',
     });
   },
@@ -192,7 +192,7 @@ it.each(['reason', 'produce'] as const)(
       proposedRoute: { activity: 'docs' },
     });
     expect(await f.advance('read', false)).toMatchObject({
-      targetModelId: 'gpt-6.1-sol',
+      targetModelId: 'gpt-6.2-sol',
       routeCell: f.engineering,
       activityPreference: f.engineering,
       reasonCode: 'escalation',
@@ -225,7 +225,7 @@ it.each(['budget', 'pin', 'config', 'context', 'owner', 'branch'] as const)(
       const find = registry.find;
       registry.find = (provider, id) => {
         const target = find(provider, id);
-        return target && id === 'gpt-6.1-sol'
+        return target && id === 'gpt-6.2-sol'
           ? { ...target, contextWindow: 1 }
           : target;
       };
@@ -235,7 +235,7 @@ it.each(['budget', 'pin', 'config', 'context', 'owner', 'branch'] as const)(
       expect(selected.tier).toBe('medium');
     if (fence !== 'context')
       expect(selected.activityPreference).toBeUndefined();
-    expect(selected.targetModelId).not.toBe('gpt-6.1-sol');
+    expect(selected.targetModelId).not.toBe('gpt-6.2-sol');
   },
 );
 
@@ -251,7 +251,7 @@ it.each(['reason', 'produce'] as const)(
       expect(escalated).toMatchObject({
         tier: 'high',
         reasonCode: 'escalation',
-        targetModelId: high === 'inherited' ? 'gpt-6.1-terra' : 'gpt-6.1-sol',
+        targetModelId: high === 'inherited' ? 'gpt-6.1-terra' : 'gpt-6.2-sol',
         routeCell: high === 'inherited' ? 'ops' : undefined,
       });
     }

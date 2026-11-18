@@ -134,19 +134,19 @@ repeated tool failure with an edit between.
 
 | Modifier | Classifier | Activity | cost | balanced | quality | Reason |
 | --- | --- | --- | --- | --- | --- | --- |
-| plain | none | - | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | baseline |
-| plain | high | code, uncertain | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
-| plain | high | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | classifier |
-| plain | high | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
-| plain | medium | code | medium gpt-6.1-terra/high | medium gpt-6.1-terra/high | medium gpt-6.1-sol/high (model from medium) | classifier |
-| plain | medium | debug, plan, review | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | classifier |
-| plain | medium | explore, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | classifier |
+| plain | none | - | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | baseline |
+| plain | high | code, uncertain | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | classifier |
+| plain | high | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | classifier |
+| plain | high | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | classifier |
+| plain | medium | code | medium gpt-6.1-terra/high | medium gpt-6.1-terra/high | medium gpt-6.2-sol/high (model from medium) | classifier |
+| plain | medium | debug, plan, review | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | classifier |
+| plain | medium | explore, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | classifier |
 | plain | low | code, debug, explore, plan, review, ops, docs, uncertain | low gpt-6-luna/medium (effort) | low gpt-6-luna/high | low gpt-6.1-terra/medium (model from low) | classifier |
 | plain | micro | code, explore, ops, docs | micro gpt-6-luna/low | micro gpt-6-luna/low | micro gpt-6-luna/low | classifier |
 | plain | micro | debug, plan, review | micro gpt-6-luna/medium | micro gpt-6-luna/medium | micro gpt-6-luna/medium | classifier |
 | plain | micro | uncertain | micro gpt-6-luna/off | micro gpt-6-luna/off | micro gpt-6-luna/off | classifier |
-| plain | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | baseline |
-| plain | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | baseline |
+| plain | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | baseline |
+| plain | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | baseline |
 | pin-medium | none | - | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | pinned |
 | pin-medium | high | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | pinned |
 | pin-medium | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | pinned |
@@ -155,35 +155,35 @@ repeated tool failure with an edit between.
 | pin-medium | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | pinned |
 | pin-medium | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | pinned |
 | effort-low | none | - | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | baseline |
-| effort-low | high | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/low | high gpt-6.1-sol/low | high gpt-6.1-sol/low | classifier |
+| effort-low | high | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.2-sol/low | high gpt-6.2-sol/low | high gpt-6.2-sol/low | classifier |
 | effort-low | medium | code, explore, ops, docs, uncertain | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | classifier |
-| effort-low | medium | debug, plan, review | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | classifier |
+| effort-low | medium | debug, plan, review | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | classifier |
 | effort-low | low | code, debug, explore, plan, review, ops, docs, uncertain | low gpt-6-luna/low | low gpt-6-luna/low | low gpt-6-luna/low | classifier |
 | effort-low | micro | code, debug, explore, plan, review, ops, docs, uncertain | micro gpt-6-luna/low | micro gpt-6-luna/low | micro gpt-6-luna/low | classifier |
 | effort-low | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | baseline |
 | effort-low | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | baseline |
-| budget | none | - | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | budget |
-| budget | high | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | budget |
-| budget | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | budget |
-| budget | low | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | budget |
-| budget | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | budget |
-| budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | budget |
-| budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | budget |
-| escalation | none | - | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
-| escalation | high | code, uncertain | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
-| escalation | high | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | classifier |
-| escalation | high | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
-| escalation | medium | code, uncertain | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
-| escalation | medium | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | escalation from medium |
-| escalation | medium | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
-| escalation | low | code, uncertain | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from low |
-| escalation | low | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | escalation from low |
-| escalation | low | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from low |
-| escalation | micro | code, uncertain | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from micro |
-| escalation | micro | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | escalation from micro |
-| escalation | micro | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from micro |
-| escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
-| escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
+| budget | none | - | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | budget |
+| budget | high | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | budget |
+| budget | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | budget |
+| budget | low | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | budget |
+| budget | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | budget |
+| budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | budget |
+| budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | budget |
+| escalation | none | - | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from medium |
+| escalation | high | code, uncertain | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | classifier |
+| escalation | high | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | classifier |
+| escalation | high | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | classifier |
+| escalation | medium | code, uncertain | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from medium |
+| escalation | medium | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | escalation from medium |
+| escalation | medium | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from medium |
+| escalation | low | code, uncertain | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from low |
+| escalation | low | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | escalation from low |
+| escalation | low | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from low |
+| escalation | micro | code, uncertain | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from micro |
+| escalation | micro | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | escalation from micro |
+| escalation | micro | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from micro |
+| escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from medium |
+| escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from medium |
 
 ## user/claude
 
@@ -260,61 +260,61 @@ repeated tool failure with an edit between.
 
 | Modifier | Classifier | Activity | cost | balanced | quality | Reason |
 | --- | --- | --- | --- | --- | --- | --- |
-| plain | none | - | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | baseline |
-| plain | high | code | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
-| plain | high | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | classifier |
-| plain | high | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
-| plain | high | uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | classifier |
+| plain | none | - | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | baseline |
+| plain | high | code | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | classifier |
+| plain | high | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | classifier |
+| plain | high | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | classifier |
+| plain | high | uncertain | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/max (effort) | classifier |
 | plain | medium | code | medium gpt-6-luna/medium (effort) | medium gpt-6-luna/high | medium gpt-6-luna/xhigh (effort) | classifier |
-| plain | medium | debug, plan, review | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | classifier |
-| plain | medium | explore, ops, docs | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.1-sol/medium (model from medium) | classifier |
-| plain | medium | uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | classifier |
+| plain | medium | debug, plan, review | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | classifier |
+| plain | medium | explore, ops, docs | medium gpt-6.1-terra/medium | medium gpt-6.1-terra/medium | medium gpt-6.2-sol/medium (model from medium) | classifier |
+| plain | medium | uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | classifier |
 | plain | low | code, debug, explore, plan, review, ops, docs | low gpt-6-luna/medium (effort) | low gpt-6-luna/high | low gpt-6.1-terra/medium (model from low) | classifier |
 | plain | low | uncertain | low gpt-6-luna/low (effort) | low gpt-6-luna/medium | low gpt-6-luna/high (effort) | classifier |
 | plain | micro | code, explore, ops, docs | micro gpt-6-luna/low | micro gpt-6-luna/low | micro gpt-6-luna/low | classifier |
 | plain | micro | debug, plan, review | micro gpt-6-luna/medium | micro gpt-6-luna/medium | micro gpt-6-luna/medium | classifier |
 | plain | micro | uncertain | micro gpt-6-luna/off | micro gpt-6-luna/off | micro gpt-6-luna/off | classifier |
-| plain | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | baseline |
-| plain | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | baseline |
-| pin-medium | none | - | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
-| pin-medium | high | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
-| pin-medium | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
-| pin-medium | low | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
-| pin-medium | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
-| pin-medium | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
-| pin-medium | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/medium | pinned |
-| effort-low | none | - | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | baseline |
-| effort-low | high | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/low | high gpt-6.1-sol/low | high gpt-6.1-sol/low | classifier |
+| plain | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | baseline |
+| plain | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | baseline |
+| pin-medium | none | - | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | pinned |
+| pin-medium | high | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | pinned |
+| pin-medium | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | pinned |
+| pin-medium | low | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | pinned |
+| pin-medium | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | pinned |
+| pin-medium | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | pinned |
+| pin-medium | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/medium | pinned |
+| effort-low | none | - | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | baseline |
+| effort-low | high | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.2-sol/low | high gpt-6.2-sol/low | high gpt-6.2-sol/low | classifier |
 | effort-low | medium | code | medium gpt-6-luna/low | medium gpt-6-luna/low | medium gpt-6-luna/low | classifier |
-| effort-low | medium | debug, plan, review, uncertain | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | classifier |
+| effort-low | medium | debug, plan, review, uncertain | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | classifier |
 | effort-low | medium | explore, ops, docs | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | medium gpt-6.1-terra/low | classifier |
 | effort-low | low | code, debug, explore, plan, review, ops, docs, uncertain | low gpt-6-luna/low | low gpt-6-luna/low | low gpt-6-luna/low | classifier |
 | effort-low | micro | code, debug, explore, plan, review, ops, docs, uncertain | micro gpt-6-luna/low | micro gpt-6-luna/low | micro gpt-6-luna/low | classifier |
-| effort-low | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | baseline |
-| effort-low | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | medium gpt-6.1-sol/low | baseline |
-| budget | none | - | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
-| budget | high | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
-| budget | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
-| budget | low | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
-| budget | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
-| budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
-| budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.1-sol/medium | medium gpt-6.1-sol/high (effort) | budget |
-| escalation | none | - | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |
-| escalation | high | code | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
-| escalation | high | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | classifier |
-| escalation | high | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | classifier |
-| escalation | high | uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | classifier |
-| escalation | medium | code | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
-| escalation | medium | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | escalation from medium |
-| escalation | medium | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from medium |
-| escalation | medium | uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |
-| escalation | low | code | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from low |
-| escalation | low | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | escalation from low |
-| escalation | low | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from low |
-| escalation | low | uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from low |
-| escalation | micro | code | high gpt-6.1-sol/high | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from micro |
-| escalation | micro | debug, plan, review | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/xhigh | escalation from micro |
-| escalation | micro | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.1-sol/high | high gpt-6.1-sol/xhigh (effort) | escalation from micro |
-| escalation | micro | uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from micro |
-| escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |
-| escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.1-sol/high (effort) | high gpt-6.1-sol/xhigh | high gpt-6.1-sol/max (effort) | escalation from medium |
+| effort-low | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | baseline |
+| effort-low | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | medium gpt-6.2-sol/low | baseline |
+| budget | none | - | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | budget |
+| budget | high | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | budget |
+| budget | medium | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | budget |
+| budget | low | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | budget |
+| budget | micro | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | budget |
+| budget | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | budget |
+| budget | invalid | code, debug, explore, plan, review, ops, docs, uncertain | medium gpt-6-luna/medium (model from low) | medium gpt-6.2-sol/medium | medium gpt-6.2-sol/high (effort) | budget |
+| escalation | none | - | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/max (effort) | escalation from medium |
+| escalation | high | code | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | classifier |
+| escalation | high | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | classifier |
+| escalation | high | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | classifier |
+| escalation | high | uncertain | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/max (effort) | classifier |
+| escalation | medium | code | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from medium |
+| escalation | medium | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | escalation from medium |
+| escalation | medium | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from medium |
+| escalation | medium | uncertain | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/max (effort) | escalation from medium |
+| escalation | low | code | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from low |
+| escalation | low | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | escalation from low |
+| escalation | low | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from low |
+| escalation | low | uncertain | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/max (effort) | escalation from low |
+| escalation | micro | code | high gpt-6.2-sol/high | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from micro |
+| escalation | micro | debug, plan, review | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/xhigh | escalation from micro |
+| escalation | micro | explore, ops, docs | high gpt-6.1-terra/medium (model from high) | high gpt-6.2-sol/high | high gpt-6.2-sol/xhigh (effort) | escalation from micro |
+| escalation | micro | uncertain | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/max (effort) | escalation from micro |
+| escalation | uncertain | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/max (effort) | escalation from medium |
+| escalation | invalid | code, debug, explore, plan, review, ops, docs, uncertain | high gpt-6.2-sol/high (effort) | high gpt-6.2-sol/xhigh | high gpt-6.2-sol/max (effort) | escalation from medium |

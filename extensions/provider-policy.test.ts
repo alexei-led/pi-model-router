@@ -8,7 +8,7 @@ const ladder = {
   micro: { model: 'work/gpt-6-luna', thinking: 'off' },
   low: { model: 'work/gpt-6-luna', thinking: 'high' },
   medium: { model: 'work/gpt-6.1-terra', thinking: 'medium' },
-  high: { model: 'work/gpt-6.1-sol', thinking: 'high' },
+  high: { model: 'work/gpt-6.2-sol', thinking: 'high' },
 };
 const find = (provider: string, id: string) =>
   model(id, {
@@ -50,7 +50,7 @@ describe('provider-aware OpenAI targets', () => {
       });
       for (const activity of ['debug', 'plan', 'review'] as const)
         expect(pair(mode, 'medium', activity)).toMatchObject({
-          model: 'work/gpt-6.1-sol',
+          model: 'work/gpt-6.2-sol',
           thinking: 'medium',
         });
       for (const activity of ['explore', 'docs', 'ops'] as const)
@@ -69,7 +69,7 @@ describe('provider-aware OpenAI targets', () => {
       'review',
     ] as const)
       expect(pair('cost', 'high', activity)).toMatchObject({
-        model: 'work/gpt-6.1-sol',
+        model: 'work/gpt-6.2-sol',
         thinking: 'high',
       });
     for (const activity of ['explore', 'docs', 'ops'] as const)

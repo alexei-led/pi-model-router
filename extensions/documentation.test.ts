@@ -45,7 +45,7 @@ it('activity-tuning examples change effort, reset a cell and independently disab
   });
   expect(
     normalizeTierConfig(required(examples[1]), 'auto/debug', 'medium', []),
-  ).toMatchObject({ model: 'openai-codex/gpt-6.1-sol', thinking: 'xhigh' });
+  ).toMatchObject({ model: 'openai-codex/gpt-6.2-sol', thinking: 'xhigh' });
   const reset = normalizeConfig(mergeConfig(base, required(examples[2])));
   expect(reset.warnings).toEqual([]);
   expect(reset.config.profiles.auto?.activities?.ops?.medium).toBeUndefined();

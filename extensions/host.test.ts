@@ -13,7 +13,7 @@ const runRouterCLI = (args: string[], input?: string) => {
   writeFileSync(
     join(agentDir, 'model-router.json'),
     JSON.stringify({
-      profiles: { offline: { medium: { model: 'openai/gpt-6.1-sol' } } },
+      profiles: { offline: { medium: { model: 'openai/gpt-6.2-sol' } } },
     }),
   );
   return spawnSync(

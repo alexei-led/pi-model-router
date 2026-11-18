@@ -20,7 +20,7 @@ const scenario = async (openai = false, activity: RouterActivity = 'ops') => {
         advisor: { models: ['fixture/choice'] },
         baselineTier: 'high',
         high: {
-          model: openai ? 'scope/gpt-6.1-sol' : 'scope/claude-opus-5-5',
+          model: openai ? 'scope/gpt-6.2-sol' : 'scope/claude-opus-5-5',
           thinking: 'high',
         },
         medium: {
@@ -97,7 +97,7 @@ const scenario = async (openai = false, activity: RouterActivity = 'ops') => {
       model(id, {
         provider,
         contextWindow:
-          id === (openai ? 'gpt-6.1-sol' : 'claude-opus-5-5')
+          id === (openai ? 'gpt-6.2-sol' : 'claude-opus-5-5')
             ? opusWindow
             : 128000,
         thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
@@ -247,7 +247,7 @@ describe('cost-mode failure recovery', () => {
       const f = await scenario(true, activity);
       expect(f.current().decision).toMatchObject({
         targetModelId: ['debug', 'plan', 'review'].includes(activity)
-          ? 'gpt-6.1-sol'
+          ? 'gpt-6.2-sol'
           : 'gpt-6.1-terra',
         thinking: ['debug', 'plan', 'review'].includes(activity)
           ? 'high'
@@ -256,7 +256,7 @@ describe('cost-mode failure recovery', () => {
       });
       const recovered = await f.next('bash', true);
       expect(recovered.decision).toMatchObject({
-        targetModelId: 'gpt-6.1-sol',
+        targetModelId: 'gpt-6.2-sol',
         thinking: ['debug', 'plan', 'review'].includes(activity)
           ? 'xhigh'
           : 'high',
@@ -272,7 +272,7 @@ describe('cost-mode failure recovery', () => {
       const expired = await f.user('expired hold');
       expect(expired.decision.targetModelId).toBe(
         ['debug', 'plan', 'review'].includes(activity)
-          ? 'gpt-6.1-sol'
+          ? 'gpt-6.2-sol'
           : 'gpt-6.1-terra',
       );
       expect(expired.decision.costRecovery).not.toBe(true);
@@ -290,7 +290,7 @@ describe('cost-mode failure recovery', () => {
   it('does not arm recovery when cost high code already equals balanced high', async () => {
     const f = await scenario(true, 'code');
     expect(f.current().decision).toMatchObject({
-      targetModelId: 'gpt-6.1-sol',
+      targetModelId: 'gpt-6.2-sol',
       thinking: 'high',
       modeLever: 'none',
     });

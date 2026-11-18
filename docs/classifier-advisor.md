@@ -168,7 +168,7 @@ Merge these settings with your existing profiles, or adapt this complete example
         "models": ["typesafe/jev-1.14.0"]
       },
       "high": {
-        "model": "openai-codex/gpt-6.1-sol",
+        "model": "openai-codex/gpt-6.2-sol",
         "thinking": "high"
       },
       "medium": {
@@ -183,7 +183,7 @@ Merge these settings with your existing profiles, or adapt this complete example
     "work": {
       "advisor": { "models": [] },
       "medium": {
-        "model": "openai-codex/gpt-6.1-sol",
+        "model": "openai-codex/gpt-6.2-sol",
         "thinking": "medium"
       }
     }

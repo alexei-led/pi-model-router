@@ -12,32 +12,32 @@ See [routing modes](routing-modes.md) for controls, precedence and recovery.
 | --- | --- | --- | --- | --- |
 | code | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
 | code | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| code | medium | gpt-6.1-terra / high | gpt-6.1-terra / high | gpt-6.1-sol / high |
-| code | high | gpt-6.1-sol / high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| code | medium | gpt-6.1-terra / high | gpt-6.1-terra / high | gpt-6.2-sol / high |
+| code | high | gpt-6.2-sol / high | gpt-6.2-sol / high | gpt-6.2-sol / xhigh |
 | debug | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
 | debug | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| debug | medium | gpt-6.1-sol / medium | gpt-6.1-sol / medium | gpt-6.1-sol / high |
-| debug | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
+| debug | medium | gpt-6.2-sol / medium | gpt-6.2-sol / medium | gpt-6.2-sol / high |
+| debug | high | gpt-6.2-sol / high | gpt-6.2-sol / xhigh | gpt-6.2-sol / xhigh |
 | explore | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
 | explore | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| explore | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
-| explore | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| explore | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.2-sol / medium |
+| explore | high | gpt-6.1-terra / medium | gpt-6.2-sol / high | gpt-6.2-sol / xhigh |
 | plan | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
 | plan | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| plan | medium | gpt-6.1-sol / medium | gpt-6.1-sol / medium | gpt-6.1-sol / high |
-| plan | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
+| plan | medium | gpt-6.2-sol / medium | gpt-6.2-sol / medium | gpt-6.2-sol / high |
+| plan | high | gpt-6.2-sol / high | gpt-6.2-sol / xhigh | gpt-6.2-sol / xhigh |
 | review | micro | gpt-6-luna / medium | gpt-6-luna / medium | gpt-6-luna / medium |
 | review | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| review | medium | gpt-6.1-sol / medium | gpt-6.1-sol / medium | gpt-6.1-sol / high |
-| review | high | gpt-6.1-sol / high | gpt-6.1-sol / xhigh | gpt-6.1-sol / xhigh |
+| review | medium | gpt-6.2-sol / medium | gpt-6.2-sol / medium | gpt-6.2-sol / high |
+| review | high | gpt-6.2-sol / high | gpt-6.2-sol / xhigh | gpt-6.2-sol / xhigh |
 | ops | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
 | ops | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| ops | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
-| ops | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| ops | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.2-sol / medium |
+| ops | high | gpt-6.1-terra / medium | gpt-6.2-sol / high | gpt-6.2-sol / xhigh |
 | docs | micro | gpt-6-luna / low | gpt-6-luna / low | gpt-6-luna / low |
 | docs | low | gpt-6-luna / medium | gpt-6-luna / high | gpt-6.1-terra / medium |
-| docs | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.1-sol / medium |
-| docs | high | gpt-6.1-terra / medium | gpt-6.1-sol / high | gpt-6.1-sol / xhigh |
+| docs | medium | gpt-6.1-terra / medium | gpt-6.1-terra / medium | gpt-6.2-sol / medium |
+| docs | high | gpt-6.1-terra / medium | gpt-6.2-sol / high | gpt-6.2-sol / xhigh |
 
 ## anthropic
 

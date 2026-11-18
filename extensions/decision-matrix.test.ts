@@ -50,9 +50,9 @@ const catalog: Model<Api>[] = [
     thinkingLevelMap: { minimal: null, ...extended },
     contextWindow: 500_000,
   }),
-  model('gpt-6.1-sol', {
+  model('gpt-6.2-sol', {
     provider: 'openai-codex',
-    cost: required(runtimeCosts['gpt-6.1-sol']),
+    cost: required(runtimeCosts['gpt-6.2-sol']),
     thinkingLevelMap: { off: null, ...extended },
     contextWindow: 500_000,
   }),
@@ -107,8 +107,8 @@ const PROFILES = {
       profiles: {
         openai: {
           advisor: { models: [JEV] },
-          high: { model: 'openai-codex/gpt-6.1-sol', thinking: 'xhigh' },
-          medium: { model: 'openai-codex/gpt-6.1-sol', thinking: 'medium' },
+          high: { model: 'openai-codex/gpt-6.2-sol', thinking: 'xhigh' },
+          medium: { model: 'openai-codex/gpt-6.2-sol', thinking: 'medium' },
           low: { model: 'openai-codex/gpt-6-luna', thinking: 'medium' },
           micro: { model: 'openai-codex/gpt-6-luna', thinking: 'off' },
           activities: {

@@ -5,21 +5,21 @@ import { join, resolve } from 'node:path';
 import { expect, it, onTestFinished } from 'vitest';
 
 it.each([
-  ['openai', {}, 'gpt-6.1-sol', 'medium'],
+  ['openai', {}, 'gpt-6.2-sol', 'medium'],
   ['anthropic', {}, 'claude-opus-5-5', 'medium'],
   [
     'openai',
     { activities: { debug: { medium: { thinking: 'xhigh' } } } },
-    'gpt-6.1-sol',
+    'gpt-6.2-sol',
     'xhigh',
   ],
   [
     'openai',
     { activities: { debug: { medium: null } } },
-    'gpt-6.1-sol',
+    'gpt-6.2-sol',
     'medium',
   ],
-  ['openai', { activityPreset: 'off' }, 'gpt-6.1-sol', 'medium'],
+  ['openai', { activityPreset: 'off' }, 'gpt-6.2-sol', 'medium'],
 ] as const)(
   'native Pi delegates %s defaults/tuning %j to %s/%s',
   { timeout: 15000 },
@@ -36,7 +36,7 @@ it.each([
           auto: {
             advisor: { models: ['preset-classifier/choice'] },
             medium: {
-              model: `preset-${family}/${family === 'openai' ? 'gpt-6.1-sol' : 'claude-sonnet-5-5'}`,
+              model: `preset-${family}/${family === 'openai' ? 'gpt-6.2-sol' : 'claude-sonnet-5-5'}`,
               thinking: 'medium',
             },
             ...tuning,

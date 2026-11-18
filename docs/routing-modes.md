@@ -17,7 +17,7 @@ With the new example ladder, the generic preferences are:
 | medium | Terra / medium | Terra / medium | Sol / medium   |
 | high   | Sol / high     | Sol / high     | Sol / xhigh    |
 
-Luna is `gpt-6-luna`, Terra is `gpt-6.1-terra`, and Sol is `gpt-6.1-sol`.
+Luna is `gpt-6-luna`, Terra is `gpt-6.1-terra`, and Sol is `gpt-6.2-sol`.
 The exact configured provider ID is preserved. Availability under one provider
 does not establish availability under another.
 
@@ -83,9 +83,9 @@ Missing or zero prices do not prove that another model is cheaper.
 For example, with the built-in OpenAI preset, `medium + debug` prefers:
 
 ```text
-cost      → gpt-6.1-sol / medium
-balanced  → gpt-6.1-sol / medium
-quality   → gpt-6.1-sol / high
+cost      → gpt-6.2-sol / medium
+balanced  → gpt-6.2-sol / medium
+quality   → gpt-6.2-sol / high
 ```
 
 This example requires available targets, usable prices for cost and fitting context.
@@ -108,7 +108,7 @@ Set a mode target to `null` to remove the inherited target.
   "thinking": "high",
   "modeRoutes": {
     "cost": { "model": "valar/deepseek-ai/DeepSeek-V4.1-Flash-1017", "thinking": "high" },
-    "quality": { "model": "openai-codex-work/gpt-6.1-sol", "thinking": "high" }
+    "quality": { "model": "openai-codex-work/gpt-6.2-sol", "thinking": "high" }
   }
 }
 ```

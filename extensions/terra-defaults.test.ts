@@ -25,10 +25,10 @@ const ladder = (provider: string) => ({
   micro: { model: `${provider}/gpt-6-luna`, thinking: 'off' },
   low: { model: `${provider}/gpt-6-luna`, thinking: 'high' },
   medium: { model: `${provider}/gpt-6.1-terra`, thinking: 'medium' },
-  high: { model: `${provider}/gpt-6.1-sol`, thinking: 'high' },
+  high: { model: `${provider}/gpt-6.2-sol`, thinking: 'high' },
 });
 const find = (provider: string, id: string) =>
-  ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'].includes(id)
+  ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.2-sol'].includes(id)
     ? model(id, {
         provider,
         contextWindow: 500_000,
@@ -93,7 +93,7 @@ it('resolves aliased default ladders and ignores raw attempts to inject internal
       models: {
         cheap: { model: 'work/gpt-6-luna' },
         worker: { model: 'work/gpt-6.1-terra' },
-        strong: { model: 'work/gpt-6.1-sol' },
+        strong: { model: 'work/gpt-6.2-sol' },
       },
       profiles: {
         p: {
@@ -183,7 +183,7 @@ it('invalidates a same-turn Terra tool plan after a mode change instead of reusi
   });
   expect(result.stopReason).toBe('stop');
   expect(f.state.lastDecision).toMatchObject({
-    targetModelId: 'gpt-6.1-sol',
+    targetModelId: 'gpt-6.2-sol',
     thinking: 'medium',
     mode: 'quality',
   });
@@ -268,7 +268,7 @@ it('keeps logical-medium Sol and skips advice over the soft budget, even when hi
   expect(f.classify).not.toHaveBeenCalled();
   expect(f.state.lastDecision).toMatchObject({
     tier: 'medium',
-    targetModelId: 'gpt-6.1-sol',
+    targetModelId: 'gpt-6.2-sol',
     thinking: 'medium',
     reasonCode: 'budget',
   });
@@ -286,7 +286,7 @@ it('keeps logical-medium Sol and skips advice over the soft budget, even when hi
   expect(
     matrix.plans.find((p) => p.cell === 'debug' && p.tier === 'medium')
       ?.attempts[0],
-  ).toMatchObject({ model: 'scope/gpt-6.1-sol', thinking: 'high' });
+  ).toMatchObject({ model: 'scope/gpt-6.2-sol', thinking: 'high' });
   expect(
     selectBaselinePlan('p', profile, matrix, undefined, true).plan.tier,
   ).toBe('medium');
@@ -306,7 +306,7 @@ it('retains only the declared fallback order when a mode-preferred primary fails
   await f.run('quality', 'medium', 'generic');
   expect(
     f.delegate.mock.calls.map(([target]) => `${target.provider}/${target.id}`),
-  ).toEqual(['scope/gpt-6.1-sol', 'other/first']);
+  ).toEqual(['scope/gpt-6.2-sol', 'other/first']);
   expect(f.state.lastDecision).toMatchObject({
     targetProvider: 'other',
     targetModelId: 'first',
@@ -320,7 +320,7 @@ it('does not rewrite old generic declarations or explicit activity overrides', (
       profiles: {
         p: {
           ...ladder('scope'),
-          medium: { model: 'scope/gpt-6.1-sol', thinking: 'medium' },
+          medium: { model: 'scope/gpt-6.2-sol', thinking: 'medium' },
           activities: {
             code: { medium: { thinking: 'high' } },
             docs: { medium: null },
@@ -330,18 +330,18 @@ it('does not rewrite old generic declarations or explicit activity overrides', (
     }).config.profiles.p,
   );
   expect(profile.medium).toMatchObject({
-    model: 'scope/gpt-6.1-sol',
+    model: 'scope/gpt-6.2-sol',
     thinking: 'medium',
   });
   expect(profile.medium?.builtinModes).toBeUndefined();
   expect(profile.activities?.code?.medium).toMatchObject({
-    model: 'scope/gpt-6.1-sol',
+    model: 'scope/gpt-6.2-sol',
     thinking: 'high',
   });
   expect(profile.activities?.code?.medium?.builtinModes).toBeUndefined();
   expect(profile.activities?.docs?.medium).toBeUndefined();
   expect(profile.activities?.debug?.medium).toMatchObject({
-    model: 'scope/gpt-6.1-sol',
+    model: 'scope/gpt-6.2-sol',
     thinking: 'medium',
   });
 });
@@ -425,7 +425,7 @@ it('uses a valid quality preference for images when the balanced primary only su
   const profile = required(normalizeConfig(raw).config.profiles.p);
   const registry = (provider: string, id: string) => {
     const target = find(provider, id);
-    if (!target || id === 'gpt-6.1-sol') return undefined;
+    if (!target || id === 'gpt-6.2-sol') return undefined;
     return id === 'gpt-6-luna'
       ? { ...target, input: ['text'] as ['text'] }
       : target;
@@ -505,7 +505,7 @@ it.each(['missing', 'price', 'context', 'image'] as const)(
       matrix.plans.find((p) => p.cell === 'ops' && p.tier === 'high'),
     );
     expect(high.attempts[0]).toMatchObject({
-      model: 'scope/gpt-6.1-sol',
+      model: 'scope/gpt-6.2-sol',
       thinking: 'medium',
     });
     expect(high.attempts).toHaveLength(1);
@@ -517,7 +517,7 @@ it('uses target alias metadata, maps effort and never borrows another provider c
     profiles: {
       p: {
         ...ladder('work'),
-        medium: { model: 'work/gpt-6.1-sol', thinking: 'medium' },
+        medium: { model: 'work/gpt-6.2-sol', thinking: 'medium' },
       },
     },
     models: {
@@ -526,8 +526,8 @@ it('uses target alias metadata, maps effort and never borrows another provider c
         thinkingLevels: ['low'],
         contextWindow: 999,
       },
-      sol: { model: 'work/gpt-6.1-sol', thinkingLevels: ['high'] },
-      'work/gpt-6.1-terra': { model: 'personal/gpt-6.1-sol' },
+      sol: { model: 'work/gpt-6.2-sol', thinkingLevels: ['high'] },
+      'work/gpt-6.1-terra': { model: 'personal/gpt-6.2-sol' },
     },
   }).config;
   // Generated Terra targets cannot be redirected by a canonical-looking alias.
@@ -583,7 +583,7 @@ it('uses the new generic baseline on classifier failure and observes immediate m
   });
   await f.run('quality');
   expect(f.state.lastDecision).toMatchObject({
-    targetModelId: 'gpt-6.1-sol',
+    targetModelId: 'gpt-6.2-sol',
     thinking: 'medium',
   });
   f.state.currentConfig = normalizeConfig(

@@ -16,7 +16,7 @@ type PresetRow = readonly [
 ];
 export type ActivityPresetFamily = 'openai' | 'anthropic';
 const LUNA = 'gpt-6-luna';
-const SOL = 'gpt-6.1-sol';
+const SOL = 'gpt-6.2-sol';
 const TERRA = 'gpt-6.1-terra';
 const HAIKU = 'claude-haiku-5-5';
 const SONNET = 'claude-sonnet-5-5';
@@ -167,7 +167,7 @@ export const isOpenAIDefaultLadder = (profile: RouterProfile): boolean =>
   });
 
 const RECOGNIZED_IDS: Record<ActivityPresetFamily, readonly string[]> = {
-  openai: [LUNA, TERRA, SOL, 'gpt-6-sol'],
+  openai: [LUNA, TERRA, SOL, 'gpt-6.1-sol', 'gpt-6-sol'],
   // Recognize existing 4.5 fast tiers for migration; never assign 4.5 as a 5.5 equivalent.
   anthropic: [HAIKU, SONNET, OPUS, 'claude-haiku-4-5'],
 };

@@ -66,7 +66,7 @@ export default (pi: ExtensionAPI) => {
       api: 'preset-fixture',
       baseUrl: 'fixture://local',
       models: (provider === 'preset-openai'
-        ? ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol']
+        ? ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.2-sol']
         : ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5']
       ).map((id) => ({
         id,
@@ -74,7 +74,7 @@ export default (pi: ExtensionAPI) => {
         input: ['text'],
         reasoning: true,
         thinkingLevelMap: {
-          ...(provider === 'preset-openai' && id !== 'gpt-6.1-sol'
+          ...(provider === 'preset-openai' && id !== 'gpt-6.2-sol'
             ? {}
             : { off: null }),
           minimal: null,
@@ -84,7 +84,7 @@ export default (pi: ExtensionAPI) => {
         contextWindow: 128000,
         maxTokens: 4096,
         cost: {
-          input: id === 'gpt-6-luna' ? 0.1 : id === 'gpt-6.1-sol' ? 2 : 1,
+          input: id === 'gpt-6-luna' ? 0.1 : id === 'gpt-6.2-sol' ? 2 : 1,
           output: 2,
           cacheRead: 0.1,
           cacheWrite: 1.25,

@@ -84,7 +84,7 @@ it.each([false, true])(
         model: terra ? 'gpt-6.1-terra' : 'claude-haiku-5-5',
         effort: terra ? 'medium' : 'high',
       },
-      { model: terra ? 'gpt-6.1-sol' : 'claude-opus-5-5', effort: 'high' },
+      { model: terra ? 'gpt-6.2-sol' : 'claude-opus-5-5', effort: 'high' },
     ]);
   },
 );
