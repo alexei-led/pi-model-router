@@ -17,6 +17,10 @@ Keep weak classifier advice from causing unsupported tier switches.
 
 Update the extension and restart Pi or run `/reload`. No configuration migration is required.
 
+### Development security
+
+- Full `npm audit` reports a Picomatch ReDoS advisory in the development toolchain; no patched stable Picomatch is available. The published router has no direct runtime dependencies, and a clean production install did not include Picomatch. Pi and its own dependencies must be audited separately.
+
 [Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.23.0...v0.23.1)
 
 ## [0.23.0] - 2026-11-18
