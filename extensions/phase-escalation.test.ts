@@ -6,6 +6,7 @@ import { terraHarness } from './test/terra-harness';
 const scenario = (
   phase: 'reason' | 'produce',
   high: 'explicit' | 'inherited' | 'reset' = 'explicit',
+  reviewEveryRequests = 0,
 ) => {
   const engineering = phase === 'reason' ? 'debug' : 'code';
   const f = terraHarness(
@@ -13,12 +14,13 @@ const scenario = (
       advisor: {
         enabled: true,
         model: 'fixture/choice',
-        reviewEveryRequests: 0,
+        reviewEveryRequests,
       },
       profiles: {
         p: {
           activityPreset: 'off',
           advisor: { models: ['fixture/choice'] },
+          low: { model: 'work/cheap', thinking: 'low' },
           medium: { model: 'work/glm-flash', thinking: 'high' },
           high: { model: 'work/gpt-6.2-sol', thinking: 'high' },
           activities: {
@@ -199,6 +201,51 @@ it.each(['reason', 'produce'] as const)(
     });
   },
 );
+
+it('raises the failure floor from the route that ran the tool even when review downshifts', async () => {
+  const f = scenario('reason', 'explicit', 3);
+  await f.advance('bash', true);
+  await f.advance('edit', false);
+  const classify = required(f.classify.getMockImplementation());
+  f.classify.mockImplementationOnce(async (target, context) => {
+    const result = await classify(target, context);
+    const route = required(context.questions.route);
+    if (route.type !== 'choice') throw new Error('Expected a route choice');
+    const choice = required(
+      Object.keys(route.criteria).find((id) => id.startsWith('low|')),
+    );
+    return {
+      ...result,
+      answers: {
+        ...result.answers,
+        route: {
+          type: 'choice',
+          choice,
+          confidence: 1,
+          probabilities: { [choice]: 1 },
+        },
+        activity: {
+          type: 'choice',
+          choice: 'docs',
+          confidence: 1,
+          probabilities: { docs: 1 },
+        },
+      },
+    };
+  });
+  await f.advance('bash', true);
+  await vi.waitFor(() =>
+    expect(f.recordDebugDecision.mock.calls.some(([d]) => d.reviewOnly)).toBe(
+      true,
+    ),
+  );
+  expect(await f.advance('read', false)).toMatchObject({
+    tier: 'high',
+    reasonCode: 'escalation',
+    adviceSource: 'review',
+    classification: { activity: 'docs', outcome: 'selected' },
+  });
+});
 
 it.each(['budget', 'pin', 'config', 'context', 'owner', 'branch'] as const)(
   'protected engineering preference respects %s continuation fences',

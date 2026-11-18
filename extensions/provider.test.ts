@@ -1268,6 +1268,95 @@ describe('routing mode changes while advice is in flight', () => {
 });
 
 describe('routing mode on an unchanged tool route', () => {
+  it('keeps the prior activity and tier when the new baseline shares its model', async () => {
+    const s = setup();
+    s.state.pinnedTierByProfile = {};
+    s.state.currentConfig = normalizeConfig({
+      profiles: {
+        balanced: {
+          activityPreset: 'off',
+          baselineTier: 'low',
+          low: {
+            model: 'test/primary',
+            thinking: 'low',
+            modeRoutes: {
+              quality: { model: 'test/primary', thinking: 'low' },
+            },
+          },
+          high: { model: 'test/fallback', thinking: 'high' },
+          activities: {
+            code: {
+              high: {
+                model: 'test/primary',
+                thinking: 'high',
+                modeRoutes: {
+                  quality: { model: 'test/primary', thinking: 'xhigh' },
+                },
+              },
+            },
+          },
+        },
+      },
+    }).config;
+    required(s.models[0]).thinkingLevelMap = { xhigh: 'xhigh' };
+    enableAdvisors(s, 'high');
+    s.registry.classify = vi.fn<Classify>(async (target, context) => {
+      const response = classifierResponse(target, context, 'high');
+      return {
+        ...response,
+        answers: {
+          ...response.answers,
+          activity: {
+            type: 'choice',
+            choice: 'code',
+            confidence: 1,
+            probabilities: { code: 1 },
+          },
+        },
+      };
+    });
+    s.delegate.mockImplementationOnce((target) =>
+      events({
+        type: 'done',
+        reason: 'toolUse',
+        message: message({
+          model: target.id,
+          stopReason: 'toolUse',
+          content: [
+            { type: 'toolCall', name: 'read', id: 'continue', arguments: {} },
+          ],
+        }),
+      }),
+    );
+    const messages: Context['messages'] = [
+      { role: 'user', content: 'Work on the change.', timestamp: 20 },
+    ];
+    const { result } = await consume(s.stream({ messages }));
+    expect(s.state.lastDecision).toMatchObject({
+      reasonCode: 'classifier',
+      routeCell: 'code',
+      tier: 'high',
+      thinking: 'high',
+    });
+    messages.push(result, {
+      role: 'toolResult',
+      toolCallId: 'continue',
+      toolName: 'read',
+      content: [{ type: 'text', text: 'contents' }],
+      isError: false,
+      timestamp: 22,
+    });
+    s.state.modeOverride = 'quality';
+    await consume(s.stream({ messages }));
+    expect(s.state.lastDecision).toMatchObject({
+      reasonCode: 'continuation',
+      mode: 'quality',
+      routeCell: 'code',
+      tier: 'high',
+      thinking: 'xhigh',
+    });
+  });
+
   it('records the new mode when a mode change leaves the route unchanged', async () => {
     const s = setup();
     s.state.pinnedTierByProfile = {};
