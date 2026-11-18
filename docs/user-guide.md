@@ -310,6 +310,7 @@ A pin to a tier whose context window is too small for the conversation keeps tha
 An effort override applies to every tier in the active profile.
 Each model runs the override at its nearest supported level. For example, `off` runs as `minimal` on a model without `off`. The confirmation names each tier that runs another level, such as `high runs at minimal`.
 Pi's thinking selector, such as Shift+Tab, sets the same override.
+The thinking level that Pi applies when you switch models does not.
 An override that removes every eligible route produces an error without a partial configuration change.
 Use `/router thinking auto` to clear the override.
 
