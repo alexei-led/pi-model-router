@@ -50,27 +50,30 @@ export const resolveRoutePair = (
 };
 
 /**
- * Pi's clampThinkingLevel over the levels a route may use: the requested
- * effort, else the nearest higher one, else the nearest lower one.
+ * Legacy profiles use Pi's higher-first mapping; table profiles never round up.
  */
 export const clampEffort = (
   requested: ThinkingLevel,
   allowed: readonly ThinkingLevel[],
+  effortPolicy?: RouterProfile['effortPolicy'],
 ): ThinkingLevel | undefined => {
   if (allowed.includes(requested)) return requested;
   const index = THINKING_LEVELS.indexOf(requested);
-  return (
-    THINKING_LEVELS.slice(index + 1).find((level) => allowed.includes(level)) ??
+  const lower = () =>
     THINKING_LEVELS.slice(0, index)
       .reverse()
-      .find((level) => allowed.includes(level))
-  );
+      .find((level) => allowed.includes(level));
+  return effortPolicy === 'table'
+    ? lower()
+    : (THINKING_LEVELS.slice(index + 1).find((level) =>
+        allowed.includes(level),
+      ) ?? lower());
 };
 
 /**
  * Resolve the effort a route runs at against the live registry, or undefined
  * when the model cannot serve the input. An unsupported effort maps to its
- * nearest supported level, as pi does. A configured effort declaration only
+ * nearest supported level according to the profile policy. A declaration only
  * narrows the levels; it never grants one the live model does not expose.
  */
 export const routeThinking = (
@@ -78,6 +81,7 @@ export const routeThinking = (
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   imageAttached: boolean,
   declaredLevels?: ModelDefinition['thinkingLevels'],
+  effortPolicy?: RouterProfile['effortPolicy'],
 ): ThinkingLevel | undefined => {
   try {
     const { provider, modelId } = parseCanonicalModelRef(pair.model);
@@ -89,7 +93,7 @@ export const routeThinking = (
       (level) =>
         !declaredLevels || level === 'off' || declaredLevels.includes(level),
     );
-    return clampEffort(pair.thinking, allowed);
+    return clampEffort(pair.thinking, allowed, effortPolicy);
   } catch {
     return undefined;
   }
@@ -144,6 +148,7 @@ export const availableRoutePairs = (
             imageAttached,
             // Only declared levels narrow a route; undeclared means the registry's.
             ownConfig?.reasoning === false ? [] : ownConfig?.thinkingLevels,
+            profile.effortPolicy,
           );
           return thinking ? [{ tier, model: target, thinking }] : [];
         } catch {
@@ -174,7 +179,12 @@ export const preservesRouteCoverage = (
   ];
   const pairsFor = (image: boolean, overrides?: RouterThinkingByTier) =>
     cells.flatMap((cell) =>
-      availableRoutePairs(cell, findModel, image, overrides),
+      availableRoutePairs(
+        { ...cell, effortPolicy: profile.effortPolicy },
+        findModel,
+        image,
+        overrides,
+      ),
     );
   for (const imageAttached of [false, true]) {
     const configured = pairsFor(imageAttached);
@@ -203,7 +213,7 @@ export const effortAdjustments = (
       : []),
   ].flatMap((cell) => {
     const pairs = availableRoutePairs(
-      cell.profile,
+      { ...cell.profile, effortPolicy: profile.effortPolicy },
       findModel,
       false,
       Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),
@@ -443,7 +453,7 @@ const applyModeToCell = (
       : (userPreferred ?? cellProfile[tier]?.builtinModes?.[mode]);
     const preferredPair = preferred
       ? availableRoutePairs(
-          { [tier]: preferred },
+          { [tier]: preferred, effortPolicy: generic.effortPolicy },
           findModel,
           imageAttached,
         ).find((pair) => pair.model === preferred.model)
@@ -468,7 +478,8 @@ const applyModeToCell = (
       (mode !== 'cost' || userPreferred || cheaper)
     ) {
       next[tier] = preferred;
-      overrides[tier] = preferredPair.thinking;
+      if (generic.effortPolicy !== 'table')
+        overrides[tier] = preferredPair.thinking;
       provenance[tier] = Object.freeze({
         mode,
         lever:
@@ -481,6 +492,7 @@ const applyModeToCell = (
       });
       continue;
     }
+    if (generic.effortPolicy === 'table' && !recovery) continue;
     const result = transformRoute({
       mode: recovery ? 'balanced' : mode,
       tier,
@@ -567,10 +579,9 @@ export const buildRouteMatrix = (
     return {
       cell: cell.cell,
       profile: moded.profile,
-      thinkingOverrides: moded.thinkingOverrides,
       provenance: moded.provenance,
       pairs: availableRoutePairs(
-        moded.profile,
+        { ...moded.profile, effortPolicy: profile.effortPolicy },
         findModel,
         imageAttached,
         moded.thinkingOverrides,
@@ -589,13 +600,7 @@ export const buildRouteMatrix = (
         contextTokens,
       );
   const plans: RoutePlan[] = cells.flatMap(
-    ({
-      cell,
-      profile: cellProfile,
-      pairs,
-      thinkingOverrides: cellOverrides,
-      provenance,
-    }) =>
+    ({ cell, profile: cellProfile, pairs, provenance }) =>
       primaryRoutePairs(
         cellProfile,
         pairs.filter((pair) => fitting.includes(pair)),
@@ -622,9 +627,6 @@ export const buildRouteMatrix = (
           cell,
           config,
           attempts,
-          thinkingOverrides: cellOverrides
-            ? Object.freeze({ ...cellOverrides })
-            : undefined,
           ...(provenance[first.tier] ? { mode: provenance[first.tier] } : {}),
         });
       }),
@@ -686,11 +688,8 @@ export const currentPlanPairs = (
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   imageAttached: boolean,
 ): RoutePair[] =>
-  availableRoutePairs(
-    { [plan.tier]: plan.config },
-    findModel,
-    imageAttached,
-    plan.thinkingOverrides,
-  ).filter((pair) =>
-    plan.attempts.some((attempt) => attempt.model === pair.model),
+  // The frozen attempts already satisfied their declarations. Recheck only live
+  // capabilities; a duplicate canonical fallback can have distinct alias metadata.
+  plan.attempts.filter(
+    (pair) => routeThinking(pair, findModel, imageAttached) === pair.thinking,
   );

@@ -54,7 +54,26 @@ target must be input-eligible. Missing/zero prices are not evidence of a cheaper
 If a preference is ineligible, use the eligible legacy transform below, then
 the configured pair. This selection adds no implicit generation fallback or retry.
 
-### Custom and non-OpenAI cells
+### Use the table without automatic mode transforms
+
+Set `"effortPolicy": "table"` inside a profile in your user
+`model-router.json`. The router still selects a tier and activity, but takes
+the model and effort together from the selected cell. Cost and quality use an
+eligible explicit mode row or built-in mode preference; if neither applies,
+they keep the base cell. They do not invent an effort step or borrow another
+tier's pair. Set `"activityPreset": "off"` to use only your own cells.
+
+If the selected model doesn't support the requested effort, the router uses
+the highest supported lower effort. If there is none, that model is ineligible
+for the cell. Each declared fallback maps the cell's request against its own
+capabilities, not the primary model's mapped effort. For example, a switch from
+Luna at `max` to an Opus cell set to `high` requests `high` on Opus.
+
+Pins, deliberate session effort overrides, the soft budget, and tool-failure
+tier escalation still apply. An escalation selects another already-configured
+pair; it does not raise an effort setting inside a cell.
+
+### Custom and non-OpenAI cells (default policy)
 
 | Mode       | Legacy transform                                                                                                                         |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |

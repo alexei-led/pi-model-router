@@ -316,6 +316,12 @@ describe('route capability validation', () => {
     },
   );
 
+  it('never rounds an unsupported effort above the requested level', () => {
+    expect(clampEffort('xhigh', ['high', 'max'], 'table')).toBe('high');
+    expect(clampEffort('low', ['high', 'max'], 'table')).toBeUndefined();
+    expect(clampEffort('max', ['high', 'max'], 'table')).toBe('max');
+  });
+
   it.each([astra, opus, haiku, model('plain', { reasoning: false })])(
     'matches pi’s clampThinkingLevel for every level: %s',
     (target) => {
@@ -769,6 +775,106 @@ describe('mode transform in the route matrix', () => {
     currentPlanPairs(entry, find, false).map(
       ({ model: ref, thinking }) => `${ref}/${thinking}`,
     );
+
+  it('uses explicit mode pairs and keeps the base pair when a preference cannot run', () => {
+    const configured = required(
+      normalizeConfig({
+        profiles: {
+          table: {
+            effortPolicy: 'table',
+            micro: { model: 'test/sonnet', thinking: 'max' },
+            medium: {
+              model: 'test/opus',
+              thinking: 'high',
+              modeRoutes: {
+                cost: { model: 'test/haiku', thinking: 'low' },
+                quality: { model: 'test/missing', thinking: 'max' },
+              },
+            },
+            high: { model: 'test/opus', thinking: 'xhigh' },
+            activities: {
+              code: { medium: { thinking: 'medium' } },
+            },
+          },
+        },
+      }).config.profiles.table,
+    );
+    const quality = matrix('quality', { profile: configured });
+    expect(route(plan(quality, 'micro'))).toEqual(['test/sonnet/max']);
+    expect(route(plan(quality, 'medium'))).toEqual(['test/opus/high']);
+    expect(route(plan(quality, 'high'))).toEqual(['test/opus/xhigh']);
+    expect(revalidated(plan(quality, 'medium', 'code'))).toEqual([
+      'test/opus/medium',
+    ]);
+    const cost = matrix('cost', { profile: configured });
+    expect(route(plan(cost, 'medium'))).toEqual(['test/haiku/low']);
+  });
+
+  it('does not recompute the selected effort when the live registry changes', () => {
+    const configured: RouterProfile = {
+      effortPolicy: 'table',
+      medium: { model: 'test/haiku', thinking: 'xhigh' },
+    };
+    const selected = plan(matrix('quality', { profile: configured }), 'medium');
+    expect(route(selected)).toEqual(['test/haiku/high']);
+    const upgraded = model('haiku', { thinkingLevelMap: extended });
+    const pairs = currentPlanPairs(selected, () => upgraded, false);
+    expect(pairs.map((pair) => pair.thinking)).toEqual(['high']);
+  });
+
+  it('keeps an eligible fallback after an ineligible alias of the same model', () => {
+    const configured = required(
+      normalizeConfig({
+        models: {
+          restricted: { model: 'test/sonnet', thinkingLevels: ['max'] },
+          allowed: { model: 'test/sonnet', thinkingLevels: ['high'] },
+        },
+        profiles: {
+          table: {
+            effortPolicy: 'table',
+            medium: {
+              model: 'test/missing',
+              thinking: 'high',
+              fallbacks: ['restricted', 'allowed'],
+            },
+          },
+        },
+      }).config.profiles.table,
+    );
+    const reasoningRequired = model('sonnet', {
+      thinkingLevelMap: { off: null, ...extended },
+    });
+    const findTarget = (provider: string, id: string) =>
+      provider === 'test' && id === 'sonnet' ? reasoningRequired : undefined;
+    const selected = plan(
+      buildRouteMatrix(configured, findTarget, false, 1),
+      'medium',
+    );
+    expect(route(selected)).toEqual(['test/sonnet/high']);
+    expect(currentPlanPairs(selected, findTarget, false)).toEqual(
+      selected.attempts,
+    );
+  });
+
+  it('preserves the configured effort request for each explicit mode fallback', () => {
+    const configured: RouterProfile = {
+      effortPolicy: 'table',
+      medium: {
+        model: 'test/opus',
+        thinking: 'medium',
+        modeRoutes: {
+          quality: {
+            model: 'test/haiku',
+            thinking: 'xhigh',
+            fallbacks: ['test/sonnet'],
+          },
+        },
+      },
+    };
+    const selected = plan(matrix('quality', { profile: configured }), 'medium');
+    expect(route(selected)).toEqual(['test/haiku/high', 'test/sonnet/xhigh']);
+    expect(revalidated(selected)).toEqual(route(selected));
+  });
 
   it('uses the cheaper lower tier with its own fallbacks and keeps the classified tier', () => {
     const medium = plan(matrix('cost'), 'medium');

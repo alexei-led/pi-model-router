@@ -128,7 +128,7 @@ export const registerRouterProvider = (
       cells.some((cell) =>
         [false, true].some((imageAttached) =>
           availableRoutePairs(
-            cell,
+            { ...cell, effortPolicy: profile.effortPolicy },
             (provider, id) => registry?.find(provider, id),
             imageAttached,
             Object.fromEntries(ROUTER_TIERS.map((tier) => [tier, level])),

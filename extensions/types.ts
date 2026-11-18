@@ -156,6 +156,7 @@ export interface ModeProvenance {
 }
 
 export interface RouterProfile {
+  effortPolicy?: 'table' | undefined;
   /** Runtime-only explicit null/use-tier ownership; never accepted as a JSON field. */
   activityResets?:
     | Partial<Record<RouterActivity, readonly RouterTier[]>>
@@ -230,7 +231,6 @@ export interface RoutePlan {
   readonly cell: RouterActivity | undefined;
   readonly config: Readonly<RoutedTierConfig>;
   readonly attempts: readonly [Readonly<RoutePair>, ...Readonly<RoutePair>[]];
-  readonly thinkingOverrides: Readonly<RouterThinkingByTier> | undefined;
   readonly mode?: ModeProvenance | undefined;
 }
 export interface ActivityCandidate {

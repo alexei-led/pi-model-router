@@ -156,6 +156,7 @@ export const mergeConfig = (
       : {};
     mergedProfiles[name] = {
       mode: mergeRawValue(existing.mode, profile.mode),
+      effortPolicy: mergeRawValue(existing.effortPolicy, profile.effortPolicy),
       switchPolicy: mergeRawValue(existing.switchPolicy, profile.switchPolicy),
       notificationTypes: mergeRawValue(
         existing.notificationTypes,
@@ -1154,6 +1155,17 @@ const normalizeProfileAdvisor = (
   return advisor;
 };
 
+const normalizeEffortPolicy = (
+  raw: unknown,
+  name: string,
+  warnings: string[],
+): Pick<RouterProfile, 'effortPolicy'> => {
+  if (raw === 'table') return { effortPolicy: raw };
+  if (raw !== undefined)
+    warnings.push(`Profile "${name}" effortPolicy must be table. Ignored.`);
+  return {};
+};
+
 export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
   const warnings: string[] = [];
 
@@ -1307,6 +1319,7 @@ export const normalizeConfig = (raw: RawRouterConfig): ConfigLoadResult => {
         );
     }
     normalizedProfiles[name] = {
+      ...normalizeEffortPolicy(profileRecord.effortPolicy, name, warnings),
       ...(switchPolicy ? { switchPolicy } : {}),
       ...(notificationTypes ? { notificationTypes } : {}),
       ...(isRouterMode(profileRecord.mode) ? { mode: profileRecord.mode } : {}),

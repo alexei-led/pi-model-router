@@ -316,6 +316,50 @@ describe('router provider', () => {
     expect(s.state.accumulatedCost).toBe(0.01);
   });
 
+  it('switches from Luna max to Opus high without delegating the old effort', async () => {
+    const s = setup();
+    s.models.push(
+      model('luna', { thinkingLevelMap: { max: 'max' } }),
+      model('opus', { thinkingLevelMap: { max: 'max' } }),
+    );
+    s.state.currentConfig = normalizeConfig({
+      profiles: {
+        balanced: {
+          effortPolicy: 'table',
+          medium: {
+            model: 'test/opus',
+            thinking: 'high',
+            modeRoutes: { cost: { model: 'test/luna', thinking: 'max' } },
+          },
+        },
+      },
+    }).config;
+    delete s.state.pinnedTierByProfile.balanced;
+    registerRouterProvider(s.api, s.state, s.actions);
+    const generate = required(s.register.mock.calls.at(-1)?.[1].streamSimple);
+    const run = (timestamp: number) =>
+      consume(
+        generate(
+          model('balanced', { provider: 'router' }),
+          normalizeContext(userContext('task', timestamp)),
+          { reasoning: 'max' },
+        ),
+      );
+    s.state.modeOverride = 'cost';
+    expect((await run(1)).result.stopReason).toBe('stop');
+    s.state.modeOverride = 'quality';
+    expect((await run(2)).result.stopReason).toBe('stop');
+    expect(
+      s.delegate.mock.calls.map(([target, , options]) => [
+        target.id,
+        options?.reasoning,
+      ]),
+    ).toEqual([
+      ['luna', 'max'],
+      ['opus', 'high'],
+    ]);
+  });
+
   it('does not pass or report thinking for a non-reasoning target', async () => {
     const s = setup();
     required(s.models[0]).reasoning = false;
