@@ -9,8 +9,8 @@ import { ROUTER_ACTIVITIES } from './types';
 const generic = (provider = 'work') => ({
   micro: { model: `${provider}/gpt-6-luna`, thinking: 'off' },
   low: { model: `${provider}/gpt-6-luna`, thinking: 'medium' },
-  medium: { model: `${provider}/gpt-6.1-sol`, thinking: 'medium' },
-  high: { model: `${provider}/gpt-6.1-sol`, thinking: 'xhigh' },
+  medium: { model: `${provider}/gpt-6.2-sol`, thinking: 'medium' },
+  high: { model: `${provider}/gpt-6.2-sol`, thinking: 'xhigh' },
 });
 const normalize = (profile: object, extra: object = {}) =>
   normalizeConfig({ ...extra, profiles: { p: profile } });
@@ -35,43 +35,43 @@ const openaiExpected = {
     ['gpt-6-luna', 'low'],
     ['gpt-6-luna', 'high'],
     ['gpt-6.1-terra', 'high'],
-    ['gpt-6.1-sol', 'high'],
+    ['gpt-6.2-sol', 'high'],
   ],
   debug: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-sol', 'medium'],
-    ['gpt-6.1-sol', 'xhigh'],
+    ['gpt-6.2-sol', 'medium'],
+    ['gpt-6.2-sol', 'xhigh'],
   ],
   explore: [
     ['gpt-6-luna', 'low'],
     ['gpt-6-luna', 'high'],
     ['gpt-6.1-terra', 'medium'],
-    ['gpt-6.1-sol', 'high'],
+    ['gpt-6.2-sol', 'high'],
   ],
   plan: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-sol', 'medium'],
-    ['gpt-6.1-sol', 'xhigh'],
+    ['gpt-6.2-sol', 'medium'],
+    ['gpt-6.2-sol', 'xhigh'],
   ],
   review: [
     ['gpt-6-luna', 'medium'],
     ['gpt-6-luna', 'high'],
-    ['gpt-6.1-sol', 'medium'],
-    ['gpt-6.1-sol', 'xhigh'],
+    ['gpt-6.2-sol', 'medium'],
+    ['gpt-6.2-sol', 'xhigh'],
   ],
   ops: [
     ['gpt-6-luna', 'low'],
     ['gpt-6-luna', 'high'],
     ['gpt-6.1-terra', 'medium'],
-    ['gpt-6.1-sol', 'high'],
+    ['gpt-6.2-sol', 'high'],
   ],
   docs: [
     ['gpt-6-luna', 'low'],
     ['gpt-6-luna', 'high'],
     ['gpt-6.1-terra', 'medium'],
-    ['gpt-6.1-sol', 'high'],
+    ['gpt-6.2-sol', 'high'],
   ],
 };
 
@@ -82,6 +82,20 @@ describe('built-in activity routes', () => {
       const profile = profileOf(generic());
       expect(ordered(profile, activity)).toEqual(openaiExpected[activity]);
       expect(profile.high?.thinking).toBe('xhigh');
+    },
+  );
+  it.each(['gpt-6-sol', 'gpt-6.1-sol'])(
+    'upgrades built-in activity targets for %s without rewriting user-owned generic routes',
+    (id) => {
+      const genericRoute = { model: `work/${id}`, thinking: 'high' };
+      const profile = profileOf({ high: genericRoute });
+      expect(profile.high).toMatchObject(genericRoute);
+      expect(profile.high?.builtinModes).toBeUndefined();
+      expect(profile.activities?.code?.high).toMatchObject({
+        model: 'work/gpt-6.2-sol',
+        thinking: 'high',
+        activitySource: 'builtin',
+      });
     },
   );
   it.each(['work', 'personal', 'custom-proxy'])(
@@ -101,7 +115,7 @@ describe('built-in activity routes', () => {
       {
         models: {
           worker: {
-            model: 'work/gpt-6.1-sol',
+            model: 'work/gpt-6.2-sol',
             thinkingLevels: ['medium', 'high'],
           },
           cheap: {
@@ -121,11 +135,11 @@ describe('built-in activity routes', () => {
   it.each([
     { medium: { model: 'test/unknown' } },
     {
-      medium: { model: 'work/gpt-6.1-sol' },
+      medium: { model: 'work/gpt-6.2-sol' },
       low: { model: 'personal/gpt-6-luna' },
     },
     {
-      medium: { model: 'work/gpt-6.1-sol' },
+      medium: { model: 'work/gpt-6.2-sol' },
       low: { model: 'work/claude-sonnet-5-5' },
     },
   ])(
@@ -156,7 +170,7 @@ describe('built-in activity routes', () => {
     });
     expect(profile.activities?.debug?.medium?.thinking).toBe('xhigh');
     expect(profile.activities?.ops?.medium).toBeUndefined();
-    expect(profile.medium?.model).toBe('work/gpt-6.1-sol');
+    expect(profile.medium?.model).toBe('work/gpt-6.2-sol');
   });
   it('preserves ordered generation fallbacks, including explicit empty replacement', () => {
     const profile = profileOf({
@@ -205,10 +219,10 @@ describe('built-in activity routes', () => {
   });
   it('keeps pins generic-only, effort overrides dominant and missing targets ineligible', () => {
     const profile = profileOf({
-      medium: { model: 'work/gpt-6.1-sol', thinking: 'medium' },
+      medium: { model: 'work/gpt-6.2-sol', thinking: 'medium' },
     });
     const find = (provider: string, id: string) =>
-      id === 'gpt-6.1-sol' ? model(id, { provider }) : undefined;
+      id === 'gpt-6.2-sol' ? model(id, { provider }) : undefined;
     const matrix = buildRouteMatrix(profile, find, false, 0);
     expect(
       matrix.plans.some((c) => c.attempts[0].model.endsWith('/gpt-6-luna')),
@@ -297,11 +311,11 @@ describe('Anthropic activity policy', () => {
 describe('preset migration boundaries', () => {
   it('keeps the generic model for an existing thinking-only override', () => {
     const profile = profileOf({
-      medium: { model: 'work/gpt-6.1-sol' },
+      medium: { model: 'work/gpt-6.2-sol' },
       activities: { ops: { medium: { thinking: 'high' } } },
     });
     expect(profile.activities?.ops?.medium).toMatchObject({
-      model: 'work/gpt-6.1-sol',
+      model: 'work/gpt-6.2-sol',
       thinking: 'high',
     });
     expect(profile.activities?.ops?.medium?.activitySource).toBeUndefined();
@@ -309,7 +323,7 @@ describe('preset migration boundaries', () => {
   it('does not transfer model-specific restrictions to a different built-in target', () => {
     const profile = profileOf({
       medium: {
-        model: 'work/gpt-6.1-sol',
+        model: 'work/gpt-6.2-sol',
         thinkingLevels: ['medium'],
         reasoning: true,
         contextWindow: 1234,
@@ -330,8 +344,8 @@ describe('preset migration boundaries', () => {
   });
   it('cannot redirect a built-in canonical target through a canonical-looking alias key', () => {
     const profile = profileOf(
-      { medium: { model: 'work/gpt-6.1-sol' } },
-      { models: { 'work/gpt-6.1-terra': { model: 'personal/gpt-6.1-sol' } } },
+      { medium: { model: 'work/gpt-6.2-sol' } },
+      { models: { 'work/gpt-6.1-terra': { model: 'personal/gpt-6.2-sol' } } },
     );
     expect(profile.activities?.ops?.medium?.model).toBe('work/gpt-6.1-terra');
   });
@@ -360,7 +374,7 @@ describe('preset migration boundaries', () => {
   it("retains an unavailable preset primary's explicitly declared fallback before using generic", () => {
     const profile = profileOf({
       medium: {
-        model: 'work/gpt-6.1-sol',
+        model: 'work/gpt-6.2-sol',
         fallbacks: ['personal/authorized-fallback'],
       },
     });
@@ -423,7 +437,7 @@ it.each(['openai', 'anthropic'] as const)(
   (family) => {
     const ids =
       family === 'openai'
-        ? ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol']
+        ? ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.2-sol']
         : ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'];
     const profile = profileOf(
       Object.fromEntries(
@@ -493,15 +507,15 @@ it('protects generated identity without changing explicitly declared fallback al
   const profile = profileOf(
     {
       medium: {
-        model: 'work/gpt-6.1-sol',
+        model: 'work/gpt-6.2-sol',
         fallbacks: ['work/gpt-6-luna', 'work/last'],
       },
     },
-    { models: { 'work/gpt-6-luna': { model: 'personal/gpt-6.1-sol' } } },
+    { models: { 'work/gpt-6-luna': { model: 'personal/gpt-6.2-sol' } } },
   );
   expect(profile.activities?.ops?.medium).toMatchObject({
     model: 'work/gpt-6.1-terra',
-    fallbacks: ['personal/gpt-6.1-sol', 'work/last'],
+    fallbacks: ['personal/gpt-6.2-sol', 'work/last'],
   });
 });
 
@@ -543,22 +557,22 @@ it('preserves explicit canonical-looking alias intent instead of substituting th
   const profile = profileOf(
     {
       medium: { model: 'worker' },
-      activities: { debug: { medium: { model: 'work/gpt-6.1-sol' } } },
+      activities: { debug: { medium: { model: 'work/gpt-6.2-sol' } } },
     },
     {
       models: {
-        worker: { model: 'work/gpt-6.1-sol' },
-        'work/gpt-6.1-sol': { model: 'personal/gpt-6.1-sol' },
+        worker: { model: 'work/gpt-6.2-sol' },
+        'work/gpt-6.2-sol': { model: 'personal/gpt-6.2-sol' },
       },
     },
   );
-  expect(profile.activities?.debug?.medium?.model).toBe('personal/gpt-6.1-sol');
+  expect(profile.activities?.debug?.medium?.model).toBe('personal/gpt-6.2-sol');
 });
 
 it('does not attach a reverse-lookup alias ceiling to an explicit canonical activity target', () => {
   const profile = profileOf(
     {
-      medium: { model: 'work/gpt-6.1-sol' },
+      medium: { model: 'work/gpt-6.2-sol' },
       activities: {
         ops: { medium: { model: 'work/gpt-6-luna', thinking: 'high' } },
       },

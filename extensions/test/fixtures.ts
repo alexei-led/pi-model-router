@@ -2,6 +2,7 @@ import {
   type Api,
   type AssistantMessage,
   type AssistantMessageEvent,
+  type AssistantMessageEventStream,
   createAssistantMessageEventStream,
   type Model,
 } from '@earendil-works/pi-ai';
@@ -92,3 +93,9 @@ export const failure = (reason: 'error' | 'aborted' = 'error') =>
     reason,
     error: message({ stopReason: reason, errorMessage: 'request failed' }),
   });
+
+export const consume = async (stream: AssistantMessageEventStream) => {
+  const received: AssistantMessageEvent[] = [];
+  for await (const event of stream) received.push(event);
+  return { received, result: await stream.result() };
+};

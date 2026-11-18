@@ -1,6 +1,6 @@
 {
   "name": "@alexeiled/pi-model-router",
-  "version": "0.21.2",
+  "version": "0.22.0",
   "type": "module",
   "files": [
     "extensions",
@@ -24,7 +24,7 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "packageManager": "npm@12.0.2",
+  "packageManager": "npm@12.2.3",
   "author": "Alexei Ledenev",
   "contributors": [
     "Ye Liu"
@@ -61,7 +61,9 @@
     "lint:fix": "biome lint --write --error-on-warnings .",
     "format": "biome format --write .",
     "format:check": "biome format .",
-    "pack:dry": "npm pack --dry-run"
+    "pack:dry": "npm pack --dry-run",
+    "test:unit": "vitest run --pool=threads --exclude \"**/*host.test.ts\" --exclude \"**/session-isolation.test.ts\" --exclude \"**/user-boundary.test.ts\"",
+    "test:host": "vitest run --pool=threads host.test.ts session-isolation.test.ts user-boundary.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "^1.1.0",
@@ -70,17 +72,17 @@
     "@earendil-works/pi-tui": "^1.1.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "@earendil-works/pi-agent-core": "^1.1.0",
-    "@earendil-works/pi-ai": "^1.1.0",
-    "@earendil-works/pi-coding-agent": "^1.1.0",
-    "@earendil-works/pi-tui": "^1.1.0",
+    "@biomejs/biome": "2.6.8",
+    "@earendil-works/pi-agent-core": "^1.5.2",
+    "@earendil-works/pi-ai": "^1.5.2",
+    "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@earendil-works/pi-tui": "^1.5.2",
     "@vitest/coverage-v8": "~5.1.0",
     "knip": "~6.45.1",
     "typescript": "^7.0.2",
     "vitest": "~5.1.0"
   },
   "overrides": {
-    "undici": "8.12.2"
+    "undici": "8.12.4"
   }
 }

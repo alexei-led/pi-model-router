@@ -1,7 +1,6 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   buildPersistedState,
   isRouterLastProfileState,
@@ -11,6 +10,7 @@ import {
   snapshotDecision,
 } from './state';
 import { required } from './test/fixtures';
+import { tempDirectory } from './test/temp-directory';
 import type { GenerationDiagnostics, RoutingDecision } from './types';
 
 const decision: RoutingDecision = {
@@ -25,19 +25,6 @@ const decision: RoutingDecision = {
 };
 
 describe('state.ts', () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
-    tempDirs.length = 0;
-  });
-
-  const createTempDir = () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pi-model-router-'));
-    tempDirs.push(dir);
-    return dir;
-  };
-
   it('retains only supported effort and estimate provenance diagnostics', () => {
     const generation = {
       transition: 'initial',
@@ -81,7 +68,7 @@ describe('state.ts', () => {
   });
 
   it('validates, saves and loads the last profile', () => {
-    const agentDir = createTempDir();
+    const agentDir = tempDirectory();
     expect(
       isRouterLastProfileState({ selectedProfile: 'p', timestamp: 1 }),
     ).toBe(true);

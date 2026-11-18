@@ -1,114 +1,32 @@
 import {
-  type AssistantMessageEvent,
   type AssistantMessageEventStream,
   type Context,
   normalizeContext,
 } from '@earendil-works/pi-ai';
-import {
-  type ExtensionAPI,
-  type ExtensionContext,
-  SessionManager,
-} from '@earendil-works/pi-coding-agent';
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { normalizeConfig } from './config';
 import { registerRouterProvider } from './provider';
 import { waitForRegistry } from './provider-runtime';
 import {
-  done,
+  consume,
   events,
   failure,
   message,
   model,
   required,
-  typeSafeClassifierRegistry,
 } from './test/fixtures';
-import type { AdvisorConfig, RouterRequestObservation } from './types';
-
-type State = Parameters<typeof registerRouterProvider>[1];
-type MutableState = { -readonly [K in keyof State]: State[K] };
-const advisorOf = (decision: State['lastDecision']) => decision?.advisor;
-
-const setup = () => {
-  const models = [
-    model(),
-    model('fallback', { contextWindow: 2048 }),
-    model('small', { contextWindow: 1024 }),
-  ];
-  const delegate = vi.fn<ExtensionContext['modelRegistry']['streamSimple']>(
-    () => done(),
-  );
-  const registry = {
-    ...typeSafeClassifierRegistry(),
-    find: (provider: string, id: string) =>
-      models.find((m) => m.provider === provider && m.id === id),
-    streamSimple: delegate,
-  } as unknown as ExtensionContext['modelRegistry'];
-  const state: MutableState = {
-    lastRegisteredModels: '',
-    currentModelRegistry: registry,
-    lastExtensionContext: {
-      sessionManager: {
-        getBranch: () => [{ id: 'user-turn', type: 'message' }],
-      },
-      ui: { setHiddenThinkingLabel: vi.fn() },
-    } as unknown as ExtensionContext,
-    currentConfig: normalizeConfig({
-      profiles: {
-        balanced: {
-          high: { model: 'test/primary' },
-          medium: { model: 'test/primary', fallbacks: ['test/fallback'] },
-          low: { model: 'test/small' },
-        },
-      },
-    }).config,
-    selectedProfile: undefined,
-    routerEnabled: false,
-    lastDecision: undefined,
-    thinkingByProfile: {},
-    pinnedTierByProfile: { balanced: 'medium' },
-    accumulatedCost: 0,
-  };
-  const register = vi.fn<ExtensionAPI['registerProvider']>();
-  const api = { registerProvider: register } as unknown as ExtensionAPI;
-  const actions = {
-    persistState: vi.fn(),
-    recordDebugDecision: vi.fn(),
-    updateStatus: vi.fn(),
-    syncPiThinkingLevel: vi.fn(),
-    beginRequest: vi.fn<
-      NonNullable<Parameters<typeof registerRouterProvider>[2]['beginRequest']>
-    >(() => () => undefined),
-  };
-  const stream = (
-    context: Context = {
-      messages: [{ role: 'user', content: 'implement', timestamp: 1 }],
-    },
-    signal?: AbortSignal,
-    sessionId?: string,
-  ) => {
-    registerRouterProvider(api, state, actions);
-    const config = register.mock.calls.at(-1)?.[1];
-    if (!config?.streamSimple)
-      throw new Error('Router provider not registered');
-    const streamOptions = {
-      ...(signal ? { signal } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    };
-    return config.streamSimple(
-      model('balanced', { provider: 'router', contextWindow: 8192 }),
-      normalizeContext(context),
-      streamOptions,
-    );
-  };
-  return { models, registry, state, delegate, register, api, actions, stream };
-};
-
-const consume = async (stream: AssistantMessageEventStream) => {
-  const received: AssistantMessageEvent[] = [];
-  for await (const event of stream) received.push(event);
-  const result = await stream.result();
-  return { received, result };
-};
+import {
+  advisorOf,
+  type ClassifierResponse,
+  type Classify,
+  classifierModel,
+  classifierResponse,
+  enableAdvisors,
+  setup,
+  userContext,
+} from './test/provider-harness';
+import type { RouterRequestObservation } from './types';
 
 describe('router provider', () => {
   it.each(['constructor', 'toString', 'hasOwnProperty'])(
@@ -185,6 +103,10 @@ describe('router provider', () => {
     });
     expect(advisorOf(s.state.lastDecision)).toBe('none');
     expect(s.actions.persistState).toHaveBeenCalledOnce();
+    expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
+    expect(
+      s.actions.recordDebugDecision.mock.calls[0]?.[0].isGenerationFailed,
+    ).toBeUndefined();
   });
 
   it('accounts for charged pre-content failures before falling back', async () => {
@@ -235,62 +157,61 @@ describe('router provider', () => {
     expect(s.state.lastDecision?.generation?.costSource).toBeUndefined();
   });
 
-  it('accounts for all failed terminal attempts even when the chain fails', async () => {
+  it('records every failed terminal charge and a sanitized failed decision', async () => {
     const s = setup();
     s.delegate.mockImplementation(() => failure());
     expect((await consume(s.stream())).result.stopReason).toBe('error');
     expect(s.state.accumulatedCost).toBe(0.02);
     expect(s.actions.persistState).toHaveBeenCalledOnce();
-  });
-
-  it('records failed fallback decisions without persisting remote error text', async () => {
-    const s = setup();
-    s.delegate.mockImplementation(() => failure());
-    expect((await consume(s.stream())).result.stopReason).toBe('error');
     expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
     expect(s.actions.recordDebugDecision).toHaveBeenCalledWith(
       expect.objectContaining({ tier: 'medium', isGenerationFailed: true }),
     );
-    const recorded = JSON.stringify(
-      s.actions.recordDebugDecision.mock.calls[0],
-    );
-    expect(recorded).not.toContain('request failed');
-  });
-
-  it('does not flag a successful generation as failed', async () => {
-    const s = setup();
-    expect((await consume(s.stream())).result.stopReason).toBe('stop');
-    expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
     expect(
-      s.actions.recordDebugDecision.mock.calls[0]?.[0].isGenerationFailed,
-    ).toBeUndefined();
+      JSON.stringify(s.actions.recordDebugDecision.mock.calls),
+    ).not.toContain('request failed');
   });
 
-  it('marks aggregate cost unknown when an attempt ends without usage', async () => {
-    const s = setup();
-    s.delegate.mockImplementationOnce(() => {
-      throw new Error('no terminal usage');
-    });
-    await consume(s.stream());
-    expect(s.state.accumulatedCost).toBe(0.01);
-    expect(s.state.lastDecision?.generation).toMatchObject({
-      attempts: 2,
-      reportedCostUsd: undefined,
-    });
-  });
-
-  it('does not report a partial chain total as complete when the final attempt has no usage', async () => {
-    const s = setup();
-    s.delegate.mockReturnValueOnce(failure()).mockImplementationOnce(() => {
-      throw new Error('no terminal usage');
-    });
-    expect((await consume(s.stream())).result.stopReason).toBe('error');
-    expect(s.state.accumulatedCost).toBe(0.01);
-    expect(s.state.lastDecision?.generation).toMatchObject({
-      attempts: 2,
-      reportedCostUsd: undefined,
-    });
-  });
+  it.each([
+    {
+      missingUsage: 'first attempt',
+      firstThrows: true,
+      outcome: 'stop',
+      finalModel: 'fallback',
+    },
+    {
+      missingUsage: 'last attempt',
+      firstThrows: false,
+      outcome: 'error',
+      finalModel: undefined,
+    },
+  ])(
+    'keeps the total unknown when $missingUsage has no usage',
+    async ({ firstThrows, outcome, finalModel }) => {
+      const s = setup();
+      const withoutUsage = () => {
+        throw new Error('no terminal usage');
+      };
+      if (firstThrows) s.delegate.mockImplementationOnce(withoutUsage);
+      else
+        s.delegate
+          .mockReturnValueOnce(failure())
+          .mockImplementationOnce(withoutUsage);
+      const { result } = await consume(s.stream());
+      expect(result.stopReason).toBe(outcome);
+      if (finalModel) expect(result.model).toBe(finalModel);
+      expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
+        'primary',
+        'fallback',
+      ]);
+      expect(s.state.accumulatedCost).toBe(0.01);
+      expect(s.state.lastDecision?.generation).toMatchObject({
+        attempts: 2,
+        reportedCostUsd: undefined,
+      });
+      expect(s.state.lastDecision?.generation?.costSource).toBeUndefined();
+    },
+  );
 
   it('keeps shadow economics observational even when switching cold is more expensive', async () => {
     const s = setup();
@@ -600,54 +521,64 @@ describe('router provider', () => {
     expect(s.delegate).toHaveBeenCalledOnce();
   });
 
-  it('reports a terminal error after visible content as failed without retrying or persisting it', async () => {
-    const s = setup();
-    const remoteError = 'synthetic provider error details';
-    const partial = message({
-      content: [{ type: 'text', text: 'partial' }],
-      stopReason: 'pending',
-    });
-    s.delegate.mockReturnValueOnce(
-      events(
-        {
-          type: 'text_delta',
-          contentIndex: 0,
-          delta: 'partial',
-          partial,
-        },
-        {
-          type: 'error',
-          reason: 'error',
-          error: message({
-            content: [{ type: 'text', text: 'partial' }],
-            stopReason: 'error',
-            errorMessage: remoteError,
-          }),
-        },
-      ),
-    );
-    const observe = vi.fn<(event: RouterRequestObservation) => void>();
-    s.actions.beginRequest.mockReturnValue(observe);
+  it.each([false, true])(
+    'stops after visible content and a terminal error (fallback: %s)',
+    async (fallback) => {
+      const s = setup();
+      required(s.state.currentConfig.profiles.balanced?.medium).fallbacks = [
+        'test/fallback',
+        'test/small',
+      ];
+      if (fallback) s.delegate.mockReturnValueOnce(failure());
+      const remoteError = 'synthetic provider error details';
+      const partial = message({
+        content: [{ type: 'text', text: 'partial' }],
+        stopReason: 'pending',
+      });
+      s.delegate.mockReturnValueOnce(
+        events(
+          {
+            type: 'text_delta',
+            contentIndex: 0,
+            delta: 'partial',
+            partial,
+          },
+          {
+            type: 'error',
+            reason: 'error',
+            error: message({
+              content: [{ type: 'text', text: 'partial' }],
+              stopReason: 'error',
+              errorMessage: remoteError,
+            }),
+          },
+        ),
+      );
+      const observe = vi.fn<(event: RouterRequestObservation) => void>();
+      s.actions.beginRequest.mockReturnValue(observe);
 
-    const { received, result } = await consume(s.stream());
+      const { received, result } = await consume(s.stream());
 
-    expect(s.delegate).toHaveBeenCalledOnce();
-    expect(result.stopReason).toBe('error');
-    expect(received.at(-1)).toMatchObject({
-      type: 'error',
-      reason: 'error',
-      error: { errorMessage: remoteError },
-    });
-    expect(observe).toHaveBeenLastCalledWith(
-      expect.objectContaining({ stage: 'failed' }),
-    );
-    expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
-    expect(s.actions.persistState).toHaveBeenCalledOnce();
-    expect(
-      JSON.stringify(s.actions.recordDebugDecision.mock.calls),
-    ).not.toContain(remoteError);
-    expect(JSON.stringify(s.state.lastDecision)).not.toContain(remoteError);
-  });
+      expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual(
+        fallback ? ['primary', 'fallback'] : ['primary'],
+      );
+      expect(result.stopReason).toBe('error');
+      expect(received.at(-1)).toMatchObject({
+        type: 'error',
+        reason: 'error',
+        error: { errorMessage: remoteError },
+      });
+      expect(observe).toHaveBeenLastCalledWith(
+        expect.objectContaining({ stage: 'failed' }),
+      );
+      expect(s.actions.recordDebugDecision).toHaveBeenCalledOnce();
+      expect(s.actions.persistState).toHaveBeenCalledOnce();
+      expect(
+        JSON.stringify(s.actions.recordDebugDecision.mock.calls),
+      ).not.toContain(remoteError);
+      expect(JSON.stringify(s.state.lastDecision)).not.toContain(remoteError);
+    },
+  );
 
   it('returns a terminal error when every stream ends without a terminal event', async () => {
     const s = setup();
@@ -657,17 +588,27 @@ describe('router provider', () => {
     expect(result.errorMessage).toContain('terminal');
   });
 
-  it('preserves cancellation instead of trying another model', async () => {
-    const s = setup();
-    s.delegate.mockReturnValueOnce(failure('aborted'));
-    const observe = vi.fn<(event: RouterRequestObservation) => void>();
-    s.actions.beginRequest.mockReturnValue(observe);
-    expect((await consume(s.stream())).result.stopReason).toBe('aborted');
-    expect(observe).toHaveBeenLastCalledWith(
-      expect.objectContaining({ stage: 'cancelled' }),
-    );
-    expect(s.delegate).toHaveBeenCalledOnce();
-  });
+  it.each([false, true])(
+    'preserves cancellation without another retry (fallback: %s)',
+    async (fallback) => {
+      const s = setup();
+      required(s.state.currentConfig.profiles.balanced?.medium).fallbacks = [
+        'test/fallback',
+        'test/small',
+      ];
+      if (fallback) s.delegate.mockReturnValueOnce(failure());
+      s.delegate.mockReturnValueOnce(failure('aborted'));
+      const observe = vi.fn<(event: RouterRequestObservation) => void>();
+      s.actions.beginRequest.mockReturnValue(observe);
+      expect((await consume(s.stream())).result.stopReason).toBe('aborted');
+      expect(observe).toHaveBeenLastCalledWith(
+        expect.objectContaining({ stage: 'cancelled' }),
+      );
+      expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual(
+        fallback ? ['primary', 'fallback'] : ['primary'],
+      );
+    },
+  );
 
   it('does not start requests for an already cancelled turn', async () => {
     const s = setup();
@@ -1027,1805 +968,6 @@ describe('four-level provider routing', () => {
   });
 });
 
-const userContext = (text = 'implement a parser', timestamp = 1): Context => ({
-  messages: [{ role: 'user', content: text, timestamp }],
-});
-
-const classifierModel = {
-  type: 'classifier' as const,
-  provider: 'typesafe',
-  id: 'jev-latest',
-  name: 'Jev',
-  api: 'typesafe-system-one' as const,
-  baseUrl: 'https://api.typesafe.ai/v1/',
-  input: ['text'] as 'text'[],
-  contextWindow: 64000,
-  cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
-};
-const classifierConfig: AdvisorConfig = {
-  enabled: true,
-  model: 'typesafe/jev-latest',
-  timeoutMs: 1500,
-  reviewEveryRequests: 4,
-  confidenceThreshold: 0.65,
-  probabilityThreshold: 0.8,
-  maxStateTokens: 3000,
-  maxRetries: 1,
-};
-type Classify = ExtensionContext['modelRegistry']['classify'];
-type ClassifierResponse = Awaited<ReturnType<Classify>>;
-const classifierResponse = (
-  target: Parameters<Classify>[0],
-  context: Parameters<Classify>[1],
-  tier: string,
-): ClassifierResponse => {
-  const criteria = required(context.questions.route).criteria;
-  const ids = Object.keys(criteria);
-  const choice = ids.find((id) => id.startsWith(`${tier}|`)) ?? '';
-  return {
-    api: target.api,
-    provider: target.provider,
-    model: target.id,
-    timestamp: Date.now(),
-    stopReason: 'stop',
-    answers: {
-      route: {
-        type: 'choice',
-        choice,
-        confidence: 0.99,
-        probabilities: Object.fromEntries(
-          ids.map((id) => [id, id === choice ? 1 : 0]),
-        ),
-      },
-    },
-  };
-};
-const enableAdvisors = (s: ReturnType<typeof setup>) => {
-  s.state.currentConfig.advisor = { ...classifierConfig };
-  required(s.state.currentConfig.profiles.balanced).advisor = {
-    models: ['typesafe/jev-latest'],
-  };
-  s.registry.findOfType = (() =>
-    classifierModel) as unknown as ExtensionContext['modelRegistry']['findOfType'];
-  s.registry.classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
-    async (target, context) => {
-      const criteria = required(context.questions.route);
-      const choice =
-        Object.keys(criteria.criteria).find((id) => id.startsWith('medium|')) ??
-        '';
-      return {
-        api: target.api,
-        provider: target.provider,
-        model: target.id,
-        timestamp: Date.now(),
-        stopReason: 'stop',
-        answers: {
-          route: {
-            type: 'choice',
-            choice,
-            confidence: 0.99,
-            probabilities: Object.fromEntries(
-              Object.keys(criteria.criteria).map((id) => [
-                id,
-                id === choice ? 1 : 0,
-              ]),
-            ),
-          },
-        },
-      };
-    },
-  );
-  delete s.state.pinnedTierByProfile.balanced;
-};
-const configureChoice = (s: ReturnType<typeof setup>, tier: string) => {
-  enableAdvisors(s);
-  s.registry.classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
-    async (target, context) => {
-      const q = required(context.questions.route);
-      const ids = Object.keys(q.criteria);
-      const choice =
-        ids.find((id) => id.startsWith(`${tier}|`)) ?? ids[0] ?? '';
-      return {
-        api: target.api,
-        provider: target.provider,
-        model: target.id,
-        timestamp: Date.now(),
-        stopReason: 'stop',
-        answers: {
-          route: {
-            type: 'choice',
-            choice,
-            confidence: 0.99,
-            probabilities: Object.fromEntries(
-              ids.map((id) => [id, id === choice ? 1 : 0]),
-            ),
-          },
-        },
-      };
-    },
-  );
-};
-
-describe('Pi classifier provider integration', () => {
-  it.each([
-    [
-      'explicit notification',
-      'fixture-status',
-      { router: { intent: 'notification' } },
-      1,
-    ],
-    ['completion notification', 'subagent-notify', undefined, 1],
-    [
-      'incremental child notification',
-      'subagent-incremental-child-notify',
-      undefined,
-      1,
-    ],
-    [
-      'incremental child steering',
-      'subagent-incremental-child-notify',
-      { router: { intent: 'steering' } },
-      2,
-    ],
-    [
-      'explicit steering',
-      'subagent-notify',
-      { router: { intent: 'steering' } },
-      2,
-    ],
-    ['untyped intercom', 'intercom_message', undefined, 2],
-    ['configured intercom', 'intercom_message', undefined, 1],
-    ['invalid intent', 'fixture-status', { router: { intent: 'other' } }, 2],
-    [
-      'background progress',
-      'fixture-status',
-      { router: { intent: 'notification' }, private: 'PRIVATE_METADATA' },
-      2,
-      1,
-    ],
-  ])(
-    'preserves notification routing but reconsiders %s',
-    async (_name, customType, details, calls, reviewEveryRequests = 4) => {
-      const s = setup();
-      configureChoice(s, 'high');
-      if (_name === 'configured intercom')
-        required(s.state.currentConfig.profiles.balanced).notificationTypes = [
-          'intercom_message',
-        ];
-      required(s.state.currentConfig.advisor).reviewEveryRequests =
-        reviewEveryRequests;
-      const manager = SessionManager.inMemory();
-      s.state.lastExtensionContext = {
-        ...required(s.state.lastExtensionContext),
-        sessionManager: manager,
-      };
-      const goal = {
-        role: 'user' as const,
-        content: 'diagnose the original failure',
-        timestamp: 1,
-      };
-      manager.appendMessage(goal);
-      const assistant = message({
-        content: [
-          {
-            type: 'toolCall',
-            id: 'notification-tool',
-            name: 'read',
-            arguments: {},
-          },
-        ],
-        stopReason: 'toolUse',
-      });
-      s.delegate.mockReturnValueOnce(
-        events({ type: 'done', reason: 'toolUse', message: assistant }),
-      );
-      await consume(s.stream({ messages: [goal] }));
-      manager.appendMessage(assistant);
-      const result = {
-        role: 'toolResult' as const,
-        toolCallId: 'notification-tool',
-        toolName: 'read',
-        content: [{ type: 'text' as const, text: 'successful check' }],
-        isError: false,
-        timestamp: 2,
-      };
-      manager.appendMessage(result);
-      manager.appendCustomMessageEntry(
-        customType,
-        'worker finished a check',
-        true,
-        details,
-      );
-      const native = required(manager.getBranch().at(-1));
-      const notification = {
-        role: 'user' as const,
-        content: 'worker finished a check',
-        timestamp: Date.parse(native.timestamp),
-      };
-      const continued = { messages: [goal, assistant, result, notification] };
-      expect((await consume(s.stream(continued))).result.stopReason).toBe(
-        'stop',
-      );
-      expect(s.registry.classify).toHaveBeenCalledTimes(calls);
-      expect(s.state.lastDecision?.reasonCode).toBe(
-        calls === 1 || reviewEveryRequests === 1
-          ? 'continuation'
-          : 'classifier',
-      );
-      expect(s.delegate.mock.calls.at(-1)?.[1].messages).toEqual(
-        normalizeContext(continued).messages,
-      );
-      if (reviewEveryRequests === 1) {
-        const payload = JSON.stringify(
-          vi.mocked(s.registry.classify).mock.calls[1]?.[1].state,
-        );
-        expect(payload).toContain('diagnose the original failure');
-        expect(payload).toContain('worker finished a check');
-        expect(payload).not.toContain('PRIVATE_METADATA');
-      }
-    },
-  );
-
-  it.each(['subagent-notify', 'subagent-incremental-child-notify'])(
-    'reuses the accepted route when %s wakes an idle parent',
-    async (customType) => {
-      const s = setup();
-      configureChoice(s, 'low');
-      const manager = SessionManager.inMemory();
-      s.state.lastExtensionContext = {
-        ...required(s.state.lastExtensionContext),
-        sessionManager: manager,
-      };
-      const goal = {
-        role: 'user' as const,
-        content: 'repeat the approved report checks',
-        timestamp: 1,
-      };
-      manager.appendMessage(goal);
-      const first = await consume(s.stream({ messages: [goal] }));
-      const target = s.state.lastDecision?.targetLabel;
-      manager.appendMessage(first.result);
-      manager.appendCustomMessageEntry(customType, 'report completed', false);
-      const native = required(manager.getBranch().at(-1));
-      const context = {
-        messages: [
-          goal,
-          first.result,
-          {
-            role: 'user' as const,
-            content: 'report completed',
-            timestamp: Date.parse(native.timestamp),
-          },
-        ],
-      };
-      expect((await consume(s.stream(context))).result.stopReason).toBe('stop');
-      expect(s.registry.classify).toHaveBeenCalledTimes(1);
-      expect(s.state.lastDecision?.targetLabel).toBe(target);
-      expect(s.state.lastDecision?.tier).toBe('low');
-      expect(s.delegate.mock.calls.at(-1)?.[1].messages).toEqual(
-        normalizeContext(context).messages,
-      );
-    },
-  );
-
-  it('does not truncate the active goal or tool chain at a notification boundary', async () => {
-    const s = setup();
-    required(s.models[0]).contextWindow = 64;
-    const manager = SessionManager.inMemory();
-    s.state.lastExtensionContext = {
-      ...required(s.state.lastExtensionContext),
-      sessionManager: manager,
-    };
-    const goal = {
-      role: 'user' as const,
-      content: 'fix the original failure',
-      timestamp: 1,
-    };
-    manager.appendMessage(goal);
-    const assistant = message({
-      content: [
-        { type: 'toolCall', id: 'active-tool', name: 'read', arguments: {} },
-      ],
-      stopReason: 'toolUse',
-    });
-    s.delegate.mockReturnValueOnce(
-      events({ type: 'done', reason: 'toolUse', message: assistant }),
-    );
-    await consume(s.stream({ messages: [goal] }));
-    manager.appendMessage(assistant);
-    const result = {
-      role: 'toolResult' as const,
-      toolCallId: 'active-tool',
-      toolName: 'read',
-      content: [{ type: 'text' as const, text: 'checked' }],
-      isError: false,
-      timestamp: 2,
-    };
-    manager.appendMessage(result);
-    const text = 'worker progress '.repeat(100);
-    manager.appendCustomMessageEntry('subagent-notify', text, true);
-    const native = required(manager.getBranch().at(-1));
-    const context = {
-      messages: [
-        goal,
-        assistant,
-        result,
-        {
-          role: 'user' as const,
-          content: text,
-          timestamp: Date.parse(native.timestamp),
-        },
-      ],
-    };
-    expect((await consume(s.stream(context))).result.stopReason).toBe('stop');
-    expect(s.delegate.mock.calls.at(-1)?.[1].messages).toEqual(
-      normalizeContext(context).messages,
-    );
-  });
-
-  it('routes varied prompt texts through the same local baseline without advice', async () => {
-    const s = setup();
-    s.models.push(model('tiny'));
-    s.state.currentConfig = normalizeConfig({
-      profiles: {
-        balanced: {
-          high: { model: 'test/primary' },
-          medium: { model: 'test/fallback' },
-          low: { model: 'test/small' },
-          micro: { model: 'test/tiny' },
-        },
-      },
-    }).config;
-    delete s.state.pinnedTierByProfile.balanced;
-    const classify = vi.fn<ExtensionContext['modelRegistry']['classify']>();
-    s.registry.classify = classify;
-    const prompts = [
-      'pwd',
-      'Design a migration plan.',
-      'да, сделай',
-      '¿Puedes ayudar?',
-      '!!!',
-      'Refactor the parser and add boundary tests.',
-    ];
-    for (const [index, prompt] of prompts.entries()) {
-      const { result } = await consume(
-        s.stream(userContext(prompt, index + 1)),
-      );
-      expect(result.stopReason).toBe('stop');
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'medium',
-        reasonCode: 'baseline',
-        advisor: 'none',
-      });
-    }
-    expect(s.state.pinnedTierByProfile.balanced).toBeUndefined();
-    expect(s.state.currentConfig.maxSessionBudget).toBeUndefined();
-    expect(s.state.currentConfig.advisor).toBeUndefined();
-    expect(classify).not.toHaveBeenCalled();
-    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual(
-      prompts.map(() => 'fallback'),
-    );
-  });
-
-  it('routes with an explicitly approved Pi classifier and reuses advice on the turn', async () => {
-    const s = setup();
-    configureChoice(s, 'high');
-    await consume(s.stream(userContext()));
-    expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce();
-    expect(s.delegate).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reasonCode: 'classifier',
-      advisor: 'classifier',
-      isClassifier: true,
-    });
-    await consume(s.stream(userContext()));
-    expect(s.registry.classify).toHaveBeenCalledOnce();
-  });
-  it('does not classify when profile consent omits the selected configured classifier', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(s.state.currentConfig.profiles.balanced).advisor = { models: [] };
-    await consume(s.stream(userContext()));
-    expect(vi.mocked(s.registry.classify)).not.toHaveBeenCalled();
-    expect(s.state.lastDecision?.reasonCode).toBe('baseline');
-  });
-  it('invalidates same-turn advice when exact profile consent is revoked', async () => {
-    const s = setup();
-    configureChoice(s, 'high');
-    const context = userContext();
-    await consume(s.stream(context));
-    expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce();
-    required(s.state.currentConfig.profiles.balanced).advisor = { models: [] };
-    await consume(s.stream(context));
-    expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      reasonCode: 'baseline',
-      advisor: 'classifier-fallback',
-    });
-  });
-  it('reuses the classified route through a valid tool continuation', async () => {
-    const s = setup();
-    configureChoice(s, 'high');
-    const user = userContext();
-    const toolCall = message({
-      content: [
-        { type: 'toolCall', id: 'tool-1', name: 'read', arguments: {} },
-      ],
-      stopReason: 'toolUse',
-    });
-    s.delegate.mockReturnValueOnce(
-      events({
-        type: 'done',
-        reason: 'toolUse',
-        message: toolCall,
-      }),
-    );
-    await consume(s.stream(user));
-    await consume(
-      s.stream({
-        messages: [
-          ...user.messages,
-          toolCall,
-          {
-            role: 'toolResult',
-            toolCallId: 'tool-1',
-            toolName: 'read',
-            content: [{ type: 'text', text: 'fixture' }],
-            isError: false,
-            timestamp: 2,
-          },
-        ],
-      }),
-    );
-    expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce();
-    expect(s.delegate).toHaveBeenCalledTimes(2);
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      reasonCode: 'continuation',
-      reuse: 'continuation',
-    });
-  });
-  it('falls back directly to a local baseline on invalid advice', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    s.registry.classify = async (target) => ({
-      api: target.api,
-      provider: target.provider,
-      model: target.id,
-      timestamp: 1,
-      stopReason: 'error',
-      errorMessage: 'private provider detail',
-      answers: {},
-    });
-    await consume(s.stream(userContext()));
-    expect(s.delegate).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      reasonCode: 'baseline',
-      advisor: 'classifier-fallback',
-      errorClass: 'advisor-unavailable',
-    });
-    expect(
-      JSON.stringify(s.actions.recordDebugDecision.mock.calls),
-    ).not.toContain('private provider detail');
-  });
-  it('aborts advice without starting baseline generation', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    s.registry.classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
-      (_model, _context, options) =>
-        new Promise((resolve) =>
-          options?.signal?.addEventListener(
-            'abort',
-            () =>
-              resolve({
-                api: 'typesafe-system-one',
-                provider: 'typesafe',
-                model: 'jev-latest',
-                timestamp: 1,
-                stopReason: 'aborted',
-                answers: {},
-              }),
-            { once: true },
-          ),
-        ),
-    );
-    const controller = new AbortController();
-    const pending = consume(s.stream(userContext(), controller.signal));
-    await vi.waitFor(() =>
-      expect(vi.mocked(s.registry.classify)).toHaveBeenCalledOnce(),
-    );
-    controller.abort();
-    expect((await pending).result.stopReason).toBe('aborted');
-    expect(s.delegate).not.toHaveBeenCalled();
-  });
-  it('shares same-turn classification while one cancelled waiter leaves the other active', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(
-      required(s.state.currentConfig.profiles.balanced).advisor,
-    ).confidenceThreshold = 0.55;
-    let resolveClassification:
-      | ((result: ClassifierResponse) => void)
-      | undefined;
-    let classifierSignal: AbortSignal | undefined;
-    const classify = vi.fn<Classify>(
-      (_target, _context, options) =>
-        new Promise((resolve) => {
-          resolveClassification = resolve;
-          classifierSignal = options?.signal;
-        }),
-    );
-    s.registry.classify = classify;
-    const context = userContext('same turn', 10);
-    const cancelled = new AbortController();
-    const active = new AbortController();
-    const first = consume(s.stream(context, cancelled.signal));
-    const second = consume(s.stream(context, active.signal));
-    await vi.waitFor(() => expect(classify).toHaveBeenCalledOnce());
-    cancelled.abort();
-    expect((await first).result.stopReason).toBe('aborted');
-    expect(classifierSignal?.aborted).toBe(false);
-    expect(s.delegate).not.toHaveBeenCalled();
-    const call = classify.mock.calls[0];
-    const resolve = resolveClassification;
-    if (!call || !resolve) throw new Error('Classifier request did not start');
-    resolve(classifierResponse(call[0], call[1], 'high'));
-    expect((await second).result.stopReason).toBe('stop');
-    expect(classify).toHaveBeenCalledOnce();
-    expect(s.delegate).toHaveBeenCalledOnce();
-  });
-
-  it('aborts the shared classifier transport when the final same-turn waiter leaves', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    required(
-      required(s.state.currentConfig.profiles.balanced).advisor,
-    ).confidenceThreshold = 0.55;
-    let classifierSignal: AbortSignal | undefined;
-    const classify = vi.fn<Classify>(
-      (_target, _context, options) =>
-        new Promise(() => {
-          classifierSignal = options?.signal;
-        }),
-    );
-    s.registry.classify = classify;
-    const context = userContext('same turn', 10);
-    const firstAbort = new AbortController();
-    const secondAbort = new AbortController();
-    const first = consume(s.stream(context, firstAbort.signal));
-    const second = consume(s.stream(context, secondAbort.signal));
-    await vi.waitFor(() => expect(classify).toHaveBeenCalledOnce());
-    firstAbort.abort();
-    expect((await first).result.stopReason).toBe('aborted');
-    expect(classifierSignal?.aborted).toBe(false);
-    secondAbort.abort();
-    expect((await second).result.stopReason).toBe('aborted');
-    expect(classifierSignal?.aborted).toBe(true);
-    expect(classify).toHaveBeenCalledOnce();
-    expect(s.delegate).not.toHaveBeenCalled();
-  });
-
-  it('bypasses advice for a pin and a single available tier', async () => {
-    const s = setup();
-    enableAdvisors(s);
-    s.state.pinnedTierByProfile.balanced = 'low';
-    await consume(s.stream());
-    expect(s.registry.classify).not.toHaveBeenCalled();
-    s.state.pinnedTierByProfile.balanced = undefined;
-    s.state.currentConfig.profiles.balanced = { low: { model: 'test/small' } };
-    await consume(s.stream());
-    expect(s.registry.classify).not.toHaveBeenCalled();
-  });
-});
-
-describe('activity matrix provider routing', () => {
-  const activitySetup = () => {
-    const s = setup();
-    s.models.push(
-      model('code'),
-      model('code-backup'),
-      model('docs'),
-      model('ops'),
-    );
-    s.state.pinnedTierByProfile = {};
-    s.state.currentConfig = normalizeConfig({
-      advisor: { enabled: true, model: 'typesafe/jev-latest' },
-      profiles: {
-        balanced: {
-          advisor: { models: ['typesafe/jev-latest'] },
-          high: { model: 'test/primary', thinking: 'high' },
-          medium: {
-            model: 'test/primary',
-            thinking: 'medium',
-            fallbacks: ['test/fallback'],
-          },
-          low: { model: 'test/small', thinking: 'low' },
-          activities: {
-            code: {
-              medium: { model: 'test/code', fallbacks: ['test/code-backup'] },
-            },
-            docs: {
-              medium: { model: 'test/docs', thinking: 'low', fallbacks: [] },
-            },
-            ops: {
-              medium: { model: 'test/ops', thinking: 'low', fallbacks: [] },
-            },
-          },
-        },
-      },
-    }).config;
-    const answer = {
-      tier: 'medium',
-      activity: 'code',
-      phase: undefined as string | undefined,
-      relation: 'new-task' as string | undefined,
-      relationConfidence: 0.95,
-      confidence: 0.95,
-      invalidActivity: false,
-      fail: false,
-    };
-    const classify = vi.fn<ExtensionContext['modelRegistry']['classify']>(
-      async (classifier, context) => {
-        if (answer.fail) throw new Error('private-response');
-        const routeQuestion = context.questions.route;
-        const routeId =
-          routeQuestion?.type === 'choice'
-            ? (Object.keys(routeQuestion.criteria).find((id) =>
-                id.startsWith(`${answer.tier}|`),
-              ) ?? 'uncertain')
-            : undefined;
-        const answers = {
-          ...(context.questions.continuity && answer.relation
-            ? {
-                continuity: {
-                  type: 'choice' as const,
-                  choice: answer.relation,
-                  confidence: answer.relationConfidence,
-                  probabilities: { [answer.relation]: 1 },
-                },
-              }
-            : {}),
-          ...(answer.phase
-            ? {
-                phase: {
-                  type: 'choice' as const,
-                  choice: answer.phase,
-                  confidence: 0.9,
-                  probabilities: { [answer.phase]: 1 },
-                },
-              }
-            : {}),
-          ...(routeId
-            ? {
-                route: {
-                  type: 'choice' as const,
-                  choice: routeId,
-                  confidence: 0.95,
-                  probabilities: { [routeId]: 1 },
-                },
-              }
-            : {}),
-          ...(context.questions.activity && !answer.invalidActivity
-            ? {
-                activity: {
-                  type: 'choice' as const,
-                  choice: answer.activity,
-                  confidence: answer.confidence,
-                  probabilities: { [answer.activity]: 1 },
-                },
-              }
-            : {}),
-        };
-        return {
-          api: classifier.api,
-          provider: classifier.provider,
-          model: classifier.id,
-          timestamp: 1,
-          stopReason: 'stop',
-          answers,
-        };
-      },
-    );
-    s.registry.classify = classify;
-    return {
-      ...s,
-      answer,
-      classify,
-      profile: required(s.state.currentConfig.profiles.balanced),
-    };
-  };
-
-  it('asks separate route/activity questions in one classify operation and uses only the selected cell fallbacks', async () => {
-    const s = activitySetup();
-    s.delegate.mockImplementation((target) =>
-      target.id === 'code' ? failure() : done(),
-    );
-    await consume(s.stream());
-    expect(s.classify).toHaveBeenCalledOnce();
-    expect(
-      Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
-    ).toEqual(['continuity', 'route', 'activity', 'phase']);
-    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
-      'code',
-      'code-backup',
-    ]);
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      activity: 'code',
-      routeCell: 'code',
-      targetModelId: 'code-backup',
-      isFallback: true,
-    });
-    await consume(s.stream());
-    expect(s.classify).toHaveBeenCalledOnce();
-    expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe('code-backup');
-    expect(s.state.lastDecision?.reuse).toBe('same-turn');
-  });
-
-  it.each([
-    ['verify', 'ops'],
-    ['execute', 'ops'],
-    ['produce', 'code'],
-    ['report', 'code'],
-  ])(
-    'routes %s with a durable code goal to the %s cell',
-    async (phase, expected) => {
-      const s = activitySetup();
-      s.answer.phase = phase;
-      await consume(s.stream());
-      expect(s.delegate.mock.calls.at(-1)?.[0].id).toBe(expected);
-      expect(s.state.lastDecision).toMatchObject({
-        activity: expected,
-        routeCell: expected,
-        classification: { activity: 'code', phase },
-      });
-    },
-  );
-
-  it('retains a confirmed goal across verify, commit and report and replaces it for a new task', async () => {
-    const s = activitySetup();
-    let ids = ['root', 'one'];
-    s.state.lastExtensionContext = {
-      sessionManager: {
-        getBranch: () => ids.map((id) => ({ id, type: 'message' })),
-        getSessionId: () => 'native-session',
-      },
-      ui: { setHiddenThinkingLabel: vi.fn() },
-    } as unknown as ExtensionContext;
-    const first = {
-      role: 'user' as const,
-      content: 'Implement the feature',
-      timestamp: 1,
-    };
-    const messages: Context['messages'] = [first];
-    await consume(s.stream({ messages: [...messages] }));
-    const steps = [
-      { text: 'Run the specified tests', phase: 'verify', route: 'ops' },
-      { text: 'Commit the verified changes', phase: 'execute', route: 'ops' },
-      { text: 'Report the result', phase: 'report', route: 'code' },
-    ];
-    s.answer.relation = 'continuation';
-    for (const [index, step] of steps.entries()) {
-      ids = [...ids, String(index + 2)];
-      messages.push({ role: 'user', content: step.text, timestamp: index + 2 });
-      s.answer.phase = step.phase;
-      await consume(s.stream({ messages: [...messages] }));
-      expect(s.state.lastDecision?.routeCell).toBe(step.route);
-      const payload = s.classify.mock.calls.at(-1)?.[1];
-      expect(payload?.state.activeGoal).toMatchObject({
-        text: 'Implement the feature',
-      });
-      expect(payload?.questions.continuity?.type).toBe('choice');
-    }
-    ids = [...ids, 'new'];
-    messages.push({
-      role: 'user',
-      content: 'Start a new task: write a manual',
-      timestamp: 8,
-    });
-    s.answer.relation = 'new-task';
-    s.answer.activity = 'docs';
-    s.answer.phase = 'produce';
-    await consume(s.stream({ messages: [...messages] }));
-    expect(s.state.lastDecision?.routeCell).toBe('docs');
-    ids = [...ids, 'follow'];
-    messages.push({ role: 'user', content: 'Continue', timestamp: 9 });
-    s.answer.relation = 'continuation';
-    await consume(s.stream({ messages: [...messages] }));
-    expect(s.classify.mock.calls.at(-1)?.[1].state.activeGoal).toMatchObject({
-      text: 'Start a new task: write a manual',
-    });
-  });
-
-  it('drops an ambiguous cross-turn goal and never reuses it on a later request', async () => {
-    const s = activitySetup();
-    let ids = ['root', 'one'];
-    s.state.lastExtensionContext = {
-      sessionManager: {
-        getBranch: () => ids.map((id) => ({ id, type: 'message' })),
-        getSessionId: () => 'native-session',
-      },
-      ui: { setHiddenThinkingLabel: vi.fn() },
-    } as unknown as ExtensionContext;
-    const messages: Context['messages'] = [
-      { role: 'user', content: 'Implement a feature', timestamp: 1 },
-    ];
-    await consume(s.stream({ messages: [...messages] }));
-    ids = [...ids, 'two'];
-    messages.push({ role: 'user', content: 'Do it', timestamp: 2 });
-    s.answer.relation = undefined;
-    s.answer.phase = 'verify';
-    await consume(s.stream({ messages: [...messages] }));
-    expect(s.state.lastDecision?.advisor).toBe('classifier-fallback');
-    ids = [...ids, 'three'];
-    messages.push({
-      role: 'user',
-      content: 'Start writing a manual',
-      timestamp: 3,
-    });
-    s.answer.activity = 'docs';
-    s.answer.phase = 'produce';
-    await consume(s.stream({ messages: [...messages] }));
-    expect(s.classify.mock.calls.at(-1)?.[1].state.activeGoal).toBeUndefined();
-    expect(s.state.lastDecision?.routeCell).toBe('docs');
-  });
-
-  it.each([
-    ['continuation', 0.95],
-    ['uncertain', 0.95],
-    [undefined, 0.95],
-    ['new-task', 0.1],
-  ] as const)(
-    'does not seed an unanchored approval for relation %s at %s',
-    async (relation, confidence) => {
-      const s = activitySetup();
-      let ids = ['root', 'one'];
-      s.state.lastExtensionContext = {
-        sessionManager: {
-          getBranch: () => ids.map((id) => ({ id, type: 'message' })),
-          getSessionId: () => 'native-session',
-        },
-        ui: { setHiddenThinkingLabel: vi.fn() },
-      } as unknown as ExtensionContext;
-      s.answer.relation = relation;
-      s.answer.relationConfidence = confidence;
-      const messages: Context['messages'] = [
-        { role: 'user', content: 'Yes, proceed', timestamp: 1 },
-      ];
-      await consume(s.stream({ messages: [...messages] }));
-      expect(s.state.lastDecision?.activity).toBe('code');
-      expect(s.classify.mock.calls[0]?.[1].state.activeGoal).toBeUndefined();
-      expect(s.classify.mock.calls[0]?.[1].questions.continuity?.type).toBe(
-        'choice',
-      );
-      ids = [...ids, 'two'];
-      messages.push({ role: 'user', content: 'Continue', timestamp: 2 });
-      await consume(s.stream({ messages: [...messages] }));
-      expect(
-        s.classify.mock.calls.at(-1)?.[1].state.activeGoal,
-      ).toBeUndefined();
-    },
-  );
-
-  it('does not turn a missing referenced brief into an ops goal', async () => {
-    const s = activitySetup();
-    s.answer.activity = 'uncertain';
-    s.answer.phase = 'verify';
-    await consume(
-      s.stream({
-        messages: [
-          {
-            role: 'user',
-            content: 'Implement the task in the unavailable brief',
-            timestamp: 1,
-          },
-        ],
-      }),
-    );
-    expect(s.state.lastDecision).toMatchObject({
-      routeCell: undefined,
-      targetModelId: 'primary',
-      classification: { activity: 'uncertain', phase: 'verify' },
-    });
-    expect(s.state.lastDecision?.activity).toBeUndefined();
-  });
-
-  it('reuses the actual cell on tool continuations and reconsiders each user-role steering message', async () => {
-    const s = activitySetup();
-    s.delegate.mockImplementation((target) =>
-      target.id === 'code'
-        ? failure()
-        : events({
-            type: 'done',
-            reason: 'toolUse',
-            message: message({
-              model: target.id,
-              stopReason: 'toolUse',
-              content: [
-                {
-                  type: 'toolCall',
-                  name: 'read',
-                  id: 'cell-tool',
-                  arguments: {},
-                },
-              ],
-            }),
-          }),
-    );
-    const user = { role: 'user' as const, content: 'implement', timestamp: 1 };
-    await consume(s.stream({ messages: [user] }));
-    const assistant = message({
-      model: 'code-backup',
-      stopReason: 'toolUse',
-      content: [
-        { type: 'toolCall', name: 'read', id: 'cell-tool', arguments: {} },
-      ],
-    });
-    const continued: Context = {
-      messages: [
-        user,
-        assistant,
-        {
-          role: 'toolResult',
-          toolCallId: 'cell-tool',
-          toolName: 'read',
-          content: [{ type: 'text', text: 'evidence' }],
-          isError: false,
-          timestamp: 2,
-        },
-      ],
-    };
-    s.answer.activity = 'docs';
-    await consume(s.stream(continued));
-    expect(s.classify).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision).toMatchObject({
-      reuse: 'continuation',
-      routeCell: 'code',
-      targetModelId: 'code-backup',
-    });
-    await consume(
-      s.stream({
-        messages: [
-          ...continued.messages,
-          { role: 'user', content: 'write the guide instead', timestamp: 3 },
-        ],
-      }),
-    );
-    expect(s.classify).toHaveBeenCalledTimes(2);
-    expect(s.state.lastDecision).toMatchObject({
-      activity: 'docs',
-      routeCell: 'docs',
-      targetModelId: 'docs',
-    });
-  });
-
-  it('does not use a review verification phase after new implementation text arrives', async () => {
-    const s = activitySetup();
-    required(s.state.currentConfig.advisor).reviewEveryRequests = 1;
-    s.delegate.mockImplementation((target) =>
-      events({
-        type: 'done',
-        reason: 'toolUse',
-        message: message({
-          model: target.id,
-          stopReason: 'toolUse',
-          content: [
-            { type: 'text', text: 'More implementation edits are needed.' },
-            { type: 'toolCall', name: 'read', id: 'step', arguments: {} },
-          ],
-        }),
-      }),
-    );
-    const messages: Context['messages'] = [
-      { role: 'user', content: 'Implement the feature', timestamp: 1 },
-    ];
-    const append = (
-      assistant: Awaited<ReturnType<typeof consume>>['result'],
-    ) => {
-      messages.push(assistant, {
-        role: 'toolResult',
-        toolCallId: 'step',
-        toolName: 'read',
-        content: [{ type: 'text', text: 'New implementation evidence' }],
-        isError: false,
-        timestamp: messages.length + 1,
-      });
-    };
-    append((await consume(s.stream({ messages: [...messages] }))).result);
-    s.answer.phase = 'verify';
-    append((await consume(s.stream({ messages: [...messages] }))).result);
-    await vi.waitFor(() =>
-      expect(
-        s.actions.recordDebugDecision.mock.calls.some(
-          ([decision]) =>
-            decision.reviewOnly && decision.classification?.phase === 'verify',
-        ),
-      ).toBe(true),
-    );
-    await consume(s.stream({ messages: [...messages] }));
-    expect(s.state.lastDecision).toMatchObject({
-      routeCell: 'code',
-      activity: 'code',
-      classification: { activity: 'code', phaseOutcome: 'uncertain' },
-    });
-    expect(s.state.lastDecision?.classification?.phase).toBeUndefined();
-  });
-
-  it('reviews current-loop context in the background and applies fresh activity advice on the next request', async () => {
-    const s = activitySetup();
-    s.state.currentConfig.advisor = {
-      ...required(s.state.currentConfig.advisor),
-      context: {
-        previousTurns: 2,
-        maxHistoryTokens: 500,
-        maxToolTokens: 250,
-        currentLoopMessages: 8,
-        toolResults: 'last',
-      },
-    };
-    s.delegate.mockImplementation((target) =>
-      events({
-        type: 'done',
-        reason: 'toolUse',
-        message: message({
-          model: target.id,
-          stopReason: 'toolUse',
-          content: [
-            {
-              type: 'text',
-              text: 'The retry implementation is complete; checking results.',
-            },
-            {
-              type: 'toolCall',
-              name: 'read',
-              id: `adaptive-${target.id}`,
-              arguments: {},
-            },
-          ],
-        }),
-      }),
-    );
-    const firstUser = {
-      role: 'user' as const,
-      content: 'Implement retry handling and document it.',
-      timestamp: 10,
-    };
-    const messages: Context['messages'] = [firstUser];
-    const first = await consume(s.stream({ messages }));
-    messages.push(first.result);
-    const firstCall = first.result.content.find(
-      (part) => part.type === 'toolCall',
-    );
-    if (firstCall?.type !== 'toolCall')
-      throw new Error('Expected fixture tool call');
-    messages.push({
-      role: 'toolResult',
-      toolCallId: firstCall.id,
-      toolName: firstCall.name,
-      content: [{ type: 'text', text: 'Retry regression passes.' }],
-      isError: false,
-      timestamp: 11,
-    });
-    s.answer.activity = 'docs';
-    const immediate = s.classify.getMockImplementation();
-    if (!immediate) throw new Error('Missing fixture classifier');
-    let releaseReview: (() => void) | undefined;
-    const reviewGate = new Promise<void>((resolve) => {
-      releaseReview = resolve;
-    });
-    s.classify.mockImplementationOnce(async (...args) => {
-      const result = immediate(...args);
-      await reviewGate;
-      return result;
-    });
-    let last: Awaited<ReturnType<typeof consume>> | undefined;
-    for (let continuation = 0; continuation < 3; continuation += 1) {
-      last = await consume(s.stream({ messages }));
-      messages.push(last.result);
-      const call = last.result.content.find((part) => part.type === 'toolCall');
-      if (call?.type !== 'toolCall')
-        throw new Error('Expected fixture tool call');
-      messages.push({
-        role: 'toolResult',
-        toolCallId: call.id,
-        toolName: call.name,
-        content: [
-          { type: 'text', text: `Recent tool evidence ${continuation}` },
-        ],
-        isError: false,
-        timestamp: 12 + continuation,
-      });
-    }
-    expect(s.classify).toHaveBeenCalledTimes(2);
-    expect(last?.result.stopReason).toBe('toolUse');
-    const reviewPayload = required(s.classify.mock.calls[1]?.[1]);
-    expect(JSON.stringify(reviewPayload.state)).not.toContain(
-      'Retry regression passes.',
-    );
-    expect(JSON.stringify(reviewPayload.state)).toContain(
-      'Recent tool evidence 1',
-    );
-    releaseReview?.();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const applied = await consume(s.stream({ messages }));
-    expect(applied.result.model).toBe('docs');
-    expect(s.state.lastDecision).toMatchObject({
-      activity: 'docs',
-      routeCell: 'docs',
-      targetModelId: 'docs',
-    });
-    expect(s.classify).toHaveBeenCalledTimes(2);
-  });
-
-  it('holds a pricey activity switch but keeps the actual route and visible proposal distinct', async () => {
-    const s = activitySetup();
-    s.state.currentConfig.switchPolicy = {
-      horizonRequests: 1,
-      costSensitivity: 1,
-      strongAdviceConfidence: 0.9,
-      escalationHoldTurns: 2,
-    };
-    s.state.currentConfig.advisor = {
-      ...required(s.state.currentConfig.advisor),
-      context: {
-        previousTurns: 2,
-        maxHistoryTokens: 500,
-        maxToolTokens: 250,
-        currentLoopMessages: 8,
-        toolResults: 'last',
-      },
-    };
-    s.models[s.models.findIndex((entry) => entry.id === 'code')] = model(
-      'code',
-      {
-        cost: { input: 0.1, output: 0.1, cacheRead: 0.01, cacheWrite: 0.1 },
-      },
-    );
-    s.models[s.models.findIndex((entry) => entry.id === 'docs')] = model(
-      'docs',
-      {
-        cost: { input: 100, output: 100, cacheRead: 10, cacheWrite: 125 },
-      },
-    );
-    s.delegate.mockImplementation((target) =>
-      events({
-        type: 'done',
-        reason: 'toolUse',
-        message: message({
-          model: target.id,
-          stopReason: 'toolUse',
-          content: [
-            {
-              type: 'text',
-              text: 'Implementation is passing; documentation remains.',
-            },
-            {
-              type: 'toolCall',
-              name: 'read',
-              id: `cost-${target.id}`,
-              arguments: {},
-            },
-          ],
-        }),
-      }),
-    );
-    const messages: Context['messages'] = [
-      {
-        role: 'user',
-        content: 'Implement retry handling and update the guide.',
-        timestamp: 30,
-      },
-    ];
-    const advance = async () => {
-      const response = await consume(s.stream({ messages }));
-      messages.push(response.result);
-      const call = response.result.content.find(
-        (part) => part.type === 'toolCall',
-      );
-      if (call?.type !== 'toolCall')
-        throw new Error('Expected fixture tool call');
-      messages.push({
-        role: 'toolResult',
-        toolCallId: call.id,
-        toolName: call.name,
-        content: [{ type: 'text', text: 'Current implementation evidence.' }],
-        isError: false,
-        timestamp: 31 + messages.length,
-      });
-      return response.result;
-    };
-    await advance();
-    s.answer.activity = 'docs';
-    s.answer.confidence = 0.8;
-    await advance();
-    await advance();
-    const reviewRequest = await advance();
-    expect(reviewRequest.stopReason).toBe('toolUse');
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const applied = await advance();
-    expect(applied.model).toBe('code');
-    expect(s.state.lastDecision).toMatchObject({
-      activity: 'code',
-      targetModelId: 'code',
-      proposedRoute: { activity: 'docs', model: 'test/docs' },
-      switchCost: { reason: 'cost-held', confidenceOverride: false },
-    });
-    expect((await advance()).model).toBe('code');
-    expect(s.state.lastDecision?.proposedRoute).toBeUndefined();
-    expect(s.state.lastDecision?.switchCost).toBeUndefined();
-  });
-
-  it('does not let activity abstention override a cost-sensitive hold in an activity-only review', async () => {
-    const s = activitySetup();
-    delete s.profile.high;
-    delete s.profile.low;
-    s.profile.activities = {
-      docs: { medium: { model: 'test/docs', thinking: 'off', fallbacks: [] } },
-    };
-    s.state.currentConfig.advisor = {
-      ...required(s.state.currentConfig.advisor),
-      reviewEveryRequests: 2,
-    };
-    s.state.currentConfig.switchPolicy = {
-      horizonRequests: 1,
-      costSensitivity: 1,
-      strongAdviceConfidence: 0.9,
-      escalationHoldTurns: 2,
-    };
-    s.models[s.models.findIndex((m) => m.id === 'docs')] = model('docs', {
-      cost: { input: 0.1, output: 0.1, cacheRead: 0.01, cacheWrite: 0.1 },
-    });
-    s.models[s.models.findIndex((m) => m.id === 'primary')] = model('primary', {
-      cost: { input: 100, output: 100, cacheRead: 10, cacheWrite: 125 },
-    });
-    const messages: Context['messages'] = [
-      {
-        role: 'user',
-        content: 'Complete the current task.',
-        timestamp: 60,
-      },
-    ];
-    s.delegate.mockImplementation((target) =>
-      events({
-        type: 'done',
-        reason: 'toolUse',
-        message: message({
-          model: target.id,
-          stopReason: 'toolUse',
-          content: [
-            {
-              type: 'toolCall',
-              name: 'read',
-              id: `abstention-${messages.length}`,
-              arguments: {},
-            },
-          ],
-        }),
-      }),
-    );
-    const advance = async () => {
-      const response = await consume(s.stream({ messages }));
-      messages.push(response.result);
-      const call = response.result.content.find((p) => p.type === 'toolCall');
-      if (call?.type !== 'toolCall')
-        throw new Error('Expected fixture tool call');
-      messages.push({
-        role: 'toolResult',
-        toolCallId: call.id,
-        toolName: call.name,
-        content: [{ type: 'text', text: 'Current evidence' }],
-        isError: false,
-        timestamp: messages.length + 60,
-      });
-      return response.result;
-    };
-    s.answer.activity = 'docs';
-    await advance();
-    s.answer.activity = 'uncertain';
-    s.answer.confidence = 0.99;
-    await advance();
-    await vi.waitFor(() =>
-      expect(
-        s.actions.recordDebugDecision.mock.calls.some(
-          ([decision]) =>
-            decision.reviewOnly &&
-            decision.classification?.activityOutcome === 'uncertain',
-        ),
-      ).toBe(true),
-    );
-    expect((await advance()).model).toBe('docs');
-    expect(s.state.lastDecision).toMatchObject({
-      targetModelId: 'docs',
-      switchCost: { reason: 'cost-held', confidenceOverride: false },
-    });
-  });
-
-  it('can disable in-loop classifier reviews independently of initial-turn advice', async () => {
-    const s = activitySetup();
-    s.state.currentConfig.advisor = {
-      ...required(s.state.currentConfig.advisor),
-      reviewEveryRequests: 0,
-    };
-    s.delegate.mockImplementation((target) =>
-      events({
-        type: 'done',
-        reason: 'toolUse',
-        message: message({
-          model: target.id,
-          stopReason: 'toolUse',
-          content: [
-            {
-              type: 'toolCall',
-              name: 'read',
-              id: `disabled-${target.id}`,
-              arguments: {},
-            },
-          ],
-        }),
-      }),
-    );
-    const user = {
-      role: 'user' as const,
-      content: 'Implement the change.',
-      timestamp: 50,
-    };
-    const messages: Context['messages'] = [user];
-    const advance = async () => {
-      const response = await consume(s.stream({ messages }));
-      messages.push(response.result);
-      const call = response.result.content.find(
-        (part) => part.type === 'toolCall',
-      );
-      if (call?.type !== 'toolCall')
-        throw new Error('Expected fixture tool call');
-      messages.push({
-        role: 'toolResult',
-        toolCallId: call.id,
-        toolName: call.name,
-        content: [{ type: 'text', text: 'done' }],
-        isError: false,
-        timestamp: 51 + messages.length,
-      });
-    };
-    await advance();
-    await advance();
-    await advance();
-    await advance();
-    await advance();
-    expect(s.classify).toHaveBeenCalledOnce();
-  });
-
-  it('discards a background review that missed its next-request window', async () => {
-    const s = activitySetup();
-    s.delegate.mockImplementation((target) =>
-      events({
-        type: 'done',
-        reason: 'toolUse',
-        message: message({
-          model: target.id,
-          stopReason: 'toolUse',
-          content: [
-            { type: 'text', text: 'Work is progressing.' },
-            {
-              type: 'toolCall',
-              name: 'read',
-              id: `fresh-${target.id}`,
-              arguments: {},
-            },
-          ],
-        }),
-      }),
-    );
-    const messages: Context['messages'] = [
-      {
-        role: 'user',
-        content: 'Implement retry handling and update docs.',
-        timestamp: 40,
-      },
-    ];
-    const advance = async () => {
-      const response = await consume(s.stream({ messages }));
-      messages.push(response.result);
-      const call = response.result.content.find(
-        (part) => part.type === 'toolCall',
-      );
-      if (call?.type !== 'toolCall')
-        throw new Error('Expected fixture tool call');
-      messages.push({
-        role: 'toolResult',
-        toolCallId: call.id,
-        toolName: call.name,
-        content: [{ type: 'text', text: 'tool evidence' }],
-        isError: false,
-        timestamp: 41 + messages.length,
-      });
-      return response.result;
-    };
-    await advance();
-    s.answer.activity = 'docs';
-    const immediate = s.classify.getMockImplementation();
-    if (!immediate) throw new Error('Missing fixture classifier');
-    let releaseReview: (() => void) | undefined;
-    const reviewGate = new Promise<void>((resolve) => {
-      releaseReview = resolve;
-    });
-    s.classify.mockImplementationOnce(async (...args) => {
-      const result = immediate(...args);
-      await reviewGate;
-      return result;
-    });
-    await advance();
-    await advance();
-    await advance();
-    expect(s.classify).toHaveBeenCalledTimes(2);
-    expect((await advance()).model).toBe('code');
-    expect((await advance()).model).toBe('code');
-    releaseReview?.();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect((await advance()).model).toBe('code');
-    await advance();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect((await advance()).model).toBe('docs');
-    expect(s.classify).toHaveBeenCalledTimes(3);
-    const reviewRecords = s.actions.recordDebugDecision.mock.calls
-      .map(([decision]) => decision)
-      .filter((decision) => decision.reviewOnly);
-    expect(reviewRecords).toHaveLength(2);
-    expect(
-      reviewRecords.every((decision) => decision.generation === undefined),
-    ).toBe(true);
-    expect(
-      reviewRecords.every(
-        (decision) => decision.classification?.requestId !== undefined,
-      ),
-    ).toBe(true);
-  });
-
-  it('raises and lowers tier within one tool loop from fresh classifier reviews', async () => {
-    const s = activitySetup();
-    s.state.currentConfig.advisor = {
-      ...required(s.state.currentConfig.advisor),
-      reviewEveryRequests: 2,
-    };
-    s.delegate.mockImplementation((target) =>
-      events({
-        type: 'done',
-        reason: 'toolUse',
-        message: message({
-          model: target.id,
-          stopReason: 'toolUse',
-          content: [
-            { type: 'text', text: 'Current work is progressing.' },
-            {
-              type: 'toolCall',
-              name: 'read',
-              id: `phase-${target.id}`,
-              arguments: {},
-            },
-          ],
-        }),
-      }),
-    );
-    const messages: Context['messages'] = [
-      {
-        role: 'user',
-        content: 'Implement and verify the retry behavior.',
-        timestamp: 20,
-      },
-    ];
-    const advance = async () => {
-      const response = await consume(s.stream({ messages }));
-      messages.push(response.result);
-      const call = response.result.content.find(
-        (part) => part.type === 'toolCall',
-      );
-      if (call?.type !== 'toolCall')
-        throw new Error('Expected fixture tool call');
-      messages.push({
-        role: 'toolResult',
-        toolCallId: call.id,
-        toolName: call.name,
-        content: [{ type: 'text', text: 'step result' }],
-        isError: false,
-        timestamp: 21 + messages.length,
-      });
-      return response.result;
-    };
-    await advance();
-    s.answer.tier = 'high';
-    await advance();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const up = await advance();
-    expect(up.model).toBe('primary');
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      targetModelId: 'primary',
-    });
-    s.answer.tier = 'low';
-    await advance();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const down = await advance();
-    expect(down.model).toBe('small');
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'low',
-      targetModelId: 'small',
-    });
-    expect(s.classify).toHaveBeenCalledTimes(3);
-  });
-
-  it.each(['off', 'identical', 'ineligible', 'overridden-effort'] as const)(
-    'preserves the old route-only question for %s activity behavior',
-    async (mode) => {
-      const s = activitySetup();
-      if (mode === 'off') s.state.currentConfig.activityRouting = 'off';
-      else if (mode === 'identical')
-        s.profile.activities = { code: { medium: required(s.profile.medium) } };
-      else if (mode === 'ineligible')
-        s.profile.activities = { code: { medium: { model: 'missing/model' } } };
-      else {
-        s.profile.activities = {
-          code: {
-            medium: {
-              ...s.profile.medium,
-              model: 'test/primary',
-              thinking: 'high',
-            },
-          },
-        };
-        s.state.thinkingByProfile.balanced = { medium: 'off' };
-      }
-      await consume(s.stream());
-      expect(
-        Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
-      ).toEqual(['route']);
-      expect(s.state.lastDecision?.targetModelId).toBe('primary');
-      expect(s.state.lastDecision?.activity).toBeUndefined();
-    },
-  );
-
-  it.each(['invalid', 'uncertain', 'low-confidence'] as const)(
-    'keeps valid tier advice but uses generic for %s activity',
-    async (mode) => {
-      const s = activitySetup();
-      s.answer.tier = 'high';
-      if (mode === 'invalid') s.answer.invalidActivity = true;
-      if (mode === 'uncertain') s.answer.activity = 'uncertain';
-      if (mode === 'low-confidence') s.answer.confidence = 0.1;
-      await consume(s.stream());
-      expect(s.state.lastDecision).toMatchObject({
-        tier: 'high',
-        targetModelId: 'primary',
-        advisor: 'classifier',
-      });
-      expect(s.state.lastDecision?.activity).toBeUndefined();
-      expect(s.state.lastDecision?.routeCell).toBeUndefined();
-    },
-  );
-
-  it('uses a generic-first baseline without consent and never treats availability provenance as classification', async () => {
-    const s = activitySetup();
-    s.profile.advisor = { models: [] };
-    await consume(s.stream());
-    expect(s.classify).not.toHaveBeenCalled();
-    expect(s.state.lastDecision?.targetModelId).toBe('primary');
-    s.models.splice(
-      s.models.findIndex((m) => m.id === 'primary'),
-      1,
-    );
-    s.models.splice(
-      s.models.findIndex((m) => m.id === 'fallback'),
-      1,
-    );
-    s.profile.low = undefined;
-    await consume(
-      s.stream({
-        messages: [{ role: 'user', content: 'another', timestamp: 2 }],
-      }),
-    );
-    expect(s.state.lastDecision).toMatchObject({
-      targetModelId: 'code',
-      routeCell: 'code',
-      reasonCode: 'baseline',
-    });
-    expect(s.state.lastDecision?.activity).toBeUndefined();
-  });
-
-  it('offers activity-only tiers but invalid activity falls back to the generic baseline', async () => {
-    const s = activitySetup();
-    s.profile.medium = { model: 'missing/generic' };
-    await consume(s.stream());
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      routeCell: 'code',
-      targetModelId: 'code',
-    });
-    s.answer.invalidActivity = true;
-    await consume(
-      s.stream({
-        messages: [{ role: 'user', content: 'next task', timestamp: 2 }],
-      }),
-    );
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'high',
-      targetModelId: 'primary',
-      advisor: 'classifier-fallback',
-    });
-    expect(s.state.lastDecision?.activity).toBeUndefined();
-  });
-
-  it('above budget prefers a lower activity-only plan over a high generic and bypasses advice', async () => {
-    const s = activitySetup();
-    s.profile.medium = { model: 'missing/generic' };
-    s.profile.low = undefined;
-    s.state.currentConfig.maxSessionBudget = 1;
-    s.state.accumulatedCost = 1;
-    await consume(s.stream());
-    expect(s.classify).not.toHaveBeenCalled();
-    expect(s.state.lastDecision).toMatchObject({
-      tier: 'medium',
-      routeCell: 'code',
-      targetModelId: 'code',
-      reasonCode: 'budget',
-      isBudgetForced: true,
-    });
-    expect(s.state.lastDecision?.activity).toBeUndefined();
-  });
-
-  it('pins generic only and rejects an ineligible generic pin despite eligible activity plans', async () => {
-    const s = activitySetup();
-    s.state.pinnedTierByProfile.balanced = 'medium';
-    await consume(s.stream());
-    expect(s.state.lastDecision).toMatchObject({
-      targetModelId: 'primary',
-      reasonCode: 'pinned',
-    });
-    s.profile.medium = { model: 'missing/generic' };
-    expect((await consume(s.stream())).result.stopReason).toBe('error');
-    expect(s.classify).not.toHaveBeenCalled();
-  });
-
-  it('asks activity only for one tier with distinct cells, but one effective plan bypasses advice', async () => {
-    const s = activitySetup();
-    s.profile.high = undefined;
-    s.profile.low = undefined;
-    await consume(s.stream());
-    expect(
-      Object.keys(required(s.classify.mock.calls[0]?.[1]).questions),
-    ).toEqual(['continuity', 'activity', 'phase']);
-    expect(s.state.lastDecision).toMatchObject({
-      activity: 'code',
-      targetModelId: 'code',
-    });
-    s.profile.activities = undefined;
-    await consume(
-      s.stream({ messages: [{ role: 'user', content: 'next', timestamp: 2 }] }),
-    );
-    expect(s.classify).toHaveBeenCalledOnce();
-    expect(s.state.lastDecision?.bypassReason).toBe('single-candidate');
-  });
-
-  it('whole classifier failure goes directly to baseline and off never uses activity-only cells', async () => {
-    const s = activitySetup();
-    s.answer.fail = true;
-    await consume(s.stream());
-    expect(s.state.lastDecision).toMatchObject({
-      advisor: 'classifier-fallback',
-      targetModelId: 'primary',
-    });
-    expect(s.classify).toHaveBeenCalledOnce();
-    s.state.currentConfig.activityRouting = 'off';
-    s.profile.high = undefined;
-    s.profile.low = undefined;
-    s.profile.medium = { model: 'missing/generic' };
-    expect(
-      (
-        await consume(
-          s.stream({
-            messages: [{ role: 'user', content: 'next', timestamp: 2 }],
-          }),
-        )
-      ).result.stopReason,
-    ).toBe('error');
-    expect(s.classify).toHaveBeenCalledOnce();
-  });
-
-  it('a selected plan is immutable and live revalidation cannot add a newly configured fallback', async () => {
-    const s = activitySetup();
-    s.delegate.mockImplementation((target) => {
-      if (target.id === 'code') {
-        required(s.profile.activities?.code?.medium).fallbacks = ['test/docs'];
-        s.models.splice(
-          s.models.findIndex((m) => m.id === 'code-backup'),
-          1,
-        );
-        return failure();
-      }
-      return done();
-    });
-    expect((await consume(s.stream())).result.stopReason).toBe('error');
-    expect(s.delegate.mock.calls.map(([target]) => target.id)).toEqual([
-      'code',
-    ]);
-  });
-
-  it('caller cancellation during activity advice never starts generation', async () => {
-    const s = activitySetup();
-    const controller = new AbortController();
-    s.classify.mockImplementation(
-      async (_model, _context, options) =>
-        new Promise((resolve) => {
-          options?.signal?.addEventListener(
-            'abort',
-            () =>
-              resolve({
-                api: 'test',
-                provider: 'typesafe',
-                model: 'jev-latest',
-                stopReason: 'aborted',
-                answers: {},
-                timestamp: 1,
-              }),
-            { once: true },
-          );
-        }),
-    );
-    const completion = consume(s.stream(undefined, controller.signal));
-    await vi.waitFor(() => expect(s.classify).toHaveBeenCalledOnce());
-    controller.abort();
-    expect((await completion).result.stopReason).toBe('aborted');
-    expect(s.delegate).not.toHaveBeenCalled();
-  });
-  it('one physical attempt plan bypasses even when only specialization cells are available', async () => {
-    const s = activitySetup();
-    s.profile.high = undefined;
-    s.profile.medium = undefined;
-    s.profile.low = undefined;
-    s.profile.activities = {
-      docs: { medium: { model: 'test/code', thinking: 'off' } },
-      code: { medium: { model: 'test/code', thinking: 'off' } },
-    };
-    await consume(s.stream());
-    expect(s.classify).not.toHaveBeenCalled();
-    expect(s.state.lastDecision).toMatchObject({
-      routeCell: 'code',
-      targetModelId: 'code',
-      bypassReason: 'single-candidate',
-    });
-    expect(s.state.lastDecision?.activity).toBeUndefined();
-  });
-  it('does not retry a specialization after visible content or caller cancellation', async () => {
-    const visible = activitySetup();
-    visible.delegate.mockImplementation(() => {
-      const partial = message({ model: 'code' });
-      return events(
-        { type: 'text_delta', contentIndex: 0, delta: 'visible', partial },
-        {
-          type: 'error',
-          reason: 'error',
-          error: { ...partial, stopReason: 'error' },
-        },
-      );
-    });
-    expect((await consume(visible.stream())).result.stopReason).toBe('error');
-    expect(visible.delegate).toHaveBeenCalledOnce();
-    const cancelled = activitySetup();
-    const controller = new AbortController();
-    cancelled.delegate.mockImplementation(() => {
-      controller.abort();
-      return done();
-    });
-    expect(
-      (await consume(cancelled.stream(undefined, controller.signal))).result
-        .stopReason,
-    ).toBe('aborted');
-    expect(cancelled.delegate).toHaveBeenCalledOnce();
-    expect(cancelled.state.accumulatedCost).toBe(0.01);
-  });
-});
-
 describe('repeated failure escalation', () => {
   const turn = (
     text: string,
@@ -3084,7 +1226,7 @@ describe('routing mode changes while advice is in flight', () => {
             {
               type: 'toolCall',
               name: 'read',
-              id: `call-${target.id}-${Math.random()}`,
+              id: `call-${target.id}-${s.delegate.mock.calls.length}`,
               arguments: {},
             },
           ],
@@ -3112,7 +1254,7 @@ describe('routing mode changes while advice is in flight', () => {
     expect(await advance()).toBe('fallback');
     answer.tier = 'high';
     expect(await advance()).toBe('fallback');
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await s.waitForReviews(1);
     expect(classify).toHaveBeenCalledTimes(2);
     s.state.modeOverride = 'cost';
     // a consumed stale review would run primary (balanced) or fallback (cost high)

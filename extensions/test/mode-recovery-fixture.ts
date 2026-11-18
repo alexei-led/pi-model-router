@@ -28,7 +28,7 @@ export const terraRecoveryFixtureConfig = {
   profiles: {
     auto: {
       ...recoveryFixtureConfig.profiles.auto,
-      high: { model: 'recovery-local/gpt-6.1-sol', thinking: 'high' },
+      high: { model: 'recovery-local/gpt-6.2-sol', thinking: 'high' },
       medium: { model: 'recovery-local/gpt-6.1-terra', thinking: 'medium' },
       low: { model: 'recovery-local/gpt-6-luna', thinking: 'high' },
     },
@@ -58,7 +58,7 @@ export default (pi: ExtensionAPI) => {
         'claude-haiku-5-5',
         'gpt-6-luna',
         'gpt-6.1-terra',
-        'gpt-6.1-sol',
+        'gpt-6.2-sol',
       ].map((id) => ({
         id,
         name: id,
@@ -78,7 +78,7 @@ export default (pi: ExtensionAPI) => {
               ? 0.1
               : id === 'gpt-6.1-terra'
                 ? 1
-                : id === 'gpt-6.1-sol'
+                : id === 'gpt-6.2-sol'
                   ? 2
                   : id.includes('haiku')
                     ? 0.1

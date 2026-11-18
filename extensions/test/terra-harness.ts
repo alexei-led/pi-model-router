@@ -18,7 +18,7 @@ import type {
   RouterTier,
 } from '../types';
 import { createRouterUIRuntime } from '../ui/runtime';
-import { events, message, model, required } from './fixtures';
+import { consume, events, message, model, required } from './fixtures';
 
 type State = Parameters<typeof registerRouterProvider>[1];
 type MutableState = { -readonly [K in keyof State]: State[K] };
@@ -173,10 +173,7 @@ export const terraHarness = (
       ),
       { sessionId: 'terra-test' },
     );
-    for await (const _event of stream) {
-      /* drain */
-    }
-    return stream.result();
+    return (await consume(stream)).result;
   };
   return {
     run,

@@ -1,6 +1,6 @@
 import type { Api, Model } from '@earendil-works/pi-ai';
 
-/** Bundled Pi 1.5.2 catalog, read 2026-11-15. Estimates, not gateway tariffs or bills. */
+/** Pi catalog and models-store, read 2026-11-18. Estimates, not gateway tariffs or bills. */
 export const runtimeCosts: Readonly<Record<string, Model<Api>['cost']>> = {
   'claude-haiku-5-5': {
     input: 0.1,
@@ -54,7 +54,7 @@ export const runtimeCosts: Readonly<Record<string, Model<Api>['cost']>> = {
       },
     ],
   },
-  'gpt-6.1-sol': {
+  'gpt-6.2-sol': {
     input: 2,
     output: 10,
     cacheRead: 0.1,

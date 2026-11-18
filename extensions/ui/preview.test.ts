@@ -24,7 +24,7 @@ const find = (provider: string, id: string) =>
     },
   });
 const pairs = {
-  openai: ['gpt-6-luna', 'gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'],
+  openai: ['gpt-6-luna', 'gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.2-sol'],
   anthropic: [
     'claude-haiku-5-5',
     'claude-haiku-5-5',

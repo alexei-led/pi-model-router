@@ -1129,7 +1129,7 @@ describe('built-in route tuning', () => {
     state.currentConfig = normalizeConfig({
       profiles: {
         auto: {
-          medium: { model: 'openai/gpt-6.1-sol', thinking: 'medium' },
+          medium: { model: 'openai/gpt-6.2-sol', thinking: 'medium' },
         },
       },
     }).config;
@@ -1305,8 +1305,8 @@ describe('mode-adjusted route previews', () => {
         auto: {
           micro: { model: 'scope/gpt-6-luna', thinking: 'low' },
           low: { model: 'scope/gpt-6-luna', thinking: 'high' },
-          medium: { model: 'scope/gpt-6.1-sol', thinking: 'medium' },
-          high: { model: 'scope/gpt-6.1-sol', thinking: 'high' },
+          medium: { model: 'scope/gpt-6.2-sol', thinking: 'medium' },
+          high: { model: 'scope/gpt-6.2-sol', thinking: 'high' },
         },
       },
     }).config;
@@ -1325,9 +1325,9 @@ describe('mode-adjusted route previews', () => {
     return f;
   };
   it.each([
-    ['cost', 'scope/gpt-6.1-sol', 'medium'],
-    ['balanced', 'scope/gpt-6.1-sol', 'medium'],
-    ['quality', 'scope/gpt-6.1-sol', 'high'],
+    ['cost', 'scope/gpt-6.2-sol', 'medium'],
+    ['balanced', 'scope/gpt-6.2-sol', 'medium'],
+    ['quality', 'scope/gpt-6.2-sol', 'high'],
   ] as const)(
     'previews %s without changing configured or actual routes',
     (mode, target, effort) => {
@@ -1340,7 +1340,7 @@ describe('mode-adjusted route previews', () => {
         ),
       );
       expect(cell.current).toMatchObject({
-        model: 'scope/gpt-6.1-sol',
+        model: 'scope/gpt-6.2-sol',
         thinking: 'medium',
       });
       expect(cell.preferred).toMatchObject({
@@ -1365,8 +1365,8 @@ describe('mode-adjusted route previews', () => {
           (cell) => cell.activity === 'debug' && cell.tier === 'medium',
         ),
     );
-    expect(cell.preferred?.route?.model).toBe('scope/gpt-6.1-sol');
-    expect(cell.pendingPreferred?.route?.model).toBe('scope/gpt-6.1-sol');
+    expect(cell.preferred?.route?.model).toBe('scope/gpt-6.2-sol');
+    expect(cell.pendingPreferred?.route?.model).toBe('scope/gpt-6.2-sol');
   });
   it('shows pin and effort bypasses instead of pretending a mode changed the route', () => {
     const { state, runtime } = configured();
@@ -1381,7 +1381,7 @@ describe('mode-adjusted route previews', () => {
     );
     expect(cell.preferred).toMatchObject({
       bypass: 'pin',
-      route: { model: 'scope/gpt-6.1-sol', thinking: 'medium' },
+      route: { model: 'scope/gpt-6.2-sol', thinking: 'medium' },
     });
     state.pinnedTierByProfile = {};
     state.thinkingByProfile.auto = { medium: 'low' };

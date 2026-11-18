@@ -36,7 +36,7 @@ Recognition uses resolved model IDs, never profile names or provider-name patter
 
 | Preset    | Recognized primary model IDs                                                          |
 | --------- | ------------------------------------------------------------------------------------- |
-| OpenAI    | `gpt-6-luna`, `gpt-6.1-terra`, `gpt-6.1-sol`, predecessor `gpt-6-sol`                 |
+| OpenAI    | `gpt-6-luna`, `gpt-6.1-terra`, `gpt-6.2-sol`, predecessor `gpt-6-sol`                 |
 | Anthropic | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, legacy `claude-haiku-4-5` |
 
 Every configured generic primary must belong to one family and use the **same exact Pi provider ID**.
@@ -108,7 +108,7 @@ For example, this cell explicitly chooses Sol at `xhigh`:
 
 ```json
 {
-  "model": "openai-codex/gpt-6.1-sol",
+  "model": "openai-codex/gpt-6.2-sol",
   "thinking": "xhigh"
 }
 ```
@@ -237,6 +237,7 @@ The soft budget skips advice and prefers eligible medium-or-lower tiers. It is n
 
 They are **derived starting policies**, not vendor-prescribed routing tables or measured quality equivalence.
 The complete mappings, effort controls and limitations are covered in the
+[Sol 6.2 policy evidence](research/2026-11-18-sol-defaults.md),
 [Terra policy evidence](research/2026-10-27-terra-defaults.md) and the earlier
 [activity model-card evidence](research/2026-10-25-activity-presets.md).
 The [acceptance record](testing/activity-presets-acceptance.md) separates automated, synthetic and live checks.
