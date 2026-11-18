@@ -97,9 +97,9 @@ from the checkout:
 PI_TEST_BINARY="$(command -v pi)" npm run test:classifier-catalog
 ```
 
-The explicit executable avoids npm selecting this checkout's Pi 1.1 test
-dependency. The check starts an isolated Pi RPC session with only this extension
-and checks that startup succeeds.
+The explicit executable tests the installed Pi version rather than the checkout's
+development dependency. The check starts an isolated Pi RPC session with only
+this extension and checks that startup succeeds.
 
 Pi 1.3's `models.json` adds chat models, not classifier entries. Register missing
 classifier metadata through a Pi provider extension.

@@ -23,6 +23,8 @@ npm publish --dry-run --access public
 
 `npm run check` runs Biome and strict TypeScript checks. Biome enforces directional imports, a production-only cognitive-complexity limit, and template-literal style. `npm run test:coverage` runs the full Vitest suite with V8 coverage for all production extension modules. Aggregate gates require 90% statements, 80% branches, 90% functions, and 90% lines. Per-file floors and higher choice/classifier/provider/routing/state branch floors are configured in `vitest.config.ts`. `npm run check:unused` runs Knip in production mode from the published `extensions/index.ts` entrypoint. Tests and fixtures are not part of that production graph. `npm run pack:dry` lists the archive contents for review.
 
+The pinned development package manager, npm 12.2.3, requires Node.js 22.22.2+, 24.15.0+ or 26+. This does not change the package runtime minimum; CI also checks Node 22.19.0 with its bundled npm.
+
 `prepublishOnly` runs these four quality gates. The CI workflow runs the same gates on Node.js 22.19.0 and 24.15.0. The publication dry run also invokes `prepublishOnly`, so it repeats the gates. Neither dry run establishes OIDC access or creates a release.
 
 The repository's root dependency overrides protect its development and fixture graph only. They do not patch a user's separately installed Pi runtime. Audit that host separately before making runtime security claims. Revisit the Undici override when Pi accepts a patched version. See the [0.17 readiness record](testing/release-017-readiness.md) for the audited versions and remaining host limitation.
