@@ -77,10 +77,10 @@
     "@earendil-works/pi-ai": "^1.5.2",
     "@earendil-works/pi-coding-agent": "^1.5.2",
     "@earendil-works/pi-tui": "^1.5.2",
-    "@vitest/coverage-v8": "~5.1.0",
+    "@vitest/coverage-v8": "~5.1.1",
     "knip": "~6.45.1",
     "typescript": "^7.0.2",
-    "vitest": "~5.1.0"
+    "vitest": "~5.1.1"
   },
   "overrides": {
     "undici": "8.12.4"
