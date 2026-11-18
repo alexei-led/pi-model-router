@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.22.2] - 2026-11-18
+
+Stop a model switch from setting a router effort override.
+
+### Fixed
+
+- Switching from a router profile to another model, or to another router profile, no longer saves the new model's thinking level as an all-tier effort override for the previous profile. Pi emits that thinking change before `model_select`, so switching to a model whose thinking level was `max` left every tier of the router profile at `max` and bypassed mode preferences after you switched back.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. A session that already saved an unwanted override keeps it until you run `/router thinking auto`. No configuration migration is required.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.22.1...v0.22.2)
+
 ## [0.22.1] - 2026-11-18
 
 Preserve routing priority when a running tool loop is reviewed or changes mode.
