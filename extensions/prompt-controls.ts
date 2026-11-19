@@ -1,9 +1,11 @@
 import type { PromptKeyword, RoutePlan, RouterTier } from './types';
 import { PROMPT_KEYWORDS, ROUTER_TIERS } from './types';
 
-// Match claude-model-router v1.28.0 exactly: underscore and hyphen are not delimiters.
+// Word continuations, including non-ASCII letters and combining marks, are not delimiters.
 export const promptKeyword = (text: string): PromptKeyword | undefined => {
-  const word = /^\s*([a-z]+)(?![\w-])/i.exec(text)?.[1]?.toLowerCase();
+  const word = /^\s*([a-z]+)(?![\p{L}\p{M}\p{N}\p{Pc}-])/iu
+    .exec(text)?.[1]
+    ?.toLowerCase();
   return PROMPT_KEYWORDS.find((keyword) => keyword === word);
 };
 
