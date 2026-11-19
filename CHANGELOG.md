@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.25.0] - 2026-11-19
+
+Add six explicit first-word controls for one turn’s model tier or reasoning effort.
+
+### Changes
+
+- `morethink` and `lessthink` step one supported effort level. `highthink` and `lowthink` step one eligible tier. `maxthink` and `nothink` pick the highest and lowest eligible tier. See [prompt controls](docs/user-guide.md#adjust-one-turn-with-a-prompt-keyword).
+- Controls keep the selected activity and active routing mode, apply through validated tool continuations, and do not carry to the next user turn. Pins, soft budgets, session effort overrides and continuation safeguards still apply. Configured fallbacks and quota holds are unchanged.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. No configuration migration is required.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.24.0...v0.25.0)
+
 ## [0.24.0] - 2026-11-19
 
 Configured fallback chains skip models that are cooling down or have exhausted a known quota.

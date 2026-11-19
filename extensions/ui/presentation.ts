@@ -235,7 +235,27 @@ export const shortReason = (snapshot: RouterUISnapshot): string => {
   return adviceFault(advice.outcome) ?? moveGlyph(move);
 };
 
+const PROMPT_CONTROL_LABELS = {
+  applied: 'one-turn control',
+  'no-eligible-tier': 'no eligible tier in that direction',
+  'no-supported-effort': 'no supported effort in that direction',
+  'effort-override': 'session effort override wins',
+  pinned: 'pin wins',
+  budget: 'soft budget wins',
+  safeguard: 'route safeguard wins',
+} as const;
+
 export const routeReason = (snapshot: RouterUISnapshot): string => {
+  const reason = ordinaryRouteReason(snapshot);
+  const control = snapshot.promptControl;
+  return control &&
+    snapshot.lifecycle !== 'off' &&
+    snapshot.lifecycle !== 'choosing'
+    ? `${reason} · ${control.keyword}: ${PROMPT_CONTROL_LABELS[control.outcome]}`
+    : reason;
+};
+
+const ordinaryRouteReason = (snapshot: RouterUISnapshot): string => {
   if (snapshot.lifecycle === 'off') return 'Router off';
   if (snapshot.lifecycle === 'choosing') return 'Choosing route';
   if (snapshot.lifecycle === 'cancelled') return 'Cancelled';

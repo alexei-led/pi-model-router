@@ -225,14 +225,24 @@ export interface RouteCandidate extends RoutePair {
   id: string;
 }
 
+export interface RouteAttempt extends RoutePair {
+  /** The exact declaration that admitted this attempt, including a fallback alias. */
+  readonly declaredLevels?: readonly ThinkingLevel[];
+}
+
 /** A local matrix cell and its ordered, prevalidated physical attempts. Runtime only. */
 export interface RoutePlan {
   readonly id: string;
   readonly tier: RouterTier;
   readonly cell: RouterActivity | undefined;
   readonly config: Readonly<RoutedTierConfig>;
-  readonly attempts: readonly [Readonly<RoutePair>, ...Readonly<RoutePair>[]];
+  readonly attempts: readonly [
+    Readonly<RouteAttempt>,
+    ...Readonly<RouteAttempt>[],
+  ];
   readonly mode?: ModeProvenance | undefined;
+  /** Matrix plan from which a request-local effort adjustment was made. */
+  readonly sourcePlanId?: string;
 }
 export interface ActivityCandidate {
   activity: RouterActivity;
@@ -442,7 +452,33 @@ export interface SwitchCostDiagnostic {
   confidenceOverride: boolean;
 }
 
+export const PROMPT_KEYWORDS = [
+  'morethink',
+  'lessthink',
+  'highthink',
+  'lowthink',
+  'maxthink',
+  'nothink',
+] as const;
+export type PromptKeyword = (typeof PROMPT_KEYWORDS)[number];
+
+export const PROMPT_CONTROL_OUTCOMES = [
+  'applied',
+  'no-eligible-tier',
+  'no-supported-effort',
+  'effort-override',
+  'pinned',
+  'budget',
+  'safeguard',
+] as const;
+export interface PromptControl {
+  keyword: PromptKeyword;
+  outcome: (typeof PROMPT_CONTROL_OUTCOMES)[number];
+}
+
 export interface RoutingDecision {
+  /** Allowlisted diagnostic; saved decisions never authorize a prompt control. */
+  promptControl?: PromptControl | undefined;
   /** Classifier terminal observation only; never an observed generation. */
   reviewOnly?: boolean | undefined;
   adviceSource?: AdviceSource | undefined;
@@ -737,6 +773,7 @@ export type RouterModeBypass = 'pin' | readonly RouterTier[];
 export interface RouterUISnapshot {
   profile: string;
   lifecycle: RouterUILifecycle;
+  promptControl?: PromptControl | undefined;
   /** Recorded catalog costs only, not a complete billing ledger. */
   accumulatedCost?: number | undefined;
   classifiers: readonly { model: string; name: string; textInput: boolean }[];

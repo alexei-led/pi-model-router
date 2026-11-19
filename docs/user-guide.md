@@ -42,6 +42,38 @@ The baseline is the configured default, not a tier inferred from prompt words.
 For semantic task-based selection, [configure and approve a classifier](classifier-advisor.md#configure-a-model).
 The first profile above does not enable one.
 
+## Adjust one turn with a prompt keyword
+
+Use one of these as the first word of a prompt or steering message:
+
+| Start with | Effect |
+| --- | --- |
+| `morethink` / `lessthink` | Move up or down one supported reasoning level on the selected model. Each configured fallback steps from its own effective level. |
+| `highthink` / `lowthink` | Move one eligible tier up or down from the router’s choice, skipping unavailable tiers. |
+| `maxthink` / `nothink` | Select the highest or lowest eligible tier. `nothink` does **not** force reasoning off; it uses that tier’s effort. `lessthink` can reach `off` when supported. |
+
+Leading whitespace and capitalization do not matter. The word can end the prompt
+or be followed by whitespace or punctuation, except that `-` and `_` are not
+delimiters. `MaxThink: trace the issue` works; `please maxthink`, `maxthink-ish`,
+`maxthink_fast`, and `maxthinking` do not. The keyword stays in the message.
+Ordinary words such as “debug” or “urgent” do not trigger a local routing override.
+
+The router still chooses its starting route normally, including initial classifier
+advice if enabled. A tier control keeps the accepted activity and uses the target
+tier’s route for the active mode. If that activity route is unavailable, the
+generic route at that tier can qualify, but a different specialization cannot.
+Registry, input and context eligibility still apply. A pin or the soft session
+budget takes precedence. An explicit session effort override wins over the effort
+keywords; a tier keyword can still move and use the destination tier’s override.
+If there is no eligible step, the route stays unchanged. Open **Now** in `/router`
+to see the outcome, or enable `/router log on` to retain it in the routing log.
+
+The control lasts through validated tool continuations of that turn, without
+in-loop classifier route changes. A new user or steering message starts fresh;
+background notifications do not activate a keyword. Repeated-failure escalation,
+cost recovery and native tool compatibility still apply. The control does not
+change fallback order, provider holds, permissions, or saved routing settings.
+
 ## Configure fallbacks
 
 Add an ordered `fallbacks` list to a tier or activity route in the router

@@ -35,6 +35,10 @@ const PART_SEPARATOR = '  ';
 const getDecisionFlags = (decision: RoutingDecision): string[] => {
   const flags: string[] = [];
   if (decision.reviewOnly) flags.push('review-only');
+  if (decision.promptControl) {
+    const { keyword, outcome } = decision.promptControl;
+    flags.push(`${keyword}=${outcome}`);
+  }
   if (decision.activity) flags.push(`activity=${decision.activity}`);
   else if (decision.routeCell)
     flags.push(`availability-cell=${decision.routeCell}`);

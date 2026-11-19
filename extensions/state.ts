@@ -33,6 +33,8 @@ import {
   isRoutingReasonCode,
   MODE_LEVERS,
   MODE_SOURCES,
+  PROMPT_CONTROL_OUTCOMES,
+  PROMPT_KEYWORDS,
   ROUTER_PHASES,
   SWITCH_COST_REASONS,
 } from './types';
@@ -425,9 +427,21 @@ const snapshotSwitchCost = (
   };
 };
 
+const snapshotPromptControl = (
+  value: unknown,
+): RoutingDecision['promptControl'] => {
+  if (!isObjectRecord(value)) return undefined;
+  const keyword = PROMPT_KEYWORDS.find((entry) => entry === value.keyword);
+  const outcome = PROMPT_CONTROL_OUTCOMES.find(
+    (entry) => entry === value.outcome,
+  );
+  return keyword && outcome ? { keyword, outcome } : undefined;
+};
+
 export const snapshotDecision = (
   decision: RoutingDecision,
 ): RoutingDecision => ({
+  promptControl: snapshotPromptControl(decision.promptControl),
   reviewOnly: decision.reviewOnly === true ? true : undefined,
   adviceSource: ADVICE_SOURCES.find(
     (source) => source === decision.adviceSource,

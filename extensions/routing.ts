@@ -10,6 +10,7 @@ import { transformRoute } from './modes';
 import type {
   ModelDefinition,
   ModeProvenance,
+  RouteAttempt,
   RoutedTierConfig,
   RoutePair,
   RoutePlan,
@@ -70,6 +71,15 @@ export const clampEffort = (
       ) ?? lower());
 };
 
+const supportedEfforts = (
+  model: Model<Api>,
+  declaredLevels?: readonly ThinkingLevel[],
+): ThinkingLevel[] =>
+  getSupportedThinkingLevels(model).filter(
+    (level) =>
+      !declaredLevels || level === 'off' || declaredLevels.includes(level),
+  );
+
 /**
  * Resolve the effort a route runs at against the live registry, or undefined
  * when the model cannot serve the input. An unsupported effort maps to its
@@ -89,11 +99,11 @@ export const routeThinking = (
     const model = findModel(provider, modelId);
     if (!model?.input.includes(imageAttached ? 'image' : 'text'))
       return undefined;
-    const allowed = getSupportedThinkingLevels(model).filter(
-      (level) =>
-        !declaredLevels || level === 'off' || declaredLevels.includes(level),
+    return clampEffort(
+      pair.thinking,
+      supportedEfforts(model, declaredLevels),
+      effortPolicy,
     );
-    return clampEffort(pair.thinking, allowed, effortPolicy);
   } catch {
     return undefined;
   }
@@ -108,12 +118,12 @@ export const routeThinking = (
  * directly so a canonical-looking model reference cannot resolve as an alias a
  * second time.
  */
-export const availableRoutePairs = (
+const availableRouteAttempts = (
   profile: RouterProfile,
   findModel: (provider: string, modelId: string) => Model<Api> | undefined,
   imageAttached: boolean,
   thinkingOverrides?: RouterThinkingByTier,
-): RoutePair[] =>
+): RouteAttempt[] =>
   ROUTER_TIERS.flatMap((tier) => {
     const config = profile[tier];
     if (!config) return [];
@@ -142,15 +152,26 @@ export const availableRoutePairs = (
                 ? 'off'
                 : primary.thinking);
           const target = `${provider}/${modelId}`;
+          // Only declared levels narrow a route; undeclared means the registry's.
+          const declaredLevels =
+            ownConfig?.reasoning === false ? [] : ownConfig?.thinkingLevels;
           const thinking = routeThinking(
             { tier, model: target, thinking: requested },
             findModel,
             imageAttached,
-            // Only declared levels narrow a route; undeclared means the registry's.
-            ownConfig?.reasoning === false ? [] : ownConfig?.thinkingLevels,
+            declaredLevels,
             profile.effortPolicy,
           );
-          return thinking ? [{ tier, model: target, thinking }] : [];
+          return thinking
+            ? [
+                {
+                  tier,
+                  model: target,
+                  thinking,
+                  ...(declaredLevels ? { declaredLevels } : {}),
+                },
+              ]
+            : [];
         } catch {
           return [];
         }
@@ -160,6 +181,15 @@ export const availableRoutePairs = (
           pairs.findIndex((other) => other.model === pair.model) === index,
       );
   });
+
+export const availableRoutePairs = (
+  ...args: Parameters<typeof availableRouteAttempts>
+): RoutePair[] =>
+  availableRouteAttempts(...args).map(({ tier, model, thinking }) => ({
+    tier,
+    model,
+    thinking,
+  }));
 
 /**
  * Keep at least one configured route usable for each input kind when a
@@ -329,10 +359,10 @@ export const selectBaselineRoute = (
   );
 };
 
-export const primaryRoutePairs = (
+export const primaryRoutePairs = <T extends RoutePair>(
   profile: RouterProfile,
-  pairs: readonly RoutePair[],
-): RoutePair[] =>
+  pairs: readonly T[],
+): T[] =>
   BASELINE_TIER_ORDER.flatMap((tier) => {
     // Keep the effective effort already validated against the live registry.
     const primary = pairs.find(
@@ -566,6 +596,14 @@ const applyModeToCell = (
   };
 };
 
+const freezeAttempt = (pair: RouteAttempt): Readonly<RouteAttempt> =>
+  Object.freeze({
+    ...pair,
+    ...(pair.declaredLevels
+      ? { declaredLevels: Object.freeze([...pair.declaredLevels]) }
+      : {}),
+  });
+
 /** Prevalidate each matrix cell; only its representative is subject to context fit. */
 export const buildRouteMatrix = (
   profile: RouterProfile,
@@ -610,7 +648,7 @@ export const buildRouteMatrix = (
       cell: cell.cell,
       profile: moded.profile,
       provenance: moded.provenance,
-      pairs: availableRoutePairs(
+      pairs: availableRouteAttempts(
         { ...moded.profile, effortPolicy: profile.effortPolicy },
         findModel,
         imageAttached,
@@ -651,9 +689,9 @@ export const buildRouteMatrix = (
           cellProfile[first.tier] as RoutedTierConfig,
         );
         const attempts = Object.freeze<
-          [Readonly<RoutePair>, ...Readonly<RoutePair>[]]
+          [Readonly<RouteAttempt>, ...Readonly<RouteAttempt>[]]
         >([
-          Object.freeze({ ...first }),
+          freezeAttempt(first),
           ...pairs
             .filter(
               (pair) =>
@@ -661,7 +699,7 @@ export const buildRouteMatrix = (
                 pair.model !== first.model &&
                 config.fallbacks?.includes(pair.model),
             )
-            .map((pair) => Object.freeze({ ...pair })),
+            .map(freezeAttempt),
         ]);
         return Object.freeze({
           id: JSON.stringify([first.tier, cell, config, attempts]),
@@ -723,6 +761,41 @@ export const selectBaselinePlan = (
     (entry) => entry.attempts[0] === selection.pair,
   ) as RoutePlan;
   return { ...selection, plan };
+};
+
+/** Each physical target steps from its own effective mode effort, without remapping or widening the chain. */
+export const stepPlanEffort = (
+  plan: RoutePlan,
+  findModel: Parameters<typeof routeThinking>[1],
+  imageAttached: boolean,
+  direction: 'up' | 'down',
+): RoutePlan => {
+  const step = (pair: Readonly<RouteAttempt>): Readonly<RouteAttempt> => {
+    const { provider, modelId } = parseCanonicalModelRef(pair.model);
+    const model = findModel(provider, modelId);
+    if (!model?.input.includes(imageAttached ? 'image' : 'text')) return pair;
+    const allowed = supportedEfforts(model, pair.declaredLevels);
+    const at = THINKING_LEVELS.indexOf(pair.thinking);
+    const ordered =
+      direction === 'up'
+        ? THINKING_LEVELS.slice(at + 1)
+        : THINKING_LEVELS.slice(0, at).reverse();
+    const thinking = ordered.find((level) => allowed.includes(level));
+    return thinking ? Object.freeze({ ...pair, thinking }) : pair;
+  };
+  const [first, ...fallbacks] = plan.attempts;
+  const attempts = Object.freeze([
+    step(first),
+    ...fallbacks.map(step),
+  ] as const);
+  if (attempts.every((pair, index) => pair === plan.attempts[index]))
+    return plan;
+  return Object.freeze({
+    ...plan,
+    id: JSON.stringify([plan.id, attempts]),
+    sourcePlanId: plan.id,
+    attempts,
+  });
 };
 
 export const currentPlanPairs = (

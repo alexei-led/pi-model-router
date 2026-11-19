@@ -7,12 +7,17 @@ import {
   terraRecoveryFixtureConfig,
 } from './test/mode-recovery-fixture';
 
-it.each([false, true])(
-  'native Pi recovers cost high (Terra: %s) after a real write between two failing tool results',
+it.each([
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+] as const)(
+  'native Pi recovers cost high (Terra: %s, keyword: %s) after a real write between two failing tool results',
   {
     timeout: 20000,
   },
-  (terra) => {
+  (terra, keyed) => {
     const fixture = hostFixture(
       terra ? terraRecoveryFixtureConfig : recoveryFixtureConfig,
       'router/auto',
@@ -23,7 +28,9 @@ it.each([false, true])(
         '--tools',
         'write,recovery_fixture_check',
         '--print',
-        'Run the local deterministic recovery loop.',
+        keyed
+          ? 'lessthink: run the local recovery loop.'
+          : 'Run the local deterministic recovery loop.',
       ],
       undefined,
       17_000,
@@ -36,18 +43,25 @@ it.each([false, true])(
     const physical: unknown = JSON.parse(
       result.stdout.match(/RECOVERY_PHYSICAL (\[[^\n]+\])/u)?.[1] ?? 'null',
     );
+    const initialEffort = terra
+      ? keyed
+        ? 'low'
+        : 'medium'
+      : keyed
+        ? 'medium'
+        : 'high';
     expect(physical).toEqual([
       {
         model: terra ? 'gpt-6.1-terra' : 'claude-haiku-5-5',
-        effort: terra ? 'medium' : 'high',
+        effort: initialEffort,
       },
       {
         model: terra ? 'gpt-6.1-terra' : 'claude-haiku-5-5',
-        effort: terra ? 'medium' : 'high',
+        effort: initialEffort,
       },
       {
         model: terra ? 'gpt-6.1-terra' : 'claude-haiku-5-5',
-        effort: terra ? 'medium' : 'high',
+        effort: initialEffort,
       },
       { model: terra ? 'gpt-6.2-sol' : 'claude-opus-5-5', effort: 'high' },
     ]);

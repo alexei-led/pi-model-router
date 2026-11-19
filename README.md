@@ -52,6 +52,10 @@ The [reference config](model-router.example.json) selects pinned Jev 1.14 but le
 Missing catalog entries need a Pi provider extension; the [optional catalog example](docs/classifier-advisor.md#1-register-missing-classifier-entries) requires Pi 1.3+.
 The router uses one selected classifier, not voting or classifier failover.
 
+## Adjust one turn
+
+Start your prompt with `morethink` or `lessthink` to move one supported effort level, `highthink` or `lowthink` to move one eligible tier, or `maxthink` or `nothink` to use the highest or lowest eligible tier. The active mode and activity still choose the route. [Prompt controls and limits →](docs/user-guide.md#adjust-one-turn-with-a-prompt-keyword)
+
 ## Inspect routing in Pi
 
 Run **`/router`** for five tabs: **Now · Routes · Classifier · Usage · Settings**.

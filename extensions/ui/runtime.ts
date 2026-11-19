@@ -866,6 +866,7 @@ export const createRouterUIRuntime = (
       reuse: last?.reuse,
       bypassReason: last?.bypassReason,
       reason: last?.reasonCode,
+      promptControl: last?.promptControl,
       costRecovery: last?.costRecovery,
       failure:
         sameProfile && lifecycle === 'failed' ? 'request-failed' : undefined,
