@@ -324,6 +324,8 @@ const rememberCompletedTurn = (
   const turn = input.request.turn;
   if (
     !input.request.toolContinuation &&
+    // Keep initial advice unshifted: a same-turn replay applies the control to it once.
+    !input.request.decision.promptControl &&
     !input.request.decision.isFallback &&
     input.cache.hasAdvisedDecision(turn)
   )

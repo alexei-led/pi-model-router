@@ -20,10 +20,15 @@ import {
   userBoundaryConfig,
 } from './test/user-boundary-fixture';
 
-it.each(['steer', 'followUp'] as const)(
-  'native SDK consumes %s before activating a queued Settings mode',
+it.each([
+  ['steer', false],
+  ['followUp', false],
+  ['steer', true],
+  ['followUp', true],
+] as const)(
+  'native SDK consumes %s before activating a queued mode (keyword: %s)',
   { timeout: 20000 },
-  async (delivery) => {
+  async (delivery, keyed) => {
     const cwd = mkdtempSync(join(tmpdir(), 'pi-user-boundary-'));
     vi.stubEnv('PI_CODING_AGENT_DIR', cwd);
     onTestFinished(() => {
@@ -123,10 +128,14 @@ it.each(['steer', 'followUp'] as const)(
           (entry) =>
             entry.type === 'custom' && entry.customType === 'router-state',
         );
-    const run = session.prompt('Run the local user-boundary fixture.');
+    const initialPrompt = keyed
+      ? 'MoReThInK: run the local fixture.'
+      : 'Run the local user-boundary fixture.';
+    const run = session.prompt(initialPrompt);
+    const effort = keyed ? 'high' : 'medium';
     await fixture.toolStarted;
     await session.prompt('/router settings');
-    expect(fixture.physical).toEqual([{ model: 'base', effort: 'medium' }]);
+    expect(fixture.physical).toEqual([{ model: 'base', effort }]);
     await session[delivery]('Consume the queued user goal.');
     const before = lastState();
     expect(
@@ -142,15 +151,28 @@ it.each(['steer', 'followUp'] as const)(
     expect(fixture.physical).toEqual(
       delivery === 'steer'
         ? [
-            { model: 'base', effort: 'medium' },
+            { model: 'base', effort },
             { model: 'cheap', effort: 'high' },
           ]
         : [
-            { model: 'base', effort: 'medium' },
-            { model: 'base', effort: 'medium' },
+            { model: 'base', effort },
+            { model: 'base', effort },
             { model: 'cheap', effort: 'high' },
           ],
     );
+    if (keyed) {
+      expect(
+        manager
+          .getBranch()
+          .some(
+            (entry) =>
+              entry.type === 'message' &&
+              entry.message.role === 'user' &&
+              JSON.stringify(entry.message.content).includes(initialPrompt),
+          ),
+      ).toBe(true);
+      expect(JSON.stringify(lastState())).not.toContain('promptControl');
+    }
     const saved = lastState();
     expect(saved?.type === 'custom' ? saved.data : undefined).toMatchObject({
       modeOverride: 'cost',

@@ -73,6 +73,23 @@ const snapshot: RouterUISnapshot = {
 };
 
 describe('Signal Panel presentation', () => {
+  it('explains an unapplied keyword without logging enabled or hiding the route reason', () => {
+    expect(
+      routeReason({
+        ...snapshot,
+        lifecycle: 'budget',
+        promptControl: { keyword: 'maxthink', outcome: 'budget' },
+      }),
+    ).toBe('Over soft budget · baseline kept · maxthink: soft budget wins');
+    expect(
+      routeReason({
+        ...snapshot,
+        lifecycle: 'choosing',
+        promptControl: { keyword: 'maxthink', outcome: 'applied' },
+      }),
+    ).toBe('Choosing route');
+  });
+
   it('marks high tier as ordinary, actual failure as error and recovered problems as warnings', () => {
     expect(routerTone(snapshot)).toBe('accent');
     expect(routerTone({ ...snapshot, lifecycle: 'failed' })).toBe('error');

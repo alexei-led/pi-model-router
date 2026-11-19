@@ -9,10 +9,15 @@ import { createCandidate, selectedAdviceConfidence } from './choice';
 import { runClassifierDetailed } from './classifier';
 import { advisorForProfile } from './config';
 import { DEFAULT_CLASSIFIER_TIMEOUT_MS } from './constants';
-import { currentGoalExcerpt, hasImageAttachment } from './context';
+import {
+  currentGoalExcerpt,
+  extractTextFromContent,
+  hasImageAttachment,
+} from './context';
 import { isRouterTier, parseCanonicalModelRef } from './domain';
 import { type EscalationState, updateEscalation } from './escalation';
 import { effectivePolicy } from './modes';
+import { promptKeyword, promptTierPlan } from './prompt-controls';
 import {
   createClassifierFlightKey,
   type GoalScope,
@@ -22,10 +27,12 @@ import {
 } from './provider-turns';
 import {
   buildRouteMatrix,
+  currentPlanPairs,
   decisionForPair,
   planBehaviorKey,
   type RouteMatrix,
   selectBaselinePlan,
+  stepPlanEffort,
 } from './routing';
 import { evaluateSwitch } from './switch-policy';
 import type {
@@ -33,6 +40,7 @@ import type {
   ClassifierRequest,
   ClassifierResult,
   GenerationDiagnostics,
+  PromptKeyword,
   ResolvedMode,
   RoutePlan,
   RouterConfig,
@@ -237,6 +245,7 @@ const canReuseContinuation = (
   matrix: RouteMatrix,
   policy: string,
   assistant: AssistantMessage | undefined,
+  imageAttached: boolean,
 ): SelectedRoute | undefined => {
   const turn = input.identity.turn;
   const record = turn ? input.cache.continuationFor(turn) : undefined;
@@ -250,13 +259,20 @@ const canReuseContinuation = (
     assistant.provider !== record.decision.targetProvider ||
     assistant.model !== record.decision.targetModelId ||
     !matrix.plans.some(
-      (plan) =>
-        plan.id === record.plan.id &&
-        plan.attempts.some(
-          (pair) =>
-            pair.model === record.decision.targetLabel &&
-            pair.thinking === record.decision.thinking,
-        ),
+      (plan) => plan.id === (record.plan.sourcePlanId ?? record.plan.id),
+    ) ||
+    !(
+      record.plan.sourcePlanId
+        ? currentPlanPairs(
+            record.plan,
+            (provider, id) => input.registry.find(provider, id),
+            imageAttached,
+          )
+        : record.plan.attempts
+    ).some(
+      (pair) =>
+        pair.model === record.decision.targetLabel &&
+        pair.thinking === record.decision.thinking,
     )
   )
     return undefined;
@@ -458,6 +474,7 @@ const scheduleBackgroundReview = (
   if (
     !turn ||
     !validContinuation ||
+    selected.decision.promptControl ||
     !routingContext(input).messages.length ||
     input.pinnedTier ||
     budget ||
@@ -520,6 +537,78 @@ const planForActivity = (
     matrix.plans.find((entry) => entry.tier === tier && !entry.cell)
   );
 };
+
+const applyPromptControl = (
+  input: RequestRouteInput,
+  selected: SelectedRoute,
+  matrix: RouteMatrix,
+  keyword: PromptKeyword,
+  budget: boolean,
+  imageAttached: boolean,
+): SelectedRoute => {
+  const retain = (
+    outcome: NonNullable<RoutingDecision['promptControl']>['outcome'],
+  ) => ({
+    ...selected,
+    decision: { ...selected.decision, promptControl: { keyword, outcome } },
+  });
+  if (input.pinnedTier) return retain('pinned');
+  if (budget) return retain('budget');
+  if (
+    selected.plan.mode?.recovery ||
+    input.getCurrentConfig() !== input.config ||
+    input.getCurrentMode().mode !== input.mode.mode
+  )
+    return retain('safeguard');
+  const preference = selected.decision.activityPreference;
+  const effort = keyword === 'morethink' || keyword === 'lessthink';
+  if (effort && input.thinkingOverrides?.[selected.plan.tier])
+    return retain('effort-override');
+  const plan = effort
+    ? stepPlanEffort(
+        selected.plan,
+        (provider, id) => input.registry.find(provider, id),
+        imageAttached,
+        keyword === 'morethink' ? 'up' : 'down',
+      )
+    : promptTierPlan(keyword, selected.plan.tier, (tier) =>
+        planForActivity(
+          input.profile,
+          matrix,
+          tier,
+          preference ?? selected.decision.activity ?? selected.plan.cell,
+          preference !== undefined,
+        ),
+      );
+  if (!plan || plan === selected.plan)
+    return retain(effort ? 'no-supported-effort' : 'no-eligible-tier');
+  return {
+    plan,
+    decision: {
+      ...selected.decision,
+      mode: undefined,
+      modeSource: undefined,
+      modeLever: undefined,
+      modeSourceTier: undefined,
+      costRecovery: undefined,
+      ...decisionForPlan(input, plan, selected.decision.reasonCode),
+      activity: preference
+        ? plan.cell === 'ops'
+          ? 'ops'
+          : preference
+        : selected.decision.activity,
+      promptControl: { keyword, outcome: 'applied' },
+    },
+  };
+};
+
+const safeguardedControl = (
+  decision: RoutingDecision,
+): RoutingDecision['promptControl'] =>
+  decision.promptControl && {
+    ...decision.promptControl,
+    outcome: 'safeguard',
+  };
 
 /** Probability coverage alone cannot promote above both the incumbent and the top choice. */
 const supportedAdviceTier = (
@@ -905,6 +994,9 @@ const continueCompatibleRoute = (
     (input.lastDecision?.targetLabel === priorRef
       ? input.lastDecision
       : undefined);
+  // A stale keyed route is not local compatibility evidence. Google signatures still bind the model.
+  if (!mustContinueGoogle && previous?.promptControl?.outcome === 'applied')
+    return selected;
   const plans = (mustContinueGoogle ? eligible() : matrix).plans;
   const compatible = plans
     .flatMap((plan) => plan.attempts.map((pair) => ({ plan, pair })))
@@ -1007,6 +1099,7 @@ const applyEscalation = (
       adviceSource,
       bypassReason,
       classification,
+      promptControl: safeguardedControl(selected.decision),
       escalatedFrom: selected.plan.tier,
     },
   };
@@ -1032,8 +1125,13 @@ export const prepareRouterRequest = async (
   const budget =
     input.config.maxSessionBudget !== undefined &&
     input.accumulatedCost >= input.config.maxSessionBudget;
-  const toolContinuation =
-    routingContext(input).messages.at(-1)?.role === 'toolResult';
+  const tail = routingContext(input).messages.at(-1);
+  const toolContinuation = tail?.role === 'toolResult';
+  // Never search history for a control. A tool result or idle notification does not open a turn.
+  const keyword =
+    input.identity.turn && tail?.role === 'user'
+      ? promptKeyword(extractTextFromContent(tail.content))
+      : undefined;
   const latest = routingContext(input).messages.findLast(
     (entry) => entry.role === 'assistant',
   );
@@ -1082,7 +1180,7 @@ export const prepareRouterRequest = async (
   const turn = input.identity.turn;
   let policy = JSON.stringify([basePolicy, recovering]);
   let continuationRoute = toolContinuation
-    ? canReuseContinuation(input, matrix, policy, priorAssistant)
+    ? canReuseContinuation(input, matrix, policy, priorAssistant, imageAttached)
     : undefined;
   if (
     continuationRoute &&
@@ -1138,6 +1236,7 @@ export const prepareRouterRequest = async (
             activityPreference: prior.decision.activityPreference,
             advisor: 'bypassed',
             bypassReason: 'tool-continuation',
+            promptControl: safeguardedControl(prior.decision),
           },
         };
       } else {
@@ -1165,7 +1264,11 @@ export const prepareRouterRequest = async (
   const requestCount = turn ? input.cache.requestCount(turn) : 0;
   const stamp = reviewStamp(input, matrix, selected, policy, requestCount);
   const reviewResult =
-    turn && toolContinuation && validContinuation && !mustContinueGoogle
+    turn &&
+    toolContinuation &&
+    validContinuation &&
+    !mustContinueGoogle &&
+    !selected.decision.promptControl
       ? input.cache.takeReview(turn, stamp)
       : undefined;
   selected = await chooseAdvisorRoute(
@@ -1177,6 +1280,16 @@ export const prepareRouterRequest = async (
     toolContinuation,
     reviewResult,
   );
+  input.signal?.throwIfAborted();
+  if (keyword)
+    selected = applyPromptControl(
+      input,
+      selected,
+      currentMatrix,
+      keyword,
+      budget,
+      imageAttached,
+    );
   if (reviewResult?.advice && selected.decision.isClassifier)
     selected = applySwitchPolicy(input, incumbent, selected, contextTokens);
   if (toolContinuation)

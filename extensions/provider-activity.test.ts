@@ -187,60 +187,68 @@ describe('activity matrix provider routing', () => {
     },
   );
 
-  it('retains a confirmed goal across verify, commit and report and replaces it for a new task', async () => {
-    const s = activitySetup();
-    let ids = ['root', 'one'];
-    s.state.lastExtensionContext = {
-      sessionManager: {
-        getBranch: () => ids.map((id) => ({ id, type: 'message' })),
-        getSessionId: () => 'native-session',
-      },
-      ui: { setHiddenThinkingLabel: vi.fn() },
-    } as unknown as ExtensionContext;
-    const first = {
-      role: 'user' as const,
-      content: 'Implement the feature',
-      timestamp: 1,
-    };
-    const messages: Context['messages'] = [first];
-    await consume(s.stream({ messages: [...messages] }));
-    const steps = [
-      { text: 'Run the specified tests', phase: 'verify', route: 'ops' },
-      { text: 'Commit the verified changes', phase: 'execute', route: 'ops' },
-      { text: 'Report the result', phase: 'report', route: 'code' },
-    ];
-    s.answer.relation = 'continuation';
-    for (const [index, step] of steps.entries()) {
-      ids = [...ids, String(index + 2)];
-      messages.push({ role: 'user', content: step.text, timestamp: index + 2 });
-      s.answer.phase = step.phase;
+  it.each(['', 'morethink: '])(
+    'retains a confirmed goal after %j across verify, commit and report and replaces it for a new task',
+    async (prefix) => {
+      const s = activitySetup();
+      let ids = ['root', 'one'];
+      s.state.lastExtensionContext = {
+        sessionManager: {
+          getBranch: () => ids.map((id) => ({ id, type: 'message' })),
+          getSessionId: () => 'native-session',
+        },
+        ui: { setHiddenThinkingLabel: vi.fn() },
+      } as unknown as ExtensionContext;
+      const first = {
+        role: 'user' as const,
+        content: `${prefix}Implement the feature`,
+        timestamp: 1,
+      };
+      const messages: Context['messages'] = [first];
       await consume(s.stream({ messages: [...messages] }));
-      expect(s.state.lastDecision?.routeCell).toBe(step.route);
-      const payload = s.classify.mock.calls.at(-1)?.[1];
-      expect(payload?.state.activeGoal).toMatchObject({
-        text: 'Implement the feature',
+      const steps = [
+        { text: 'Run the specified tests', phase: 'verify', route: 'ops' },
+        { text: 'Commit the verified changes', phase: 'execute', route: 'ops' },
+        { text: 'Report the result', phase: 'report', route: 'code' },
+      ];
+      s.answer.relation = 'continuation';
+      for (const [index, step] of steps.entries()) {
+        ids = [...ids, String(index + 2)];
+        messages.push({
+          role: 'user',
+          content: step.text,
+          timestamp: index + 2,
+        });
+        s.answer.phase = step.phase;
+        await consume(s.stream({ messages: [...messages] }));
+        expect(s.state.lastDecision?.routeCell).toBe(step.route);
+        expect(s.state.lastDecision?.promptControl).toBeUndefined();
+        const payload = s.classify.mock.calls.at(-1)?.[1];
+        expect(payload?.state.activeGoal).toMatchObject({
+          text: `${prefix}Implement the feature`,
+        });
+        expect(payload?.questions.continuity?.type).toBe('choice');
+      }
+      ids = [...ids, 'new'];
+      messages.push({
+        role: 'user',
+        content: 'Start a new task: write a manual',
+        timestamp: 8,
       });
-      expect(payload?.questions.continuity?.type).toBe('choice');
-    }
-    ids = [...ids, 'new'];
-    messages.push({
-      role: 'user',
-      content: 'Start a new task: write a manual',
-      timestamp: 8,
-    });
-    s.answer.relation = 'new-task';
-    s.answer.activity = 'docs';
-    s.answer.phase = 'produce';
-    await consume(s.stream({ messages: [...messages] }));
-    expect(s.state.lastDecision?.routeCell).toBe('docs');
-    ids = [...ids, 'follow'];
-    messages.push({ role: 'user', content: 'Continue', timestamp: 9 });
-    s.answer.relation = 'continuation';
-    await consume(s.stream({ messages: [...messages] }));
-    expect(s.classify.mock.calls.at(-1)?.[1].state.activeGoal).toMatchObject({
-      text: 'Start a new task: write a manual',
-    });
-  });
+      s.answer.relation = 'new-task';
+      s.answer.activity = 'docs';
+      s.answer.phase = 'produce';
+      await consume(s.stream({ messages: [...messages] }));
+      expect(s.state.lastDecision?.routeCell).toBe('docs');
+      ids = [...ids, 'follow'];
+      messages.push({ role: 'user', content: 'Continue', timestamp: 9 });
+      s.answer.relation = 'continuation';
+      await consume(s.stream({ messages: [...messages] }));
+      expect(s.classify.mock.calls.at(-1)?.[1].state.activeGoal).toMatchObject({
+        text: 'Start a new task: write a manual',
+      });
+    },
+  );
 
   it('drops an ambiguous cross-turn goal and never reuses it on a later request', async () => {
     const s = activitySetup();

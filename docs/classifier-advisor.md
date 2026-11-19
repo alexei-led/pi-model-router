@@ -420,7 +420,8 @@ The router uses native branch metadata, never message wording:
   types are notifications by default, including when they wake an idle parent.
   They retain the accepted task route rather than starting a new initial
   classification. Valid tool continuations still use the configured review
-  cadence. This recognizes result notices only; it does not enable
+  cadence unless a [prompt keyword](user-guide.md#adjust-one-turn-with-a-prompt-keyword)
+  controls the turn. This recognizes result notices only; it does not enable
   inherited/shared subagent provider runtimes.
 - `details: { router: { intent: "steering" } }` starts a new routing task,
   including on a completion-type message.

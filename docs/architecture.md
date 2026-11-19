@@ -99,7 +99,7 @@ matrix holds frozen cell declarations and ordered prevalidated physical attempts
 not remote model references. Baseline selection is generic-first within the
 budget-applicable pool. See [configuration and baseline details](user-guide.md#activity-routes).
 Explicit fallback models retain their configured order. They are not extra classifier candidates.
-Prompt words, language, length, and inferred task phase never select a local tier.
+Ordinary prompt words, language, length, and inferred task phase never select a local tier. [Explicit first-word controls](user-guide.md#adjust-one-turn-with-a-prompt-keyword) can adjust the selected route for one turn.
 
 The routing mode is applied while the matrix is built, before advice and
 baseline selection. `config.ts` attaches runtime-only `builtinModes` alternatives to default-owned
@@ -185,6 +185,8 @@ The bounded cache stores the actual successful route and its immutable selected-
 Reuse requires matching session, user turn, profile, policy, configuration, branch ancestry, model, and tool-result identities.
 When the caller omits `sessionId`, the key uses Pi's native session ID.
 Changed capabilities or configuration invalidate reuse. New user-role steering messages change turn identity and abort prior background review. A bounded runtime-only goal anchor survives a new user turn only on a valid, confident continuation answer, fenced by native owner, branch ancestry, preceding user-message identity, config and request epoch. Native-provenance notifications preserve the goal and continuation; see [notification recognition](classifier-advisor.md#goals-steering-and-notifications). Valid tool-result continuations may schedule a periodic nonblocking classifier review; only the immediately following request may consume it. Branch/policy/plan/matrix identity changes, changed message prefixes and expiry drop the result. Phase advice additionally requires an exact context snapshot; appended evidence retains only otherwise valid tier/goal advice. The original provider `sessionId` passes through unchanged.
+
+First-word prompt controls run after initial advice or baseline, without changing the advice cache or goal anchor. A tier control resolves within the eligible matrix with the accepted activity and destination mode; an effort control makes a request-local immutable derivative with the source plan ID and the exact per-attempt supported effort. Valid reuse checks the current source plan and the actual attempted pair. Keyed continuations do not schedule or apply background route reviews; if reuse fails, do not reparse the previous user prompt. Provider hold and generation fallback handling are unchanged.
 Context truncation, the last resort after the window check, removes complete old user turns and preserves system instructions and the active tool chain.
 Its text estimate does not guarantee a fit for images or oversized active turns.
 
@@ -224,16 +226,16 @@ not native pi-subagents policy propagation.
 
 ## Failure behavior
 
-| Event                                                                     | Router action                                         | Boundary                                                      |
-| ------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------- |
-| Initial advisor times out, abstains, or returns invalid advice.           | Select the eligible baseline.                         | Do not call a second advisor.                                 |
-| Background review fails, is stale or expires.                             | Keep the valid eligible incumbent.                    | Do not delay generation or apply old advice.                  |
-| An explicit pin has no eligible route.                                    | Return an error.                                      | Do not substitute another tier.                               |
-| The caller cancels.                                                       | Stop the request.                                     | Do not start baseline generation or retry.                    |
-| Generation fails before visible content.                                  | Try an eligible configured fallback, or return an error. | Revalidate the target, skip holds, and account for reported costs.         |
-| Generation fails after visible content.                                   | End the response with an error.                       | Do not retry on another model.                                |
-| The stream ends without a terminal event.                                 | Return an incomplete-stream error.                    | Apply the same visibility and cancellation limits to retries. |
-| A Google thought-signature continuation loses its compatible prior model. | Fail the continuation.                                | Do not send it to an incompatible model.                      |
+| Event                                                                     | Router action                                            | Boundary                                                           |
+| ------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------ |
+| Initial advisor times out, abstains, or returns invalid advice.           | Select the eligible baseline.                            | Do not call a second advisor.                                      |
+| Background review fails, is stale or expires.                             | Keep the valid eligible incumbent.                       | Do not delay generation or apply old advice.                       |
+| An explicit pin has no eligible route.                                    | Return an error.                                         | Do not substitute another tier.                                    |
+| The caller cancels.                                                       | Stop the request.                                        | Do not start baseline generation or retry.                         |
+| Generation fails before visible content.                                  | Try an eligible configured fallback, or return an error. | Revalidate the target, skip holds, and account for reported costs. |
+| Generation fails after visible content.                                   | End the response with an error.                          | Do not retry on another model.                                     |
+| The stream ends without a terminal event.                                 | Return an incomplete-stream error.                       | Apply the same visibility and cancellation limits to retries.      |
+| A Google thought-signature continuation loses its compatible prior model. | Fail the continuation.                                   | Do not send it to an incompatible model.                           |
 
 Quota holds apply at delegation, not in the advisor's route matrix. Physical
 targets are skipped in the selected cell's configured order. A confirmed
@@ -279,7 +281,7 @@ Queued controls activate at an owned user boundary: `before_agent_start` handles
 | `provider.ts`            | Register logical profile models from live capabilities, create the provider-scoped turn cache, and adapt Pi's stream API.                                    |
 | `provider-request.ts`    | Build turn identity, validate continuation reuse, resolve a current matrix cell, and coordinate classifier advice.                                           |
 | `provider-turns.ts`      | Keep bounded continuation/advice caches and retain selected plans and reference-count shared classifier flights for one session-owned provider registration. |
-| `provider-failover.ts`   | Capture allowlisted provider evidence, classify failures and track bounded in-memory model and quota-group holds.                           |
+| `provider-failover.ts`   | Capture allowlisted provider evidence, classify failures and track bounded in-memory model and quota-group holds.                                            |
 | `provider-generation.ts` | Revalidate physical targets, run configured generation fallbacks before visible content, account for attempts, and forward events.                           |
 | `provider-runtime.ts`    | Wait for the model registry and bridge request preparation/generation to Pi streams, persistence, and status updates.                                        |
 | `context.ts`             | Resolve native notification provenance, select bounded classifier text and extract generation input.                                                         |
