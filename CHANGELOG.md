@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.24.0] - 2026-11-19
+
+Configured fallback chains skip models that are cooling down or have exhausted a known quota.
+
+### Changes
+
+- Temporary provider failures hold only the affected model. Recognized shared quota failures hold models with the same user-configured `quotaGroup`. The router uses provider timing when available and does not guess a reset date.
+- The selected route keeps its configured fallback order. The router can switch before output, but does not replay a partial response. Known authentication, permission and invalid-request failures stop instead of switching providers.
+- The [user guide](docs/user-guide.md#configure-fallbacks) shows cross-provider fallback and quota-group configuration. Holds do not persist across reloads.
+
+### Upgrade
+
+Update the extension and restart Pi or run `/reload`. No configuration migration is required. Add `quotaGroup` to model aliases only if they share the same account quota.
+
+[Full changelog](https://github.com/alexei-led/pi-model-router/compare/v0.23.1...v0.24.0)
+
 ## [0.23.1] - 2026-11-18
 
 Keep weak classifier advice from causing unsupported tier switches.

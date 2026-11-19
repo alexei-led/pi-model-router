@@ -230,10 +230,17 @@ not native pi-subagents policy propagation.
 | Background review fails, is stale or expires.                             | Keep the valid eligible incumbent.                    | Do not delay generation or apply old advice.                  |
 | An explicit pin has no eligible route.                                    | Return an error.                                      | Do not substitute another tier.                               |
 | The caller cancels.                                                       | Stop the request.                                     | Do not start baseline generation or retry.                    |
-| Generation fails before visible content.                                  | Try the next configured fallback, or return an error. | Revalidate the target and account for reported costs.         |
+| Generation fails before visible content.                                  | Try an eligible configured fallback, or return an error. | Revalidate the target, skip holds, and account for reported costs.         |
 | Generation fails after visible content.                                   | End the response with an error.                       | Do not retry on another model.                                |
 | The stream ends without a terminal event.                                 | Return an incomplete-stream error.                    | Apply the same visibility and cancellation limits to retries. |
 | A Google thought-signature continuation loses its compatible prior model. | Fail the continuation.                                | Do not send it to an incompatible model.                      |
+
+Quota holds apply at delegation, not in the advisor's route matrix. Physical
+targets are skipped in the selected cell's configured order. A confirmed
+account-wide limit can hold a user-defined quota group; a generic 429 cannot.
+An attempt can record a hold after output without replaying the response.
+Holds belong to the active provider registration and are not persisted in
+session snapshots. See [fallback configuration](user-guide.md#configure-fallbacks).
 
 ## State and cost
 
@@ -272,6 +279,7 @@ Queued controls activate at an owned user boundary: `before_agent_start` handles
 | `provider.ts`            | Register logical profile models from live capabilities, create the provider-scoped turn cache, and adapt Pi's stream API.                                    |
 | `provider-request.ts`    | Build turn identity, validate continuation reuse, resolve a current matrix cell, and coordinate classifier advice.                                           |
 | `provider-turns.ts`      | Keep bounded continuation/advice caches and retain selected plans and reference-count shared classifier flights for one session-owned provider registration. |
+| `provider-failover.ts`   | Capture allowlisted provider evidence, classify failures and track bounded in-memory model and quota-group holds.                           |
 | `provider-generation.ts` | Revalidate physical targets, run configured generation fallbacks before visible content, account for attempts, and forward events.                           |
 | `provider-runtime.ts`    | Wait for the model registry and bridge request preparation/generation to Pi streams, persistence, and status updates.                                        |
 | `context.ts`             | Resolve native notification provenance, select bounded classifier text and extract generation input.                                                         |

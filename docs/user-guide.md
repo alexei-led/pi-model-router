@@ -42,6 +42,68 @@ The baseline is the configured default, not a tier inferred from prompt words.
 For semantic task-based selection, [configure and approve a classifier](classifier-advisor.md#configure-a-model).
 The first profile above does not enable one.
 
+## Configure fallbacks
+
+Add an ordered `fallbacks` list to a tier or activity route in the router
+configuration. Use model references registered in Pi, or router model aliases:
+
+```json
+{
+  "profiles": {
+    "auto": {
+      "high": {
+        "model": "anthropic/claude-opus-5-5",
+        "thinking": "high",
+        "fallbacks": ["openai-codex/gpt-6.1-sol", "backup/model"]
+      }
+    }
+  }
+}
+```
+
+Replace these illustrative IDs with models available in your Pi registry. After
+editing the router config, run `/router reload`. Put personal routes in
+`~/.pi/agent/model-router.json` or project routes in `.pi/model-router.json`.
+Select the profile and use
+**Routes → Details** to inspect its fallbacks.
+
+The router tries the selected route and then its eligible fallbacks in order
+when generation fails before any text, thinking, or tool-call content. The
+router does not switch after output or cancellation, or on a recognized
+authentication, permission, or invalid-request error. A smaller fallback
+context window can cause older turns to be truncated.
+
+Fallbacks are explicit: models in other tiers or providers are not automatic
+fallbacks. Activity cells inherit the generic tier's list unless they specify
+their own. An empty list clears it. Explicit `modeRoutes` use their own lists.
+
+### Share a quota hold across models
+
+In your **user** config, give model aliases with the same verified account quota
+the same `quotaGroup`:
+
+```json
+{
+  "models": {
+    "work-opus": { "model": "anthropic/claude-opus-5-5", "quotaGroup": "claude-work" },
+    "work-sonnet": { "model": "anthropic/claude-sonnet-5-5", "quotaGroup": "claude-work" }
+  }
+}
+```
+
+The group applies to the exact model references, whether a route uses those
+references directly or through aliases. Do not group independent accounts. Pi
+still owns model registration and credentials.
+
+- A confirmed account-wide quota failure skips the group. A model-specific
+  limit, ordinary throttle, or overload skips only the failed model.
+- The router uses a valid provider reset or `Retry-After` when it can see one.
+  For a quota with no timing, it reports an unknown reset and makes the model
+  eligible after 15 minutes. A temporary failure without timing uses a short
+  cooldown. A recognized billing block stays held until the extension reloads.
+- Holds are in memory. They do not rewrite your routes, and expiry does not
+  trigger a request. A later eligible turn can try the preferred model again.
+
 ## Understand the result
 
 | Part of the strip             | Meaning                                                                                                                                                              |
