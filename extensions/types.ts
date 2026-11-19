@@ -37,6 +37,7 @@ export type EffortCacheSharing = 'shared' | 'separate' | 'unknown';
 
 export interface ModelDefinition {
   model: string;
+  quotaGroup?: string | undefined;
   effortCacheSharing?: EffortCacheSharing | undefined;
   contextWindow?: number | undefined;
   maxTokens?: number | undefined;

@@ -1,17 +1,23 @@
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import type {
-  Api,
-  AssistantMessage,
-  AssistantMessageEvent,
-  AssistantMessageEventStream,
-  Context,
-  Model,
-  SimpleStreamOptions,
+import {
+  type Api,
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  type AssistantMessageEventStream,
+  type Context,
+  isRetryableAssistantError,
+  type Model,
+  type SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { extractTextFromContent } from './context';
 import { isThinkingLevel, parseCanonicalModelRef } from './domain';
 import { observeGeneration, repriceTokens } from './economics';
+import {
+  describeHold,
+  observeDelegateFailure,
+  type ProviderHolds,
+} from './provider-failover';
 import type { PreparedRouterRequest } from './provider-request';
 import type { ProviderTurnCache } from './provider-turns';
 import { currentPlanPairs, routeContextWindow } from './routing';
@@ -33,6 +39,8 @@ export interface GenerationInput {
     ProviderTurnCache,
     'hasAdvisedDecision' | 'rememberAdvisedDecision' | 'rememberContinuation'
   >;
+  holds: ProviderHolds;
+  onHold: (notice: string) => void;
   onCost: (cost: number) => void;
   onObservation: (event: RouterRequestObservation) => void;
   onAttemptTarget: (
@@ -314,7 +322,11 @@ const rememberCompletedTurn = (
 ): void => {
   if (event.type !== 'done' || !input.request.turn) return;
   const turn = input.request.turn;
-  if (!input.request.toolContinuation && input.cache.hasAdvisedDecision(turn))
+  if (
+    !input.request.toolContinuation &&
+    !input.request.decision.isFallback &&
+    input.cache.hasAdvisedDecision(turn)
+  )
     input.cache.rememberAdvisedDecision(
       turn,
       input.request.decision,
@@ -349,11 +361,20 @@ const runDelegateAttempt = async (
     reportedCostUsd: attempt.reportedCostUsd,
   };
   const pendingEvents: AssistantMessageEvent[] = [];
+  const { input, targetModel, modelRef, options } = attempt;
+  const evidence = observeDelegateFailure(targetModel.api, options);
+  const startedAt = Date.now();
+  const failure = (error: unknown) => {
+    const classified = evidence.classify(error);
+    const hold = input.holds.record(input.request.config, modelRef, classified);
+    if (hold) input.onHold(`${hold.scope}: ${describeHold(hold)}`);
+    return { hold, requestError: classified.kind === 'request' };
+  };
   try {
     const delegatedStream = attempt.input.registry.streamSimple(
       attempt.targetModel,
       attempt.context,
-      attempt.options,
+      evidence.options,
     );
     for await (const event of delegatedStream) {
       const progress = processAttemptEvent(
@@ -367,11 +388,51 @@ const runDelegateAttempt = async (
     }
     if (!state.terminalReceived)
       throw new Error('Provider stream ended without a terminal event.');
+    if (!state.generationAborted) {
+      if (state.terminalEvent?.type === 'error') {
+        const { hold } = failure(errorMessageOf(state.terminalEvent));
+        if (hold || isRetryableAssistantError(state.terminalEvent.error)) {
+          // Do not pass retry-triggering provider text to Pi after content.
+          state.terminalEvent = {
+            ...state.terminalEvent,
+            error: {
+              ...state.terminalEvent.error,
+              errorMessage: hold
+                ? `Response stopped: ${describeHold(hold)}.`
+                : 'Response stopped after output. Retry manually if needed.',
+            },
+          };
+        }
+      } else input.holds.success(modelRef, startedAt);
+    }
     return { status: 'terminal', state };
   } catch (error) {
-    if (state.contentReceived || attempt.input.options?.signal?.aborted)
+    if (input.options?.signal?.aborted || state.generationAborted)
       return { status: 'stop', state, error };
-    return { status: 'retry', state, error };
+    const { hold, requestError } = failure(error);
+    const reported = hold
+      ? new Error(`Model ${hold.scope}: ${describeHold(hold)}.`)
+      : error;
+    const partialMessage = state.partialMessage;
+    if (
+      partialMessage &&
+      !hold &&
+      isRetryableAssistantError({
+        ...partialMessage,
+        stopReason: 'error',
+        errorMessage: error instanceof Error ? error.message : '',
+      })
+    )
+      return {
+        status: 'stop',
+        state,
+        error: new Error(
+          'Response stopped after output. Retry manually if needed.',
+        ),
+      };
+    if (state.contentReceived || requestError)
+      return { status: 'stop', state, error: reported };
+    return { status: 'retry', state, error: reported };
   }
 };
 
@@ -406,6 +467,7 @@ export const runGenerationAttempts = async (
         .map((pair) => pair.model),
     ].filter((ref, index, refs) => refs.indexOf(ref) === index);
     let lastError: unknown;
+    const blocked = new Set<string>();
     let success = false;
     let attempts = 0;
     let reportedCostUsd: number | undefined = 0;
@@ -461,6 +523,12 @@ export const runGenerationAttempts = async (
             modelId !== priorAssistant.model)
         )
           throw new Error('No compatible route for Google tool continuation.');
+
+        const hold = input.holds.lookup(request.config, modelRef);
+        if (hold) {
+          blocked.add(`${hold.scope}: ${describeHold(hold)}`);
+          continue;
+        }
 
         const delegatedReasoning: SimpleStreamOptions['reasoning'] =
           pair.thinking !== 'off' ? pair.thinking : undefined;
@@ -536,13 +604,17 @@ export const runGenerationAttempts = async (
 
     if (!success)
       return failureOutcome(
-        lastError instanceof Error
-          ? lastError
-          : new Error(
-              typeof lastError === 'string'
-                ? lastError
-                : 'Failed to delegate to any model in the chain.',
-            ),
+        blocked.size
+          ? new Error(
+              `No configured model could complete. On hold: ${[...blocked].join('; ')}.`,
+            )
+          : lastError instanceof Error
+            ? lastError
+            : new Error(
+                typeof lastError === 'string'
+                  ? lastError
+                  : 'Failed to delegate to any model in the chain.',
+              ),
         true,
         generationAborted,
       );

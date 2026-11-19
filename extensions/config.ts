@@ -293,8 +293,19 @@ export const normalizeModelsMap = (
       if (thinkingLevels.length === 0) thinkingLevels = undefined;
     }
 
+    const quotaGroup =
+      typeof entry.quotaGroup === 'string' &&
+      /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(entry.quotaGroup)
+        ? entry.quotaGroup
+        : undefined;
+    if (entry.quotaGroup !== undefined && quotaGroup === undefined)
+      warnings.push(
+        'Ignored invalid model quotaGroup. Use a short name with letters, digits, dots, underscores or hyphens.',
+      );
+
     result[alias] = {
       model,
+      ...(quotaGroup ? { quotaGroup } : {}),
       effortCacheSharing,
       contextWindow,
       maxTokens,

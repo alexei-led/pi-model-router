@@ -14,6 +14,7 @@ import type {
 import { profileNames, resolveContextWindow, resolveMaxTokens } from './config';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './constants';
 import { MAX_THINKING_LEVEL, parseCanonicalModelRef } from './domain';
+import { createProviderHolds } from './provider-failover';
 import { startRouterProviderStream } from './provider-runtime';
 import { createProviderTurnCache } from './provider-turns';
 import { availableRoutePairs } from './routing';
@@ -162,6 +163,7 @@ export const registerRouterProvider = (
 
   state.disposeProvider?.();
   const turnCache = createProviderTurnCache();
+  const holds = createProviderHolds();
   const registrationController = new AbortController();
   const registrationSignal = state.ownerSignal
     ? AbortSignal.any([state.ownerSignal, registrationController.signal])
@@ -205,6 +207,7 @@ export const registerRouterProvider = (
         stream,
         state,
         cache: turnCache,
+        holds,
         actions: {
           persistState: actions.persistState,
           recordDebugDecision: actions.recordDebugDecision,

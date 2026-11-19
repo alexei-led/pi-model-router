@@ -13,7 +13,7 @@ Optional advice uses any text-capable classifier registered in Pi. The router us
 ## Why use it?
 
 - **Fewer manual changes.** One profile can combine fast, low-cost routes with stronger models.
-- **Control over cost and quality.** You choose the models, effort levels, fallback order, and baseline. You can pin a route at any time.
+- **Control over cost and quality.** You choose the models, effort levels, [fallback order](docs/user-guide.md#configure-fallbacks), and baseline. You can pin a route at any time.
 - **Routing modes.** `cost`, `balanced` or `quality` chooses a preferred model/effort pair, per profile, project or session. OpenAI defaults use Luna, Terra and Sol; custom routes keep deterministic transforms. [Choose a mode](docs/routing-modes.md).
 - **Built-in activity routes.** Recognized OpenAI and Claude profiles get defaults for code, debug, explore, plan, review, ops and docs. Tune one cell or opt out. [Defaults and tuning](docs/activity-routing.md).
 - **Adaptive tool loops.** Periodic background reviews assess current work without delaying generation. Eligible recommendations can change tier, activity and effort between requests, with explicit switch-cost controls.

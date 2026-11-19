@@ -11,6 +11,7 @@ import type {
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { notificationMessageIndices } from './context';
 import { modeForProfile } from './modes';
+import type { ProviderHolds } from './provider-failover';
 import type { GenerationOutcome } from './provider-generation';
 import { runGenerationAttempts } from './provider-generation';
 import {
@@ -76,6 +77,7 @@ interface RouterStreamInput {
   state: ProviderStreamState;
   actions: ProviderStreamActions;
   cache: ProviderTurnCache;
+  holds: ProviderHolds;
 }
 
 interface PreparedStreamRequest {
@@ -229,6 +231,15 @@ const runGeneration = async (
     registry,
     request,
     cache,
+    holds: input.holds,
+    onHold: (notice) => {
+      try {
+        const ctx = state.lastExtensionContext;
+        if (ctx?.mode === 'tui') ctx.ui.notify?.(notice, 'warning');
+      } catch {
+        // A UI teardown cannot change delegation.
+      }
+    },
     onCost: (cost) => {
       state.accumulatedCost += cost;
     },
